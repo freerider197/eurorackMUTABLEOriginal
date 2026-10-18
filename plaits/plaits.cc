@@ -25,12 +25,40 @@
 #include <stm32f37x_conf.h>
 
 #include "plaits/drivers/audio_dac.h"
-#include "plaits/drivers/debug_pin.h"
-#include "plaits/drivers/debug_port.h"
 
 #include "plaits/dsp/dsp.h"
+#include "plaits/cpu_probe.h"
+
+#ifndef PLAITS_CPU_PROBE_SECTION_TOTAL
+#define PLAITS_CPU_PROBE_SECTION_TOTAL 0
+#endif
+
+// The standard engine-development probe begins immediately before
+// Voice::Render. System-feature benchmarks can opt into measuring the UI/ADC
+// work that precedes it as part of the same audio callback.
+#ifndef PLAITS_CPU_PROBE_WHOLE_CALLBACK
+#define PLAITS_CPU_PROBE_WHOLE_CALLBACK 0
+#endif
 #include "plaits/dsp/voice.h"
 #include "plaits/settings.h"
+#if PLAITS_TZFM_DIAGNOSTIC
+#include "plaits/tzfm_diagnostic.h"
+#endif
+#if PLAITS_FM_CARRIER_DIAGNOSTIC
+#include "plaits/fm_carrier_diagnostic.h"
+#endif
+#if PLAITS_OVERRUN_SWEEP
+#include "plaits/overrun_sweep.h"
+#endif
+#if PLAITS_THRESHOLD_LADDER
+#include "plaits/threshold_ladder.h"
+#endif
+#if PLAITS_SCENE_CHECK
+// PLAITS_SCENE_COUNT and PLAITS_SCENES come from the generated scene table
+// the build force-includes (export_overrun_sweep.py --scenes).
+#include "plaits/scene_check.h"
+#endif
+#include "plaits/section_marks.h"
 #include "plaits/ui.h"
 #include "plaits/user_data.h"
 #include "plaits/user_data_receiver.h"
@@ -44,16 +72,39 @@ using namespace stmlib;
 const bool test_adc_noise = false;
 
 AudioDac audio_dac;
-DebugPort debug_port;
 Modulations modulations;
 Patch patch;
 Settings settings;
 Ui ui;
+PLAITS_CPU_PROBE_DECLARE
 UserData user_data;
 UserDataReceiver user_data_receiver;
 Voice voice;
+#if PLAITS_TZFM_DIAGNOSTIC
+TzfmDiagnostic tzfm_diagnostic;
+#endif
+#if PLAITS_FM_CARRIER_DIAGNOSTIC
+FmCarrierDiagnostic fm_carrier_diagnostic;
+#endif
+#if PLAITS_OVERRUN_SWEEP
+OverrunSweep overrun_sweep;
+#endif
+#if PLAITS_THRESHOLD_LADDER
+ThresholdLadder threshold_ladder;
+extern "C" void plaits_threshold_burn() { threshold_ladder.Burn(); }
+#endif
+#if PLAITS_SCENE_CHECK
+static const CheckScene kCheckScenes[PLAITS_SCENE_COUNT] = PLAITS_SCENES;
+SceneCheck<PLAITS_SCENE_COUNT> scene_check;
+extern "C" void plaits_section_mark(int mark) { scene_check.Mark(mark); }
+extern "C" void plaits_ui_task_mark(int task) { scene_check.UiTask(task); }
+extern "C" void plaits_probe_mark(int probe) { scene_check.Probe(probe); }
+#endif
 
-char shared_buffer[16384];
+// BufferAllocator returns typed pointers without adjusting their alignment.
+// A char array can otherwise follow the one-byte UserData object at an odd
+// address, faulting on Cortex-M4 floating-point loads/stores before audio starts.
+char shared_buffer[16384] __attribute__((aligned(8)));
 uint32_t test_ramp;
 
 // Default interrupt handlers.
@@ -76,9 +127,37 @@ void FillBuffer(AudioDac::Frame* output, size_t size) {
   TIC
 #endif  // PROFILE_INTERRUPT
 
+#if PLAITS_CPU_PROBE && PLAITS_CPU_PROBE_WHOLE_CALLBACK
+  PLAITS_CPU_PROBE_BEGIN
+#endif
+#if PLAITS_OVERRUN_SWEEP
+  // Cost is measured from callback entry: the UI poll, the synthesis and the
+  // late-fill deadline all share the same 12-sample period.
+  overrun_sweep.BeginCallback(audio_dac.EntryLag());
+#endif
+#if PLAITS_THRESHOLD_LADDER
+  threshold_ladder.BeginCallback();
+#endif
+#if PLAITS_SCENE_CHECK
+  scene_check.BeginCallback();
+#endif
+
   IWDG_ReloadCounter();
-  
+
+#if PLAITS_TZFM_DIAGNOSTIC
+  // The Fast FM resampler and calibration live in Ui::Poll, while the regular
+  // engine probe brackets Voice::Render. Measure both real callback portions
+  // separately and add them; keep the synthetic sweep setup below outside the
+  // ledger so the diagnostic does not charge its own control machinery to the
+  // production feature.
+  cpu_probe.Begin();
+#endif
   ui.Poll();
+  PLAITS_SECTION_MARK(SECTION_MARK_UI_END);
+#if PLAITS_TZFM_DIAGNOSTIC
+  cpu_probe.End(size);
+  const float diagnostic_ui_usage = cpu_probe.last_usage();
+#endif
   
   if (test_adc_noise) {
     static float note_lp = 0.0f;
@@ -98,14 +177,58 @@ void FillBuffer(AudioDac::Frame* output, size_t size) {
       test_ramp += 8947848;
       ++output;
     }
-  } else {
+  }
+#if PLAITS_THRESHOLD_LADDER
+  else if (threshold_ladder.reporting()) {
+    threshold_ladder.WriteReport((Voice::Frame*)(output), size);
+  }
+#endif
+#if PLAITS_SCENE_CHECK
+  else if (scene_check.reporting()) {
+    scene_check.WriteReport((Voice::Frame*)(output), size);
+  }
+#endif
+#if PLAITS_OVERRUN_SWEEP
+  else if (overrun_sweep.reporting()) {
+    overrun_sweep.WriteReport((Voice::Frame*)(output), size);
+    ui.DisplayDiagnosticResultLatched(
+        overrun_sweep.passed(), overrun_sweep.FailureMask());
+  }
+#endif
+#if PLAITS_TZFM_DIAGNOSTIC
+  else if (tzfm_diagnostic.reporting()) {
+    ui.SetAudioRateFmNeeded(false);
+    tzfm_diagnostic.WriteReport((Voice::Frame*)(output), size);
+  }
+#endif
+  else {
+#if PLAITS_FM_CARRIER_DIAGNOSTIC
+    fm_carrier_diagnostic.Prepare(&patch, &modulations, size);
+#endif
+#if PLAITS_TZFM_DIAGNOSTIC
+    tzfm_diagnostic.Prepare(&patch, &modulations, size);
+#endif
+#if PLAITS_OVERRUN_SWEEP
+    overrun_sweep.Prepare(&patch, &modulations);
+#endif
+#if PLAITS_THRESHOLD_LADDER
+    threshold_ladder.Prepare(&patch, &modulations);
+#endif
+#if PLAITS_SCENE_CHECK
+    scene_check.Prepare(&patch, &modulations);
+#endif
     if (modulations.timbre_patched) {
       PacketDecoderState state = \
           user_data_receiver.Process(modulations.timbre);
       if (state == PACKET_DECODER_STATE_END_OF_TRANSMISSION) {
         if (user_data_receiver.progress() == 1.0f) {
           int slot = voice.active_engine();
+#if PLAITS_HAS_TERRAIN_BANK
+          bool success = user_data.Save(
+              user_data_receiver.rx_buffer(), slot, patch.harmonics);
+#else
           bool success = user_data.Save(user_data_receiver.rx_buffer(), slot);
+#endif
           if (success) {
             voice.ReloadUserData();
           } else {
@@ -119,16 +242,97 @@ void FillBuffer(AudioDac::Frame* output, size_t size) {
         ui.DisplayDataTransferProgress(-1.0f);
       }
     }
+#if !(PLAITS_CPU_PROBE && PLAITS_CPU_PROBE_WHOLE_CALLBACK)
+    PLAITS_CPU_PROBE_BEGIN
+#endif
+#if PLAITS_CPU_PROBE && PLAITS_CPU_PROBE_SECTION_TOTAL
+    // Validation builds only: registering a section switches the AUX readout
+    // from the continuous usage tone to the full two-tone beacon format.
+    cpu_probe.SectionBegin(0);
+#endif
+    const int previous_engine = voice.active_engine();
     voice.Render(patch, modulations, (Voice::Frame*)(output), size);
-    ui.set_active_engine(voice.active_engine());
+    const int active_engine = voice.active_engine();
+#if PLAITS_THRESHOLD_LADDER
+    threshold_ladder.EndRender(audio_dac.OutputLate());
+    threshold_ladder.WriteStart((Voice::Frame*)(output), size);
+#endif
+#if PLAITS_SCENE_CHECK
+    scene_check.EndRender(audio_dac.OutputLate());
+    scene_check.WriteStart((Voice::Frame*)(output), size);
+#endif
+#if PLAITS_OVERRUN_SWEEP
+    overrun_sweep.EndRender(size);
+    // Sampled before any of the sweep's own work: this is where production
+    // firmware has finished writing the block.
+    const bool output_late = audio_dac.OutputLate();
+    overrun_sweep.WriteOutputs((Voice::Frame*)(output), size);
+    overrun_sweep.Observe(
+        output_late,
+        audio_dac.late_fills(),
+        audio_dac.double_pending(),
+        voice.active_engine_stereo_capable());
+    if (overrun_sweep.progress_due()) {
+      ui.DisplayDataTransferProgress(
+          0.125f + 0.875f * overrun_sweep.progress());
+    }
+#endif
+#if PLAITS_CPU_PROBE && PLAITS_CPU_PROBE_SECTION_TOTAL
+    cpu_probe.SectionEnd(0);
+#endif
+    PLAITS_CPU_PROBE_END(size)
+#if PLAITS_FM_CARRIER_DIAGNOSTIC
+    fm_carrier_diagnostic.Observe(
+        cpu_probe.last_usage(), (Voice::Frame*)(output), size);
+    fm_carrier_diagnostic.MuteStress((Voice::Frame*)(output), size);
+#endif
+#if PLAITS_TZFM_DIAGNOSTIC
+    TzfmDiagnosticCounters counters;
+    counters.overruns = ui.audio_rate_fm_overruns();
+    counters.resyncs = ui.audio_rate_fm_resyncs();
+    counters.underflows = ui.audio_rate_fm_underflows();
+    counters.excess_lag = ui.audio_rate_fm_excess_lag();
+    tzfm_diagnostic.Observe(
+        diagnostic_ui_usage + cpu_probe.last_usage(), counters);
+    tzfm_diagnostic.Mute((Voice::Frame*)(output), size);
+#endif
+    PLAITS_CPU_PROBE_READOUT((Voice::Frame*)(output), size)
+    PLAITS_CPU_PROBE_DISPLAY(ui)
+#if PLAITS_FM_CARRIER_DIAGNOSTIC
+    if (fm_carrier_diagnostic.finished()) {
+      // This must run after the probe's live LED display. Reassert every block
+      // so neither that display nor the normal UI timeout can erase the final
+      // unattended result while the audible audition loop continues.
+      ui.DisplayDiagnosticResultLatched(
+          fm_carrier_diagnostic.passed(),
+          fm_carrier_diagnostic.failure_mask());
+    } else {
+      // Keep at least one green LED lit from the first block, then fill the
+      // panel as the autonomous sweep advances. The CPU limit is still
+      // measured internally; a visible heartbeat is more useful here than a
+      // CPU bar whose lowest range can legitimately look dark.
+      ui.DisplayDataTransferProgress(
+          0.125f + 0.875f * fm_carrier_diagnostic.progress());
+    }
+#endif
+    if (active_engine != previous_engine) {
+      ui.RealignAudioInputAfterEngineChange();
+    }
+    ui.set_active_engine(active_engine);
+#if PLAITS_BUILD_FAST_FM
+#if PLAITS_TZFM_DIAGNOSTIC
+    ui.SetAudioRateFmNeeded(tzfm_diagnostic.fast_stage());
+#else
+    ui.SetAudioRateFmNeeded(
+        modulations.frequency_patched &&
+        voice.active_engine_supports_fast_fm());
+#endif
+#endif
   }
   
-  if (debug_port.readable()) {
-    uint8_t command = debug_port.Read();
-    uint8_t response = ui.HandleFactoryTestingRequest(command);
-    debug_port.Write(response);
-  }
-  
+#if PLAITS_OVERRUN_SWEEP
+  overrun_sweep.EndCallback(size);
+#endif
 #ifdef PROFILE_INTERRUPT
   TOC
 #endif  // PROFILE_INTERRUPT
@@ -147,19 +351,28 @@ void Init() {
   
   volatile size_t counter = 1000000;
   while (counter--);
-  
-#ifdef PROFILE_INTERRUPT
-  settings.Init();
-  DebugPin::Init();
-#else
-  bool freshly_baked = !settings.Init();
-  if (freshly_baked) {
-    debug_port.Init();
-  }
-#endif  // PROFILE_INTERRUPT
 
+  settings.Init();
   ui.Init(&patch, &modulations, &settings);
   
+  PLAITS_CPU_PROBE_INIT
+#if PLAITS_TZFM_DIAGNOSTIC
+  tzfm_diagnostic.Init(
+      PLAITS_TZFM_AUDITION_GROUP,
+      PLAITS_FM_DIAGNOSTIC_EXPONENTIAL);
+#endif
+#if PLAITS_FM_CARRIER_DIAGNOSTIC
+  fm_carrier_diagnostic.Init();
+#endif
+#if PLAITS_OVERRUN_SWEEP
+  overrun_sweep.Init(PLAITS_OVERRUN_SWEEP_GROUP);
+#endif
+#if PLAITS_THRESHOLD_LADDER
+  threshold_ladder.Init();
+#endif
+#if PLAITS_SCENE_CHECK
+  scene_check.Init(kCheckScenes);
+#endif
   audio_dac.Init(48000, kBlockSize);
 
   audio_dac.Start(&FillBuffer);
@@ -168,5 +381,10 @@ void Init() {
 
 int main(void) {
   Init();
-  while (1) { }
+  while (1) {
+#if PLAITS_OVERRUN_SWEEP
+    // Packet building runs here, in time the audio interrupt leaves idle.
+    overrun_sweep.Poll();
+#endif
+  }
 }

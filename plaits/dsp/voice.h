@@ -31,42 +31,34 @@
 
 #include "stmlib/stmlib.h"
 
+#include "stmlib/dsp/dsp.h"
 #include "stmlib/dsp/filter.h"
 #include "stmlib/dsp/limiter.h"
+#include "stmlib/dsp/hysteresis_quantizer.h"
 #include "stmlib/utils/buffer_allocator.h"
 
-#include "plaits/dsp/engine/additive_engine.h"
-#include "plaits/dsp/engine/bass_drum_engine.h"
-#include "plaits/dsp/engine/chord_engine.h"
 #include "plaits/dsp/engine/engine.h"
-#include "plaits/dsp/engine/fm_engine.h"
-#include "plaits/dsp/engine/grain_engine.h"
-#include "plaits/dsp/engine/hi_hat_engine.h"
-#include "plaits/dsp/engine/modal_engine.h"
-#include "plaits/dsp/engine/noise_engine.h"
-#include "plaits/dsp/engine/particle_engine.h"
-#include "plaits/dsp/engine/snare_drum_engine.h"
-#include "plaits/dsp/engine/speech_engine.h"
-#include "plaits/dsp/engine/string_engine.h"
-#include "plaits/dsp/engine/swarm_engine.h"
-#include "plaits/dsp/engine/virtual_analog_engine.h"
-#include "plaits/dsp/engine/waveshaping_engine.h"
-#include "plaits/dsp/engine/wavetable_engine.h"
-
-#include "plaits/dsp/engine2/chiptune_engine.h"
-#include "plaits/dsp/engine2/phase_distortion_engine.h"
-#include "plaits/dsp/engine2/six_op_engine.h"
-#include "plaits/dsp/engine2/string_machine_engine.h"
-#include "plaits/dsp/engine2/virtual_analog_vcf_engine.h"
-#include "plaits/dsp/engine2/wave_terrain_engine.h"
+#if defined(PLAITS_STOCK_ENGINE_LAYOUT)
+#include "plaits/dsp/stock_engine_config.h"
+#else
+#include "plaits/dsp/engine_config.h"
+#endif
+// After the engine config: a generated config may define PLAITS_ENGINE_COUNT,
+// and build_config.h defaults it to 24 otherwise.
+#include "plaits/build_config.h"
+#include "plaits/dsp/oscillator/sine_oscillator.h"
+#include "plaits/dsp/oscillator/square_oscillator.h"
+#include "plaits/dsp/parameter_randomizer.h"
 
 #include "plaits/dsp/envelope.h"
 
 #include "plaits/dsp/fx/low_pass_gate.h"
 
+#include "plaits/dsp/physical_modelling/delay_line.h"
+
 namespace plaits {
 
-const int kMaxEngines = 24;
+const int kMaxEngines = PLAITS_ENGINE_COUNT;
 const int kMaxTriggerDelay = 8;
 const int kTriggerDelay = 5;
 
@@ -81,10 +73,18 @@ class ChannelPostProcessor {
   }
   
   void Reset() {
-    limiter_.Init();
+    limiter_peak_ = 0.5f;  // stmlib::Limiter::Init()
   }
   
-  void Process(
+  // Not unrolled: in the state-space low-pass gate each sample's output and
+  // states are short independent sums, so unrolling buys little beyond loop
+  // overhead and cost ~500 B of flash across the gated, bypassed and limited
+  // variants.
+#if defined(__clang__)
+  __attribute__((noinline)) void Process(
+#else
+  __attribute__((noinline, optimize("no-unroll-loops"))) void Process(
+#endif
       float gain,
       bool bypass_lpg,
       float low_pass_gate_gain,
@@ -94,32 +94,125 @@ class ChannelPostProcessor {
       short* out,
       size_t size,
       size_t stride) {
-    if (gain < 0.0f) {
-      limiter_.Process(-gain, in, size);
-    }
     const float post_gain = (gain < 0.0f ? 1.0f : gain) * -32767.0f;
+    // A negative gain runs stmlib::Limiter first. It is computed per sample
+    // as the output is written rather than in a pass of its own over `in`.
+    if (gain < 0.0f) {
+      LimitedSource source = { in, -gain, limiter_peak_ };
+      Write(
+          &source,
+          post_gain,
+          bypass_lpg,
+          low_pass_gate_gain,
+          low_pass_gate_frequency,
+          low_pass_gate_hf_bleed,
+          out,
+          size,
+          stride);
+      limiter_peak_ = source.peak;
+    } else {
+      LowPassGate::BufferSource source = { in };
+      Write(
+          &source,
+          post_gain,
+          bypass_lpg,
+          low_pass_gate_gain,
+          low_pass_gate_frequency,
+          low_pass_gate_hf_bleed,
+          out,
+          size,
+          stride);
+    }
+  }
+
+  // A stereo pair's limiter, run once for both channels in place: one peak
+  // follower tracks the louder side and one gain is applied to both, so the
+  // image holds still while limiting (two independent limiters duck each side
+  // on its own). Below the ceiling the output is what two limiters would give;
+  // above it both sides are reduced together. Afterwards the pair goes
+  // through Process() as unlimited (gain 1: the same -32767 scale). Being one
+  // pass instead of two limited ones, it also halves the limiter's per-sample
+  // compares and divides, which on the module cost ~0.03 of the period per
+  // limited channel.
+  // Not unrolled: the peak follower is a sample-to-sample dependent chain, so
+  // unrolling only costs flash (540 B vs ~150 B).
+#if defined(__clang__)
+  __attribute__((noinline)) void LimitStereoInPlace(
+#else
+  __attribute__((noinline, optimize("no-unroll-loops"))) void LimitStereoInPlace(
+#endif
+      float pre_gain, float* left, float* right, size_t size) {
+    float peak = limiter_peak_;
+    while (size--) {
+      const float l = *left * pre_gain;
+      const float r = *right * pre_gain;
+      const float level = std::max(fabsf(l), fabsf(r));
+      SLOPE(peak, level, 0.05f, 0.00002f);
+      const float gain = (peak <= 1.0f ? 1.0f : 1.0f / peak) * 0.8f;
+      *left++ = l * gain;
+      *right++ = r * gain;
+    }
+    limiter_peak_ = peak;
+  }
+
+ private:
+  // stmlib::Limiter::Process, one sample, with the peak follower held by the
+  // caller for the block: through the member, every sample reloaded and
+  // stored it. Same arithmetic, same output.
+  static inline float Limit(float pre_gain, float in, float* peak) {
+    float s = in * pre_gain;
+    SLOPE(*peak, fabsf(s), 0.05f, 0.00002f);
+    float gain = (*peak <= 1.0f ? 1.0f : 1.0f / *peak);
+    return s * gain * 0.8f;
+  }
+
+  struct LimitedSource {
+    const float* in;
+    float pre_gain;
+    float peak;
+    inline float Next() { return Limit(pre_gain, *in++, &peak); }
+  };
+
+  template<typename Source>
+  inline void Write(
+      Source* source,
+      float post_gain,
+      bool bypass_lpg,
+      float low_pass_gate_gain,
+      float low_pass_gate_frequency,
+      float low_pass_gate_hf_bleed,
+      short* out,
+      size_t size,
+      size_t stride) {
     if (!bypass_lpg) {
-      lpg_.Process(
+      lpg_.ProcessSource(
           post_gain * low_pass_gate_gain,
           low_pass_gate_frequency,
           low_pass_gate_hf_bleed,
-          in,
+          source,
           out,
           size,
           stride);
     } else {
       while (size--) {
-        *out = stmlib::Clip16(1 + static_cast<int32_t>(*in++ * post_gain));
+        *out = stmlib::Clip16(
+            1 + static_cast<int32_t>(source->Next() * post_gain));
         out += stride;
       }
     }
   }
-  
- private:
-  stmlib::Limiter limiter_;
+
+  float limiter_peak_;
   LowPassGate lpg_;
   
   DISALLOW_COPY_AND_ASSIGN(ChannelPostProcessor);
+};
+
+enum TrigResponse {
+  TRIG_RESPONSE_TRIGGER,
+  TRIG_RESPONSE_GATE,
+  TRIG_RESPONSE_VELOCITY_TRIGGER,
+  TRIG_RESPONSE_VELOCITY_GATE,
 };
 
 struct Patch {
@@ -134,6 +227,70 @@ struct Patch {
   int engine;
   float decay;
   float lpg_colour;
+
+  float freqlock_param;
+  // Option VALUES are ordered most-reached-for first, so the common settings
+  // land on the solid LED colors (0 green, 1 red, 2 yellow) and the rare ones
+  // fall through to the blinking tier. A module keeps its saved options across
+  // an audio reflash, so any change to the meaning of a value here must be
+  // paired with an OPTIONS_LAYOUT_VERSION bump in the builder's profile-id
+  // encoding (generate_engine_config.py) - that is what forces a one-time
+  // ApplyBuildOptionDefaults instead of silently re-reading old numbers under
+  // new meanings.
+  // 0 - manual octave switching
+  // 1 - fourth synthesis macro
+  // 2 - manual aux crossfade
+  // 3 - manual control of decay (without button press)
+  // 4 - envelope contour; TRIG response chooses one-shot or gated behavior
+  uint8_t locked_frequency_pot_option;
+  // 0 - trigger: stock edge-triggered ping / one-shot contour
+  // 1 - gate: gate duration holds the note open
+  // 2 - velocity trigger: rising-edge voltage scales the ping / one-shot
+  // 3 - velocity gate: gate duration holds the note open and its rising-edge
+  //     voltage scales accent / the outer LPG
+  uint8_t trig_response_option;
+  // 0 - cv control of model (original)
+  // 1 - cv control of the fourth synthesis macro
+  // 2 - cv control of aux crossfade
+  // 3 - cv control of lpg colour
+  // 4 - audio-rate Sync In (native phase reset or bounded engine fallback)
+  uint8_t model_cv_option;
+  // 0 - cv control of level (original)
+  // 1 - cv control of decay
+  // 2 - auto: decay on outer-LPG engines, level/accent on self-enveloped ones
+  uint8_t level_cv_option;
+  // 0 - regular aux model
+  // 1 - stereo: OUT/AUX become a true L/R pair on stereo-capable engines
+  //     (the other engines keep their regular aux output)
+  // 2 - suboscillator, shaped and tuned by aux_subosc_option
+  uint8_t aux_output_option;
+  // Shape and octave in one value, so the suboscillator is one setting on one
+  // light rather than two. Shape is the slower-moving choice, so it takes the
+  // blink tier and the octave takes the hue: the three squares are the three
+  // solid colors, the three sines the same three blinking.
+  // 0 - square             3 - sine
+  // 1 - square, -1 octave  4 - sine, -1 octave
+  // 2 - square, -2 octaves 5 - sine, -2 octaves
+  // Only has an effect while aux_is_subosc(); the UI darkens its menu light
+  // otherwise.
+  uint8_t aux_subosc_option;
+  // Index into the chord tables this firmware was built with (up to sixteen).
+  uint8_t chord_set_option;
+  // 0 - don't hold params on trigger (original)
+  // 1 - hold timbre, morph, harmo, level, v/oct cv modulations on trigger (not fm)
+  //     (note model is already held on trigger by default)
+  uint8_t hold_on_trigger_option;
+  // 0 - stock internal-envelope behavior
+  // 1 - continuous chaotic drift on unpatched TIMBRE and MORPH
+  // 2 - new held random offsets on each trigger rising edge
+  uint8_t attenuverter_mode;
+
+  // The readings of the two aux options that the DSP and the UI need. Keeping
+  // them here means a future renumber touches one place.
+  inline bool aux_is_stereo() const { return aux_output_option == 1; }
+  inline bool aux_is_subosc() const { return aux_output_option == 2; }
+  inline bool aux_subosc_is_sine() const { return aux_subosc_option >= 3; }
+  inline int aux_subosc_octaves_down() const { return aux_subosc_option % 3; }
 };
 
 struct Modulations {
@@ -146,6 +303,14 @@ struct Modulations {
   float trigger;
   float level;
 
+  // Sample-position bit mask filled by the MODEL-input sync detector.
+  uint32_t hard_sync;
+
+  // FM readings transformed with the regular calibration. Fast mode supplies
+  // independently sampled values; slow mode and safe fallbacks repeat the
+  // current control-rate value across the block.
+  float frequency_audio[kMaxBlockSize];
+  bool frequency_audio_rate;
   bool frequency_patched;
   bool timbre_patched;
   bool morph_patched;
@@ -176,6 +341,24 @@ class Voice {
       Frame* frames,
       size_t size);
   inline int active_engine() const { return previous_engine_index_; }
+  // Whether the stereo aux option actually changes the active engine's render
+  // (false for engines without a true stereo path or with their
+  // PLAITS_STEREO_<X> flag off). Lets the overrun sweep skip states identical
+  // to the regular-aux ones.
+  inline bool active_engine_stereo_capable() {
+    return previous_engine_index_ >= 0 &&
+        engines_.get(previous_engine_index_)->stereo_capable();
+  }
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  inline bool active_engine_supports_linear_tzfm() {
+    return previous_engine_index_ >= 0 &&
+        engines_.get(previous_engine_index_)->linear_tzfm_capable();
+  }
+  inline bool active_engine_supports_fast_fm() {
+    return previous_engine_index_ >= 0 &&
+        engines_.get(previous_engine_index_)->fast_fm_capable();
+  }
+#endif
     
  private:
   void ComputeDecayParameters(const Patch& settings);
@@ -202,42 +385,38 @@ class Voice {
     return value;
   }
 
-  VirtualAnalogEngine virtual_analog_engine_;
-  WaveshapingEngine waveshaping_engine_;
-  FMEngine fm_engine_;
-  GrainEngine grain_engine_;
-  AdditiveEngine additive_engine_;
-  WavetableEngine wavetable_engine_;
-  ChordEngine chord_engine_;
-  SpeechEngine speech_engine_;
+  PLAITS_ENGINE_MEMBERS
 
-  SwarmEngine swarm_engine_;
-  NoiseEngine noise_engine_;
-  ParticleEngine particle_engine_;
-  StringEngine string_engine_;
-  ModalEngine modal_engine_;
-  BassDrumEngine bass_drum_engine_;
-  SnareDrumEngine snare_drum_engine_;
-  HiHatEngine hi_hat_engine_;
-  
-  VirtualAnalogVCFEngine virtual_analog_vcf_engine_;
-  PhaseDistortionEngine phase_distortion_engine_;
-  SixOpEngine six_op_engine_;
-  WaveTerrainEngine wave_terrain_engine_;
-  StringMachineEngine string_machine_engine_;
-  ChiptuneEngine chiptune_engine_;
+  FastSineOscillator sine_oscillator_;
+  SquareOscillator square_oscillator_;
 
   stmlib::HysteresisQuantizer2 engine_quantizer_;
   
   bool reload_user_data_;
+  int previous_panel_engine_;
   int previous_engine_index_;
   float engine_cv_;
   
   float previous_note_;
   bool trigger_state_;
+  float trigger_velocity_;
+
+  float held_timbre_;
+  float held_morph_;
+  float held_harmo_;
+  float held_level_;
+  float held_note_;
+
+  ParameterRandomizer parameter_randomizer_;
+  uint8_t previous_attenuverter_mode_;
   
   DecayEnvelope decay_envelope_;
   LPGEnvelope lpg_envelope_;
+#if PLAITS_BUILD_ENABLE_ONE_KNOB_ENVELOPE
+  OneKnobEnvelope one_knob_envelope_;
+  bool one_knob_envelope_active_;
+  OneKnobEnvelope::Mode one_knob_envelope_mode_;
+#endif
   
   float trigger_delay_line_[kMaxTriggerDelay];
   DelayLine<float, kMaxTriggerDelay> trigger_delay_;

@@ -24,13 +24,20 @@
 //
 // -----------------------------------------------------------------------------
 //
-// 2 variable shape oscillators with sync, FM and crossfading.
+// The production Plaits virtual-analog voice (the former VA_VARIANT 2).
 
 #include "plaits/dsp/engine/virtual_analog_engine.h"
 
 #include <algorithm>
 
+#include "plaits/build_config.h"
 #include "stmlib/dsp/parameter_interpolator.h"
+
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+#define PLAITS_HARD_SYNC_EVENTS(parameters) ((parameters).hard_sync)
+#else
+#define PLAITS_HARD_SYNC_EVENTS(parameters) 0u
+#endif
 
 namespace plaits {
 
@@ -82,8 +89,8 @@ void VirtualAnalogEngine::Render(
     size_t size,
     bool* already_enveloped) {
 
-#if VA_VARIANT == 0
-  
+#if 0
+
   // 1 = variable waveshape controlled by TIMBRE.
   // 2 = variable waveshape controlled by MORPH, detuned by HARMONICS.
   // OUT = 1 + 2.
@@ -105,25 +112,51 @@ void VirtualAnalogEngine::Render(
 
   float pw_2 = 0.5f + (parameters.morph - 0.66f) * 1.4f;
   CONSTRAIN(pw_2, 0.5f, 0.99f);
-  
-  primary_.Render(primary_f, pw_1, shape_1, temp_buffer_, size);
-  auxiliary_.Render(auxiliary_f, pw_2, shape_2, aux, size);
-  for (size_t i = 0; i < size; ++i) {
-    out[i] = (aux[i] + temp_buffer_[i]) * 0.5f;
-  }
-  
-  sync_.Render(primary_f, sync_f, pw_2, shape_2, aux, size);
-  for (size_t i = 0; i < size; ++i) {
-    aux[i] = (aux[i] + temp_buffer_[i]) * 0.5f;
+
+  primary_.Render(
+      primary_f, pw_1, shape_1, temp_buffer_, size,
+      PLAITS_HARD_SYNC_EVENTS(parameters));
+  auxiliary_.Render(
+      auxiliary_f, pw_2, shape_2, aux, size,
+      PLAITS_HARD_SYNC_EVENTS(parameters));
+
+  if ((PLAITS_STEREO_VIRTUAL_ANALOG && parameters.stereo)) {
+    // OUT/AUX become L/R: pan the two detuned varishape oscillators (primary
+    // left-of-center, auxiliary right-of-center) and drop the sync byproduct.
+    float primary_left, primary_right, auxiliary_left, auxiliary_right;
+    StereoPanGains(0.28f, &primary_left, &primary_right);
+    StereoPanGains(0.72f, &auxiliary_left, &auxiliary_right);
+    for (size_t i = 0; i < size; ++i) {
+      const float primary = temp_buffer_[i];
+      const float secondary = aux[i];
+      out[i] = primary * primary_left + secondary * auxiliary_left;
+      aux[i] = primary * primary_right + secondary * auxiliary_right;
+    }
+  } else {
+    for (size_t i = 0; i < size; ++i) {
+      out[i] = (aux[i] + temp_buffer_[i]) * 0.5f;
+    }
+
+    sync_.Render(
+        primary_f,
+        sync_f,
+        pw_2,
+        shape_2,
+        aux,
+        size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+    for (size_t i = 0; i < size; ++i) {
+      aux[i] = (aux[i] + temp_buffer_[i]) * 0.5f;
+    }
   }
 
-#elif VA_VARIANT == 1
-  
+#elif 0
+
   // 1 = variable waveshape controlled by MORPH.
   // 2 = variable waveshape controlled by MORPH.
   // OUT = crossfade between 1 + 2, 1, 1 sync 2 controlled by TIMBRE.
   // AUX = 2.
-  
+
   float auxiliary_amount = max(0.5f - parameters.timbre, 0.0f) * 2.0f;
   auxiliary_amount *= auxiliary_amount * 0.5f;
 
@@ -142,34 +175,81 @@ void VirtualAnalogEngine::Render(
   float pw = 0.5f + (parameters.morph - 0.66f) * 1.4f;
   CONSTRAIN(pw, 0.5f, 0.99f);
 
-  primary_.Render(primary_f, pw, shape, out, size);
-  sync_.Render(primary_f, sync_f, pw, shape, aux, size);
+  if ((PLAITS_STEREO_VIRTUAL_ANALOG && parameters.stereo)) {
+    // OUT/AUX become L/R: pan the two detuned varishape oscillators (primary
+    // left-of-center, auxiliary right-of-center). The sync oscillator and the
+    // TIMBRE crossfade are dropped, but both crossfade interpolators are still
+    // advanced so their state stays coherent when toggling back to mono.
+    primary_.Render(
+        primary_f, pw, shape, out, size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+    auxiliary_.Render(
+        auxiliary_f, pw, shape, aux, size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
 
-  ParameterInterpolator xmod_amount_modulation(
-      &xmod_amount_,
-      squashed_xmod_amount * (2.0f - squashed_xmod_amount),
-      size);
-  for (size_t i = 0; i < size; ++i) {
-    out[i] += (aux[i] - out[i]) * xmod_amount_modulation.Next();
+    ParameterInterpolator xmod_amount_modulation(
+        &xmod_amount_,
+        squashed_xmod_amount * (2.0f - squashed_xmod_amount),
+        size);
+    ParameterInterpolator auxiliary_amount_modulation(
+        &auxiliary_amount_,
+        auxiliary_amount,
+        size);
+    float primary_left, primary_right, auxiliary_left, auxiliary_right;
+    StereoPanGains(0.28f, &primary_left, &primary_right);
+    StereoPanGains(0.72f, &auxiliary_left, &auxiliary_right);
+    for (size_t i = 0; i < size; ++i) {
+      xmod_amount_modulation.Next();
+      auxiliary_amount_modulation.Next();
+      const float primary = out[i];
+      const float secondary = aux[i];
+      out[i] = primary * primary_left + secondary * auxiliary_left;
+      aux[i] = primary * primary_right + secondary * auxiliary_right;
+    }
+  } else {
+    primary_.Render(
+        primary_f, pw, shape, out, size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+    sync_.Render(
+        primary_f,
+        sync_f,
+        pw,
+        shape,
+        aux,
+        size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+
+    ParameterInterpolator xmod_amount_modulation(
+        &xmod_amount_,
+        squashed_xmod_amount * (2.0f - squashed_xmod_amount),
+        size);
+    for (size_t i = 0; i < size; ++i) {
+      out[i] += (aux[i] - out[i]) * xmod_amount_modulation.Next();
+    }
+
+    auxiliary_.Render(
+        auxiliary_f, pw, shape, aux, size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+
+    ParameterInterpolator auxiliary_amount_modulation(
+        &auxiliary_amount_,
+        auxiliary_amount,
+        size);
+    for (size_t i = 0; i < size; ++i) {
+      out[i] += (aux[i] - out[i]) * auxiliary_amount_modulation.Next();
+    }
   }
 
-  auxiliary_.Render(auxiliary_f, pw, shape, aux, size);
-
-  ParameterInterpolator auxiliary_amount_modulation(
-      &auxiliary_amount_,
-      auxiliary_amount,
-      size);
-  for (size_t i = 0; i < size; ++i) {
-    out[i] += (aux[i] - out[i]) * auxiliary_amount_modulation.Next();
-  }
-  
-#elif VA_VARIANT == 2
+#else
 
   // 1 = variable square controlled by TIMBRE.
   // 2 = variable saw controlled by MORPH.
   // OUT = 1 + 2.
   // AUX = dual variable waveshape controlled by MORPH, self sync by TIMBRE.
-  
+  // In stereo mode OUT/AUX become L/R: the same per-oscillator gains, but the
+  // saw (which carries the HARMONICS detune) is panned right-of-center and the
+  // square left-of-center. The monster-sync AUX render is skipped.
+
   const float sync_amount = parameters.timbre * parameters.timbre;
   const float auxiliary_detune = ComputeDetuning(parameters.harmonics);
   const float primary_f = NoteToFrequency(parameters.note);
@@ -179,19 +259,86 @@ void VirtualAnalogEngine::Render(
   const float auxiliary_sync_f = NoteToFrequency(
       parameters.note + auxiliary_detune + sync_amount * 48.0f);
 
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  float auxiliary_frequency_offset[kMaxBlockSize];
+  float primary_sync_frequency_offset[kMaxBlockSize];
+  float auxiliary_sync_frequency_offset[kMaxBlockSize];
+  const float auxiliary_ratio = auxiliary_f /
+      (primary_f > 1.0e-9f ? primary_f : 1.0e-9f);
+  const float primary_sync_ratio = primary_sync_f /
+      (primary_f > 1.0e-9f ? primary_f : 1.0e-9f);
+  const float auxiliary_sync_ratio = auxiliary_sync_f /
+      (primary_f > 1.0e-9f ? primary_f : 1.0e-9f);
+  if (parameters.frequency_offset) {
+    for (size_t i = 0; i < size; ++i) {
+      const float offset = parameters.frequency_offset[i];
+      auxiliary_frequency_offset[i] = offset * auxiliary_ratio;
+      primary_sync_frequency_offset[i] = offset * primary_sync_ratio;
+      auxiliary_sync_frequency_offset[i] = offset * auxiliary_sync_ratio;
+    }
+  }
+#endif
+
   float shape = parameters.morph * 1.5f;
   CONSTRAIN(shape, 0.0f, 1.0f);
 
   float pw = 0.5f + (parameters.morph - 0.66f) * 1.46f;
   CONSTRAIN(pw, 0.5f, 0.995f);
   
-  // Render monster sync to AUX.
-  primary_.Render(primary_f, primary_sync_f, pw, shape, out, size);
-  auxiliary_.Render(auxiliary_f, auxiliary_sync_f, pw, shape, aux, size);
-  for (size_t i = 0; i < size; ++i) {
-    aux[i] = (aux[i] - out[i]) * 0.5f;
+  // Render monster sync to AUX. Skipped in stereo, where AUX carries the saw's
+  // right channel instead. primary_/auxiliary_ are only used here, so freezing
+  // their phases in stereo has no audible effect on the OUT oscillators.
+  if (!(PLAITS_STEREO_VIRTUAL_ANALOG && parameters.stereo)) {
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+    if (parameters.frequency_offset) {
+      primary_.RenderLinearFm<true, false>(
+          primary_f,
+          primary_sync_f,
+          pw,
+          shape,
+          0.0f,
+          parameters.frequency_offset,
+          primary_sync_frequency_offset,
+          out,
+          size,
+          PLAITS_HARD_SYNC_EVENTS(parameters));
+      auxiliary_.RenderLinearFm<true, false>(
+          auxiliary_f,
+          auxiliary_sync_f,
+          pw,
+          shape,
+          0.0f,
+          auxiliary_frequency_offset,
+          auxiliary_sync_frequency_offset,
+          aux,
+          size,
+          PLAITS_HARD_SYNC_EVENTS(parameters));
+    } else {
+#endif
+    primary_.Render(
+        primary_f,
+        primary_sync_f,
+        pw,
+        shape,
+        out,
+        size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+    auxiliary_.Render(
+        auxiliary_f,
+        auxiliary_sync_f,
+        pw,
+        shape,
+        aux,
+        size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+    }
+#endif
+    for (size_t i = 0; i < size; ++i) {
+      aux[i] = (aux[i] - out[i]) * 0.5f;
+    }
   }
-  
+
   // Render double varishape to OUT.
   float square_pw = 1.3f * parameters.timbre - 0.15f;
   CONSTRAIN(square_pw, 0.005f, 0.5f);
@@ -216,30 +363,94 @@ void VirtualAnalogEngine::Render(
   
   const float square_sync_f = NoteToFrequency(
       parameters.note + square_sync_ratio);
+
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  float square_sync_frequency_offset[kMaxBlockSize];
+  if (parameters.frequency_offset) {
+    const float square_ratio = square_sync_f /
+        (primary_f > 1.0e-9f ? primary_f : 1.0e-9f);
+    for (size_t i = 0; i < size; ++i) {
+      square_sync_frequency_offset[i] =
+          parameters.frequency_offset[i] * square_ratio;
+    }
+    sync_.RenderLinearFm<true, false>(
+        primary_f,
+        square_sync_f,
+        square_pw,
+        1.0f,
+        0.0f,
+        parameters.frequency_offset,
+        square_sync_frequency_offset,
+        temp_buffer_,
+        size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+    variable_saw_.RenderLinearFm(
+        auxiliary_f,
+        saw_pw,
+        saw_shape,
+        auxiliary_frequency_offset,
+        out,
+        size,
+        PLAITS_HARD_SYNC_EVENTS(parameters));
+  } else {
+#endif
   
   sync_.Render(
-      primary_f, square_sync_f, square_pw, 1.0f, temp_buffer_, size);
-  variable_saw_.Render(auxiliary_f, saw_pw, saw_shape, out, size);
+      primary_f,
+      square_sync_f,
+      square_pw,
+      1.0f,
+      temp_buffer_,
+      size,
+      PLAITS_HARD_SYNC_EVENTS(parameters));
+  variable_saw_.Render(
+      auxiliary_f,
+      saw_pw,
+      saw_shape,
+      out,
+      size,
+      PLAITS_HARD_SYNC_EVENTS(parameters));
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  }
+#endif
   
   float norm = 1.0f / (std::max(square_gain, saw_gain));
+  const float oscillator_balance = parameters.macro;
   
   ParameterInterpolator square_gain_modulation(
       &auxiliary_amount_,
-      square_gain * 0.3f * norm,
+      square_gain * 0.6f * oscillator_balance * norm,
       size);
 
   ParameterInterpolator saw_gain_modulation(
       &xmod_amount_,
-      saw_gain * 0.5f * norm,
+      saw_gain * (1.0f - oscillator_balance) * norm,
       size);
-  
-  for (size_t i = 0; i < size; ++i) {
-    out[i] = out[i] * saw_gain_modulation.Next() + \
-        square_gain_modulation.Next() * temp_buffer_[i];
+
+  if ((PLAITS_STEREO_VIRTUAL_ANALOG && parameters.stereo)) {
+    // Pan the two oscillators across the field. Both interpolators are still
+    // advanced once per sample, so auxiliary_amount_/xmod_amount_ end at the
+    // same targets as in mono. The saw sits at 0.72 (it carries the HARMONICS
+    // detune) and the square at 0.28.
+    float saw_left, saw_right, square_left, square_right;
+    StereoPanGains(0.72f, &saw_left, &saw_right);
+    StereoPanGains(0.28f, &square_left, &square_right);
+    for (size_t i = 0; i < size; ++i) {
+      const float saw = out[i] * saw_gain_modulation.Next();
+      const float square = square_gain_modulation.Next() * temp_buffer_[i];
+      out[i] = saw * saw_left + square * square_left;
+      aux[i] = saw * saw_right + square * square_right;
+    }
+  } else {
+    for (size_t i = 0; i < size; ++i) {
+      out[i] = out[i] * saw_gain_modulation.Next() + \
+          square_gain_modulation.Next() * temp_buffer_[i];
+    }
   }
 
-#endif  // VA_VARIANT values
-
+#endif
 }
 
 }  // namespace plaits
+
+#undef PLAITS_HARD_SYNC_EVENTS

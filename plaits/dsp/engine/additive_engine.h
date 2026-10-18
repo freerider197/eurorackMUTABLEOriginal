@@ -25,6 +25,11 @@
 // -----------------------------------------------------------------------------
 //
 // Additive synthesis with 24+8 partials.
+//
+// OUT: 24 integer harmonics. AUX: 8 harmonics of the organ subset.
+// alt firmware, stereo mode: OUT carries the 24-harmonic voice and AUX carries
+// a short all-pass phase rotation of it. This keeps the spectrum and level
+// matched while avoiding a second 24-partial accumulation.
 
 #ifndef PLAITS_DSP_ENGINE_ADDITIVE_ENGINE_H_
 #define PLAITS_DSP_ENGINE_ADDITIVE_ENGINE_H_
@@ -33,10 +38,11 @@
 #include "plaits/dsp/oscillator/harmonic_oscillator.h"
 
 namespace plaits {
-  
+
 const int kHarmonicBatchSize = 12;
 const int kNumHarmonics = 36;
 const int kNumHarmonicOscillators = kNumHarmonics / kHarmonicBatchSize;
+const int kNumIntegerHarmonics = 24;
 
 class AdditiveEngine : public Engine {
  public:
@@ -51,7 +57,12 @@ class AdditiveEngine : public Engine {
       float* aux,
       size_t size,
       bool* already_enveloped);
- 
+  virtual bool stereo_capable() const { return PLAITS_STEREO_HARMONIC; }
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+  virtual bool hard_sync_capable() const { return true; }
+#endif
+  virtual bool linear_tzfm_capable() const { return true; }
+
  private:
   void UpdateAmplitudes(
       float centroid,
@@ -59,12 +70,16 @@ class AdditiveEngine : public Engine {
       float bumps,
       float* amplitudes,
       const int* harmonic_indices,
-      size_t num_harmonics);
-      
+      size_t num_harmonics,
+      float odd_gain = 1.0f,
+      float even_gain = 1.0f);
+
   HarmonicOscillator<kHarmonicBatchSize> harmonic_oscillator_[kNumHarmonicOscillators];
-  
+
   float* amplitudes_;
-  
+
+  StereoPhaseAllpass<7> stereo_allpass_;
+
   DISALLOW_COPY_AND_ASSIGN(AdditiveEngine);
 };
 

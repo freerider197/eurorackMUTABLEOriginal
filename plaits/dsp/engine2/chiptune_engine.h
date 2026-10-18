@@ -25,6 +25,12 @@
 // -----------------------------------------------------------------------------
 //
 // Chiptune waveforms with arpeggiator.
+//
+// OUT: single arpeggiated square voice when clocked, five-voice square
+// chord otherwise. AUX: NES triangle bass. In stereo mode, OUT/AUX become
+// left/right: the chord voices spread across the field (root centered,
+// outer voices widest), the arpeggiated voice ping-pongs between sides on
+// every step, and the bass stays centered.
 
 #ifndef PLAITS_DSP_ENGINE_CHIPTUNE_ENGINE_H_
 #define PLAITS_DSP_ENGINE_CHIPTUNE_ENGINE_H_
@@ -54,11 +60,24 @@ class ChiptuneEngine : public Engine {
       float* aux,
       size_t size,
       bool* already_enveloped);
-  
+  virtual bool stereo_capable() const { return PLAITS_STEREO_CHIPTUNE; }
+
   inline void set_envelope_shape(float envelope_shape) {
+    if (envelope_shape_ == NO_ENVELOPE && envelope_shape != NO_ENVELOPE) {
+      // Start at the requested bass-envelope mix, not a fully open bass.
+      // Otherwise the smoothing ramp produces a short note on every idle
+      // voice when entering triggered mode, even before its first clock.
+      aux_envelope_amount_ = envelope_shape * 20.0f;
+      CONSTRAIN(aux_envelope_amount_, 0.0f, 1.0f);
+    }
     envelope_shape_ = envelope_shape;
   }
   
+#if PLAITS_BUILD_EXTENDED_TZFM
+  // Qualified separately from the stock Plaits catalog's CPU policy.
+  virtual bool linear_tzfm_capable() const { return true; }
+#endif
+
  private:
   SuperSquareOscillator voice_[kChordNumVoices];
   NESTriangleOscillator<> bass_;
@@ -66,11 +85,16 @@ class ChiptuneEngine : public Engine {
   ChordBank chords_;
   Arpeggiator arpeggiator_;
   stmlib::HysteresisQuantizer2 arpeggiator_pattern_selector_;
+  stmlib::HysteresisQuantizer2 register_spread_selector_;
   
   float envelope_shape_;
   float envelope_state_;
   float aux_envelope_amount_;
-  
+
+  bool arp_pan_flip_;
+  float arp_pan_left_;
+  float arp_pan_right_;
+
   DISALLOW_COPY_AND_ASSIGN(ChiptuneEngine);
 };
 

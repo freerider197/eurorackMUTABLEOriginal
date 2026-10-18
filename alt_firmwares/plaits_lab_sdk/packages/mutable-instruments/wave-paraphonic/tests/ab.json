@@ -1,0 +1,69 @@
+{
+  "shape": "WAVE_PARAPHONIC",
+  "note": "The engine now reads Plaits' shared chord table, so these A/B cases isolate the inherited WAVE path on a chord both implementations can express exactly: Braids COLOR p2=0.71875 parks on its {4, 7, 12} row, while engine HARMONICS=1 selects Original's Major [0, 400, 700, 1200]. Fan is zero and Spread reproduces the table at noon. Chord selection itself is covered by ChordBank and the website runtime-table test, not compared against Braids' private list here. The p1 values are deliberate -- int(p1 * 32767) >> 10 picks a slot on the 33-wave scan line and the low bits crossfade it with its successor, so p1 = 0.6876 and p1 = 0.968902 sit almost exactly ON a slot while p1 = 0.70 sits between two. 16 of the 33 slots have an exact counterpart in Plaits' wave bank and 17 are substituted (see the engine header), so the cases measure both. wave-gain-step parks p1 midway between slots 10 and 11, the widest step in the port's gain table and a pair whose waves are both exact matches.",
+  "cases": [
+    {
+      "id": "stock-mid",
+      "name": "Stock chord, between two exactly-matched waves",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.70, "p2": 0.71875},
+      "engine": {"timbre": 0.70, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 1.5}
+    },
+    {
+      "id": "wave-pure",
+      "name": "One exact wave, essentially uncrossfaded",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.6876, "p2": 0.71875},
+      "engine": {"timbre": 0.6876, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 1.5}
+    },
+    {
+      "id": "wave-low",
+      "name": "The near end of the scan line, on a substituted wave",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.0, "p2": 0.71875},
+      "engine": {"timbre": 0.0, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.5, "spectrumDb": 2.0}
+    },
+    {
+      "id": "wave-high",
+      "name": "The far end of the scan line",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 1.0, "p2": 0.71875},
+      "engine": {"timbre": 1.0, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 1.5}
+    },
+    {
+      "id": "wave-gain-step",
+      "name": "Midway across the widest gain step on the scan line",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.3281, "p2": 0.71875},
+      "engine": {"timbre": 0.3281, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 1.5}
+    },
+    {
+      "id": "wave-worst",
+      "name": "The worst substituted slot of the 33",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.968902, "p2": 0.71875},
+      "engine": {"timbre": 0.968902, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 3.0}
+    },
+    {
+      "id": "high-note",
+      "name": "Two octaves up, where the 48 kHz readout aliases",
+      "seconds": 2,
+      "note": 69,
+      "braids": {"p1": 0.70, "p2": 0.71875},
+      "engine": {"timbre": 0.70, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.5, "spectrumDb": 3.0}
+    }
+  ]
+}

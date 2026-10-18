@@ -25,6 +25,11 @@
 // -----------------------------------------------------------------------------
 //
 // 6-operator FM synth.
+//
+// OUT, AUX: both carry the mix of the two voices. In stereo mode, OUT/AUX
+// become left/right: triggered notes alternate between the two sides as the
+// round-robin allocator swaps voices, while a free-running drone (a single
+// sustained voice) stays centred.
 
 #ifndef PLAITS_DSP_ENGINE_SIX_OP_ENGINE_H_
 #define PLAITS_DSP_ENGINE_SIX_OP_ENGINE_H_
@@ -49,6 +54,19 @@ class FMVoice {
   void Init(fm::Algorithms<6>* algorithms, float sample_rate);
   void LoadPatch(const fm::Patch* patch);
   void Render(float* buffer, size_t size);
+#if PLAITS_BUILD_EXTENDED_TZFM
+  void RenderSigned(float* buffer, float offset) {
+    if (!patch_) return;
+    voice_.set_frequency_offset(offset);
+    voice_.Render(parameters_, buffer, 1);
+    voice_.set_frequency_offset(0.0f);
+  }
+#endif
+#ifdef TEST
+  void set_carrier_timbre_enabled(bool enabled) {
+    voice_.set_carrier_timbre_enabled(enabled);
+  }
+#endif
   
   inline void UnloadPatch() {
     patch_ = NULL;
@@ -56,6 +74,10 @@ class FMVoice {
   
   inline const fm::Patch* patch() const {
     return patch_;
+  }
+
+  inline bool audible(float threshold) const {
+    return patch_ && voice_.audible(threshold);
   }
   
   inline fm::Voice<6>::Parameters* mutable_parameters() {
@@ -92,21 +114,53 @@ class SixOpEngine : public Engine {
   virtual void Init(stmlib::BufferAllocator* allocator);
   virtual void Reset();
   virtual void LoadUserData(const uint8_t* user_data);
+  // Variable-length bank: `length` bytes hold length / SYX_SIZE patches (1..32).
+  // The Harmonics quantizer is re-sized to that count, so the dial sweeps only
+  // the patches actually present — no need to zone-fill a short bank to 32.
+  virtual void LoadUserData(const uint8_t* user_data, size_t length);
   virtual void Render(const EngineParameters& parameters,
       float* out,
       float* aux,
       size_t size,
       bool* already_enveloped);
-      
+  virtual bool stereo_capable() const { return PLAITS_STEREO_SIX_OP; }
+
   void LoadBank(int bank);
+#ifdef TEST
+  void set_carrier_timbre_enabled(bool enabled) {
+    for (int i = 0; i < kNumSixOpVoices; ++i) {
+      voice_[i].set_carrier_timbre_enabled(enabled);
+    }
+  }
+#endif
   
+#if PLAITS_BUILD_EXTENDED_TZFM
+  // Qualified separately from the stock Plaits catalog's CPU policy.
+  virtual bool linear_tzfm_capable() const { return true; }
+#endif
+
  private:
+#if defined(__clang__)
+#define SIX_OP_RENDER_ATTRIBUTES __attribute__((noinline))
+#else
+#define SIX_OP_RENDER_ATTRIBUTES __attribute__((noinline, optimize("Os")))
+#endif
+  void SIX_OP_RENDER_ATTRIBUTES RenderMonoOutput(
+      float gain,
+      float macro,
+      float* out,
+      float* aux,
+      size_t size);
+#undef SIX_OP_RENDER_ATTRIBUTES
   stmlib::HysteresisQuantizer2 patch_index_quantizer_;
   fm::Algorithms<6> algorithms_;
   fm::Patch* patches_;
+  int num_patches_;
   FMVoice voice_[kNumSixOpVoices];
   float* temp_buffer_;
   float* acc_buffer_;
+  float post_filter_;
+  float post_filter_right_;
   int active_voice_;
   int rendered_voice_;
   

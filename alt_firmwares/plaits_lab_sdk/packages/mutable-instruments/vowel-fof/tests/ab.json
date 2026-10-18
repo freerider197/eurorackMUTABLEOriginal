@@ -1,0 +1,355 @@
+{
+  "shape": "VOWEL_FOF",
+  "note": "MAPPING, read from the source and proved by measurement. RenderVowelFof passes COLOR as the outer table index and TIMBRE as the middle one; formant_f_data stores register outside vowel. The port keeps that table order and passes MORPH outside TIMBRE, so Braids TIMBRE = engine TIMBRE = Vowel, and Braids COLOR = engine MORPH = Register. The labels were corrected and the faithful DSP mapping was not moved.\n\nSTOCK POSITIONS. HARMONICS is the added breath crossfade, so its Braids position is 0.0. MACRO is the added formant tilt, neutral at 0.5. Every case holds both there.\n\nLINEAR A/B. The harness used to render the port with its 3.8x catalog gain into a 16-bit WAV, clip, and divide afterward. That operation is not reversible and created a false -1.67 dB residual plus a false parameter-space basin. ab_engine.py now renders with fixed eightfold headroom and undoes that linear scale after reading. Across these sixteen cases AC RMS is +0.01..+0.11 dB, pitch is within 0.2 cents and spectrum is 0.10..0.42 dB. Every case therefore uses the same tight limits: 0.3 dB AC RMS, 0.5 cents and 0.6 dB spectrum. The old scan has not been re-run through the corrected harness, so no claim is made outside the committed suite. Its former worst points remain here as stress coverage.\n\nHIGH FREQUENCY. The port deliberately omits Braids' 2x output averager. On stock-mid the corrected A/B reads +1.72 dB at 10-20.5 kHz and +5.66 dB at 20.5-24 kHz; those bands carry 2.3% of the energy and the overall spectrum difference is 0.15 dB.\n\nSTEREO is outside this file because render_model leaves EngineParameters::stereo false. A direct probe finds L/R -4.90..+4.01 dB at correlation 0.32..0.996 over notes 21-93 and the full grid at the MACRO detent. Off detent it reaches -8.1..+25.2 dB and correlation -0.40. Full figures are in the engine header. The triggered case does reach the port-only bank Reset path; Braids ignores strike on this shape.",
+  "cases": [
+    {
+      "id": "stock-mid",
+      "name": "Mid grid: /i/ at countertenor",
+      "seconds": 3,
+      "note": 45,
+      "braids": {
+        "p1": 0.5,
+        "p2": 0.5
+      },
+      "engine": {
+        "timbre": 0.5,
+        "harmonics": 0.0,
+        "morph": 0.5,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "vowel-a-bass",
+      "name": "TIMBRE 0, COLOR 0: /a/ at bass",
+      "seconds": 3,
+      "note": 45,
+      "braids": {
+        "p1": 0.0,
+        "p2": 0.0
+      },
+      "engine": {
+        "timbre": 0.0,
+        "harmonics": 0.0,
+        "morph": 0.0,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "vowel-u-bass",
+      "name": "TIMBRE 1, COLOR 0: /u/ at bass",
+      "seconds": 3,
+      "note": 45,
+      "braids": {
+        "p1": 1.0,
+        "p2": 0.0
+      },
+      "engine": {
+        "timbre": 1.0,
+        "harmonics": 0.0,
+        "morph": 0.0,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "u-mid-note",
+      "name": "Note 60 at the /u/ end: former clipped-harness stress point",
+      "seconds": 3,
+      "note": 60,
+      "braids": {
+        "p1": 0.875,
+        "p2": 0.0
+      },
+      "engine": {
+        "timbre": 0.875,
+        "harmonics": 0.0,
+        "morph": 0.0,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "worst-residual",
+      "name": "Note 61: former clipped-harness worst point retained as coverage",
+      "seconds": 3,
+      "note": 61,
+      "braids": {
+        "p1": 0.75,
+        "p2": 0.3125
+      },
+      "engine": {
+        "timbre": 0.75,
+        "harmonics": 0.0,
+        "morph": 0.3125,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "vowel-a-soprano",
+      "name": "TIMBRE 0, COLOR 1: /a/ at soprano",
+      "seconds": 3,
+      "note": 45,
+      "braids": {
+        "p1": 0.0,
+        "p2": 1.0
+      },
+      "engine": {
+        "timbre": 0.0,
+        "harmonics": 0.0,
+        "morph": 1.0,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "vowel-u-soprano",
+      "name": "TIMBRE 1, COLOR 1: /u/ at soprano",
+      "seconds": 3,
+      "note": 45,
+      "braids": {
+        "p1": 1.0,
+        "p2": 1.0
+      },
+      "engine": {
+        "timbre": 1.0,
+        "harmonics": 0.0,
+        "morph": 1.0,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "off-node",
+      "name": "Between grid nodes on both axes",
+      "seconds": 3,
+      "note": 45,
+      "braids": {
+        "p1": 0.375,
+        "p2": 0.625
+      },
+      "engine": {
+        "timbre": 0.375,
+        "harmonics": 0.0,
+        "morph": 0.625,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "vowel-sweep",
+      "name": "TIMBRE swept end to end at a fixed register",
+      "seconds": 4,
+      "note": 45,
+      "braids": {
+        "p1": [
+          0.0,
+          1.0
+        ],
+        "p2": 0.5
+      },
+      "engine": {
+        "timbre": [
+          0.0,
+          1.0
+        ],
+        "harmonics": 0.0,
+        "morph": 0.5,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "register-sweep",
+      "name": "COLOR swept end to end at a fixed vowel",
+      "seconds": 4,
+      "note": 45,
+      "braids": {
+        "p1": 0.5,
+        "p2": [
+          0.0,
+          1.0
+        ]
+      },
+      "engine": {
+        "timbre": 0.5,
+        "harmonics": 0.0,
+        "morph": [
+          0.0,
+          1.0
+        ],
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "low-note",
+      "name": "Two octaves down, dense excitation",
+      "seconds": 3,
+      "note": 33,
+      "braids": {
+        "p1": 0.75,
+        "p2": 0.25
+      },
+      "engine": {
+        "timbre": 0.75,
+        "harmonics": 0.0,
+        "morph": 0.25,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "high-note",
+      "name": "Three octaves up, sparse excitation",
+      "seconds": 2,
+      "note": 81,
+      "braids": {
+        "p1": 0.25,
+        "p2": 0.75
+      },
+      "engine": {
+        "timbre": 0.25,
+        "harmonics": 0.0,
+        "morph": 0.75,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "very-low-note",
+      "name": "Note 21: densest excitation, deepest clipping",
+      "seconds": 3,
+      "note": 21,
+      "braids": {
+        "p1": 0.5,
+        "p2": 0.5
+      },
+      "engine": {
+        "timbre": 0.5,
+        "harmonics": 0.0,
+        "morph": 0.5,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "very-high-note",
+      "name": "Note 93: sparsest excitation",
+      "seconds": 2,
+      "note": 93,
+      "braids": {
+        "p1": 0.5,
+        "p2": 0.5
+      },
+      "engine": {
+        "timbre": 0.5,
+        "harmonics": 0.0,
+        "morph": 0.5,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "triggered",
+      "name": "TRIG at 8 Hz: the port re-inits the bank, Braids ignores strike",
+      "seconds": 4,
+      "note": 45,
+      "triggerHz": 8.0,
+      "braids": {
+        "p1": 0.5,
+        "p2": 0.5
+      },
+      "engine": {
+        "timbre": 0.5,
+        "harmonics": 0.0,
+        "morph": 0.5,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    },
+    {
+      "id": "vowel-e-tenor",
+      "name": "Interior grid node the corners miss: /e/ at tenor",
+      "seconds": 3,
+      "note": 45,
+      "braids": {
+        "p1": 0.25,
+        "p2": 0.25
+      },
+      "engine": {
+        "timbre": 0.25,
+        "harmonics": 0.0,
+        "morph": 0.25,
+        "macro": 0.5
+      },
+      "tolerance": {
+        "acRmsDb": 0.3,
+        "cents": 0.5,
+        "spectrumDb": 0.6
+      }
+    }
+  ]
+}

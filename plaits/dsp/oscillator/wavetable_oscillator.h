@@ -30,6 +30,7 @@
 #define PLAITS_DSP_OSCILLATOR_WAVETABLE_OSCILLATOR_H_
 
 #include <algorithm>
+#include "plaits/dsp/extended_tzfm.h"
 
 #include "stmlib/dsp/dsp.h"
 #include "stmlib/dsp/parameter_interpolator.h"
@@ -49,9 +50,24 @@ class Differentiator {
   }
   
   float Process(float coefficient, float s) {
-    ONE_POLE(lp_, s - previous_, coefficient);
-    previous_ = s;
-    return lp_;
+    return Process(coefficient, s, &lp_, &previous_);
+  }
+
+  // The same, on state the caller holds in locals for a loop (as members, the
+  // state was reloaded and stored around every store to the output buffer).
+  static inline float Process(
+      float coefficient, float s, float* lp, float* previous) {
+    ONE_POLE(*lp, s - *previous, coefficient);
+    *previous = s;
+    return *lp;
+  }
+  inline void state(float* lp, float* previous) const {
+    *lp = lp_;
+    *previous = previous_;
+  }
+  inline void set_state(float lp, float previous) {
+    lp_ = lp;
+    previous_ = previous;
   }
  private:
   float lp_;
@@ -114,7 +130,9 @@ class WavetableOscillator {
       float waveform,
       const int16_t* const* wavetable,
       float* out,
-      size_t size) {
+      size_t size,
+      const float* root_frequency_offset = NULL,
+      float frequency_offset_scale = 0.0f) {
     CONSTRAIN(frequency, 0.0000001f, kMaxFrequency)
 
     if (attenuate_high_frequencies) {
@@ -124,27 +142,38 @@ class WavetableOscillator {
       amplitude *= 1.0f / (frequency * 131072.0f);
     }
 
+    // One shared 1 / size: initialised with a size, each interpolator
+    // divides by it (14 cycles on the M4). The reciprocal differs from the
+    // division by at most an ulp.
+    const float step = 1.0f / static_cast<float>(size);
     stmlib::ParameterInterpolator frequency_modulation(
         &frequency_,
         frequency,
-        size);
+        step);
     stmlib::ParameterInterpolator amplitude_modulation(
         &amplitude_,
         amplitude,
-        size);
+        step);
     stmlib::ParameterInterpolator waveform_modulation(
         &waveform_,
         waveform * float(num_waves - 1.0001f),
-        size);
+        step);
     
     float lp = lp_;
     float phase = phase_;
+    float differentiator_lp, differentiator_previous;
+    differentiator_.state(&differentiator_lp, &differentiator_previous);
     while (size--) {
-      const float f0 = frequency_modulation.Next();
-      const float cutoff = std::min(float(wavetable_size) * f0, 1.0f);
-      const float scale = approximate_scale ? 1.0f : 1.0f / (f0 * 131072.0f);
+      float f0 = frequency_modulation.Next();
+      if (root_frequency_offset) {
+        f0 += *root_frequency_offset++ * frequency_offset_scale;
+        CONSTRAIN(f0, PLAITS_BUILD_EXTENDED_TZFM ? -kMaxFrequency : 0.0000001f, kMaxFrequency);
+      }
+      const float cutoff = std::min(float(wavetable_size) * (PLAITS_BUILD_EXTENDED_TZFM ? fabsf(f0) : f0), 1.0f);
+      const float scale = approximate_scale ? 1.0f : 1.0f / ((PLAITS_BUILD_EXTENDED_TZFM ? std::max(fabsf(f0), 1.0e-7f) : f0) * 131072.0f);
       
       phase += f0;
+      if (PLAITS_BUILD_EXTENDED_TZFM && phase < 0.0f) phase += 1.0f;
       if (phase >= 1.0f) {
         phase -= 1.0f;
       }
@@ -160,12 +189,36 @@ class WavetableOscillator {
       const float x1 = InterpolateWave(
           wavetable[waveform_integral + 1], p_integral, p_fractional);
       
-      const float s = differentiator_.Process(
+      float s;
+#if PLAITS_BUILD_EXTENDED_TZFM
+      if (root_frequency_offset) {
+        // Average the derivative of the integrated table over the traversed
+        // phase interval. This retains its box-filter anti-aliasing in either
+        // direction. Near zero use a fixed spatial derivative, avoiding both
+        // cancellation and division by zero without flipping output polarity.
+        const float epsilon = std::max(fabsf(f0) * 0.5f, 1.0f / 65536.0f);
+        const float center = phase - f0 * 0.5f;
+        const float pa = TzfmWrap(center - epsilon) * wavetable_size;
+        const float pb = TzfmWrap(center + epsilon) * wavetable_size;
+        const int ia = int(pa), ib = int(pb);
+        const float d0 = InterpolateWave(wavetable[waveform_integral], ib, pb - ib) -
+            InterpolateWave(wavetable[waveform_integral], ia, pa - ia);
+        const float d1 = InterpolateWave(wavetable[waveform_integral + 1], ib, pb - ib) -
+            InterpolateWave(wavetable[waveform_integral + 1], ia, pa - ia);
+        s = (d0 + (d1 - d0) * waveform_fractional) / (2.0f * epsilon);
+        s *= approximate_scale ? frequency : 1.0f / 131072.0f;
+        lp = s;
+      } else
+#endif
+      s = Differentiator::Process(
           cutoff,
-          (x0 + (x1 - x0) * waveform_fractional) * scale);
+          (x0 + (x1 - x0) * waveform_fractional) * scale,
+          &differentiator_lp,
+          &differentiator_previous);
       ONE_POLE(lp, s, cutoff);
       *out++ += amplitude_modulation.Next() * lp;
     }
+    differentiator_.set_state(differentiator_lp, differentiator_previous);
     lp_ = lp;
     phase_ = phase;
   }

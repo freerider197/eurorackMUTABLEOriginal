@@ -72,6 +72,7 @@ class AnalogSnareDrum {
       float tone,
       float decay,
       float snappy,
+      float mode_spread,
       float* out,
       size_t size) {
     const float decay_xt = decay * (1.0f + decay * (decay - 1.0f));
@@ -102,7 +103,8 @@ class AnalogSnareDrum {
     float gain[kNumModes];
     
     for (int i = 0; i < kNumModes; ++i) {
-      f[i] = std::min(f0 * kModeFrequencies[i], 0.499f);
+      const float ratio = 1.0f + (kModeFrequencies[i] - 1.0f) * mode_spread;
+      f[i] = std::min(f0 * ratio, 0.499f);
       resonator_[i].set_f_q<stmlib::FREQUENCY_FAST>(
           f[i],
           1.0f + f[i] * (i == 0 ? q : q * 0.25f));
@@ -154,14 +156,25 @@ class AnalogSnareDrum {
       ONE_POLE(pulse_lp_, pulse, 0.75f);
       
       float shell = 0.0f;
-      for (int i = 0; i < kNumModes; ++i) {
-        float excitation = i == 0
-            ? (pulse - pulse_lp_) + 0.006f * pulse
-            : 0.026f * pulse;
-        shell += gain[i] * (sustain
-            ? oscillator_[i].Next(f[i]) * sustain_gain_value * 0.25f
-            : resonator_[i].Process<stmlib::FILTER_MODE_BAND_PASS>(
-                  excitation) + excitation * exciter_leak);
+      // Sustain is constant for the whole block. Keeping this branch outside
+      // the five-mode loop avoids testing it five times per sample, and also
+      // avoids constructing an excitation the free-running oscillators never
+      // consume.
+      if (sustain) {
+        for (int i = 0; i < kNumModes; ++i) {
+          const float mode =
+              oscillator_[i].Next(f[i]) * sustain_gain_value * 0.25f;
+          shell += gain[i] * mode;
+        }
+      } else {
+        for (int i = 0; i < kNumModes; ++i) {
+          float excitation = i == 0
+              ? (pulse - pulse_lp_) + 0.006f * pulse
+              : 0.026f * pulse;
+          shell += gain[i] *
+              (resonator_[i].Process<stmlib::FILTER_MODE_BAND_PASS>(
+                    excitation) + excitation * exciter_leak);
+        }
       }
       shell = stmlib::SoftClip(shell);
       

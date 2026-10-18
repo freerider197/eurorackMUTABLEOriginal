@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "sdk": "plaits-engine-cpp-v1",
+  "packageType": "builtin-reference",
+  "id": "mutable-instruments/z-filter",
+  "catalogId": "z-filter",
+  "version": "1.0.0",
+  "name": "Z Filter",
+  "author": "Emilie Gillet",
+  "origin": "Mutable Instruments",
+  "license": "MIT",
+  "description": "Braids' four filter models in one slot: a windowed resonator burst rung against a polarity-flipped pulse train and its integral.",
+  "family": "Subtractive",
+  "tags": ["braids", "filter", "resonator", "subtractive"],
+  "controls": [
+    { "id": "harmonics", "label": "Model", "description": "Selects the lowpass, peaking, bandpass, and highpass filter models." },
+    { "id": "timbre", "label": "Cutoff", "description": "Sweeps the filter cutoff from below the note to ten octaves above it." },
+    { "id": "morph", "label": "Shape", "description": "Morphs the filter excitation from saw through square at noon to triangle." },
+    { "id": "macro", "label": "Bend", "description": "Bends the burst envelope from the flat stock ramp toward a sharp percussive attack." }
+  ],
+  "outputs": {
+    "main": "The filter model HARMONICS selects.",
+    "aux": "Its complement, so LP pairs with HP and PK with BP. The stereo toggle does not change this fixed model pair."
+  },
+  "trigger": "Restarts the excitation phases and integral without clearing the resonator state.",
+  "source": {
+    "root": "../../../../..",
+    "header": "plaits/dsp/engine2/z_filter_engine.h",
+    "files": ["plaits/dsp/engine2/z_filter_engine.cc"],
+    "className": "ZFilterEngine"
+  },
+  "postProcessing": { "alreadyEnveloped": false, "outGain": 0.8, "auxGain": 0.8 },
+  "scenarios": "tests/scenarios.json",
+  "upstream": "Braids DigitalOscillator::RenderDigitalFilter (ZLPF, ZPKF, ZBPF, ZHPF)"
+}

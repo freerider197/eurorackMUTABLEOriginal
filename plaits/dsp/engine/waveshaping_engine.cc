@@ -33,8 +33,16 @@
 #include "stmlib/dsp/parameter_interpolator.h"
 #include "stmlib/utils/dsp.h"
 
+#include "plaits/build_config.h"
 #include "plaits/dsp/oscillator/sine_oscillator.h"
 #include "plaits/resources.h"
+#include "plaits/build_config.h"
+
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+#define PLAITS_HARD_SYNC_EVENTS(parameters) ((parameters).hard_sync)
+#else
+#define PLAITS_HARD_SYNC_EVENTS(parameters) 0u
+#endif
 
 namespace plaits {
 
@@ -73,8 +81,17 @@ void WaveshapingEngine::Render(
   const float pw = parameters.morph * 0.45f + 0.5f;
   
   // Start from bandlimited slope signal.
-  slope_.Render<OSCILLATOR_SHAPE_SLOPE>(f0, pw, out, size);
-  triangle_.Render<OSCILLATOR_SHAPE_SLOPE>(f0, 0.5f, aux, size);
+  const uint32_t hard_sync = PLAITS_HARD_SYNC_EVENTS(parameters);
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  slope_.RenderLinearFm<OSCILLATOR_SHAPE_SLOPE>(
+      f0, pw, parameters.frequency_offset, out, size, hard_sync);
+  triangle_.RenderLinearFm<OSCILLATOR_SHAPE_SLOPE>(
+      f0, 0.5f, parameters.frequency_offset, aux, size, hard_sync);
+#else
+  slope_.Render<OSCILLATOR_SHAPE_SLOPE>(f0, pw, out, size, hard_sync);
+  triangle_.Render<OSCILLATOR_SHAPE_SLOPE>(
+      f0, 0.5f, aux, size, hard_sync);
+#endif
 
   // Try to estimate how rich the spectrum is, and reduce the range of the
   // waveshaping control accordingly.
@@ -97,11 +114,21 @@ void WaveshapingEngine::Render(
       0.03f + 0.46f * wavefolder_gain * wavefolder_gain_attenuation,
       size);
   const float overtone_gain = parameters.timbre * (2.0f - parameters.timbre);
+  const float symmetry = ApplyMacro(
+      0.0f, -0.22f, 0.22f, parameters.macro);
   ParameterInterpolator overtone_gain_modulation(
       &previous_overtone_gain_,
       overtone_gain * (2.0f - overtone_gain),
       size);
-  
+
+  // In stereo the two wavefolder tables are genuinely different shapings of
+  // the same drive index, so they are panned apart instead of blended into a
+  // single AUX. fold leans left (0.25), fold_2 leans right (0.75); both tables
+  // reach both channels (equal-power), so a mono sum keeps them in phase.
+  float fold_left, fold_right, fold_2_left, fold_2_right;
+  StereoPanGains(0.25f, &fold_left, &fold_right);
+  StereoPanGains(0.75f, &fold_2_left, &fold_2_right);
+
   for (size_t i = 0; i < size; ++i) {
     float shape = shape_modulation.Next() * 3.9999f;
     MAKE_INTEGRAL_FRACTIONAL(shape);
@@ -122,16 +149,24 @@ void WaveshapingEngine::Render(
     float y = y0 + (y1 - y0) * ws_index_fractional;
     
     float mix = x + (y - x) * shape_fractional;
-    float index = mix * wf_gain_modulation.Next() + 0.5f;
+    float index = (mix + symmetry) * wf_gain_modulation.Next() + 0.5f;
+    CONSTRAIN(index, 0.0f, 1.0f);
     float fold = InterpolateHermite(
         lut_fold + 1, index, 512.0f);
     float fold_2 = -InterpolateHermite(
         lut_fold_2 + 1, index, 512.0f);
-    
-    float sine = Sine(aux[i] * 0.25f + 0.5f);
-    out[i] = fold;
-    aux[i] = sine + (fold_2 - sine) * overtone_gain_modulation.Next();
+
+    if ((PLAITS_STEREO_WAVESHAPING && parameters.stereo)) {
+      out[i] = fold * fold_left + fold_2 * fold_2_left;
+      aux[i] = fold * fold_right + fold_2 * fold_2_right;
+    } else {
+      float sine = Sine(aux[i] * 0.25f + 0.5f);
+      out[i] = fold;
+      aux[i] = sine + (fold_2 - sine) * overtone_gain_modulation.Next();
+    }
   }
 }
 
 }  // namespace plaits
+
+#undef PLAITS_HARD_SYNC_EVENTS

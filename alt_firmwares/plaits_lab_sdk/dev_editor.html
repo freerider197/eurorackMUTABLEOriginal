@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plaits Lab — local audition</title>
+<style>
+  :root { --bg:#FBF6EC; --card:#FFFCF5; --ink:#1A1410; --muted:#5C4F44; --subtle:#8B7B6E; --accent:#DC4A2C; --border:#E8D9C0; --scope:#171918; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:26px 20px 60px; }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:6px; }
+  h1 { margin:0; font-size:19px; font-weight:600; letter-spacing:-.01em; }
+  .sub { color:var(--subtle); font-size:12px; }
+  .pill { font-size:11px; font-weight:600; padding:4px 11px; border-radius:999px; border:1px solid var(--border); color:var(--subtle); }
+  .pill.on { color:#2f7d52; border-color:#a9d5bd; background:#eef7f1; }
+  .pill.off { color:var(--accent); border-color:#e7bbb0; background:#fbeeea; }
+  .card { margin-top:16px; padding:18px; border:1px solid var(--border); border-radius:14px; background:var(--card); }
+  .summary { display:flex; flex-wrap:wrap; gap:8px 26px; font-size:12px; }
+  .summary b { display:block; color:var(--subtle); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.05em; }
+  code { font-family:"SF Mono",ui-monospace,monospace; font-size:12px; }
+  .controls { display:grid; gap:14px; margin-top:4px; }
+  .controls label { display:grid; gap:5px; }
+  .controls .row { display:flex; justify-content:space-between; align-items:baseline; }
+  .controls .row strong { font-weight:600; }
+  .controls .row output { font-variant-numeric:tabular-nums; color:var(--muted); }
+  .controls small { color:var(--subtle); font-size:11px; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  .randomizer-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:12px; }
+  .randomizer-head h2 { margin:0; font-size:15px; font-weight:600; }
+  .randomizer-head .pill { padding:2px 9px; }
+  .randomizer-copy { margin:0 0 14px; color:var(--muted); font-size:12px; }
+  .randomizer-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px 22px; }
+  .randomizer-grid label { display:grid; gap:5px; }
+  .randomizer-grid .row { display:flex; justify-content:space-between; align-items:baseline; }
+  .randomizer-grid output { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .randomizer-grid small { color:var(--subtle); font-size:11px; }
+  @media (max-width:560px) { .randomizer-grid { grid-template-columns:1fr; } }
+  .actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:16px; }
+  button { border:1px solid var(--border); border-radius:9px; padding:9px 15px; background:var(--card); color:var(--ink); font-size:13px; font-weight:600; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#FFF8F0; }
+  button.primary:hover:not(:disabled) { background:#c13e22; color:#FFF8F0; }
+  button:disabled { opacity:.5; cursor:default; }
+  button kbd { margin-left:5px; padding:1px 5px; border:1px solid currentColor; border-radius:4px; font:10px/1.4 "SF Mono",ui-monospace,monospace; opacity:.65; }
+  .actions label { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+  #live-actions .sub { color:var(--subtle); font-size:12px; flex-basis:100%; }
+  #live-status.err { color:var(--accent); }
+  select { border:1px solid var(--border); border-radius:8px; padding:6px 8px; background:var(--card); font-size:12px; }
+  .scope-tabs { display:inline-flex; gap:4px; margin-bottom:8px; }
+  .scope-tabs button { padding:5px 12px; font-size:11px; }
+  .scope-tabs button.active { border-color:var(--accent); color:var(--accent); }
+  canvas { width:100%; height:180px; border-radius:10px; display:block; background:var(--scope); }
+  audio { width:100%; margin-top:12px; }
+  .audio-label { display:block; margin-top:12px; color:var(--subtle); font-size:11px; }
+  .notice { margin-top:14px; color:var(--muted); font-size:12px; min-height:18px; white-space:pre-wrap; }
+  .notice.err { color:var(--accent); font-family:ui-monospace,"SF Mono",monospace; font-size:11px; max-height:170px; overflow:auto; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>Plaits Lab — local audition</h1><div class="sub">Served by <code>plaits-lab dev</code> on this machine</div></div>
+    <span id="pill" class="pill">Connecting…</span>
+  </header>
+
+  <div id="offline" class="card">
+    <div class="notice" id="offline-notice">Reaching the local server…</div>
+  </div>
+
+  <div id="bench" class="hidden">
+    <div class="card">
+      <div class="summary">
+        <div><b>Package</b><code id="pkg-id">—</code></div>
+        <div><b>Digest</b><code id="pkg-digest">—</code></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="controls" id="controls"></div>
+      <div class="actions hidden" id="live-actions">
+        <button class="primary" id="live-toggle">▶ Live audition</button>
+        <button id="live-strike" title="Strike (Space)" aria-keyshortcuts="Space">Strike <kbd>Space</kbd></button>
+        <label>Envelope <select id="live-env"><option value="0">Sustained</option><option value="1">Plucked</option></select></label>
+        <label>Monitor <select id="live-monitor"><option value="main">Main only</option><option value="aux">Aux only</option><option value="mainaux">Main + Aux (L/R)</option><option value="stereo" id="monitor-stereo-opt" disabled>Stereo (start audition to detect)</option></select></label>
+        <button id="live-reload">Reload edits</button>
+        <span class="sub" id="live-status">Real time — tweak any control and hear it change.</span>
+      </div>
+      <div class="actions" id="offline-actions">
+        <button class="primary" id="render">Render preview</button>
+        <button id="recheck">Recheck source</button>
+        <label><input type="checkbox" id="trigger" /> Triggered</label>
+        <label>A/B against <select id="ab"><option value="">None</option></select></label>
+      </div>
+    </div>
+    <div class="card hidden" id="randomizer-card">
+      <div class="randomizer-head">
+        <h2>Unpatched attenuverters</h2>
+        <span class="pill" id="randomizer-profile">Firmware Drift audition</span>
+      </div>
+      <p class="randomizer-copy">Assumes the TIMBRE and MORPH CV inputs are unpatched. A small zone around noon is completely off. Both directions remain bipolar: CCW selects restrained movement close to the knob setting, while CW selects broader, farther-reaching movement. Moving farther increases both excursion and speed through the parameter profile shown below.</p>
+      <div class="randomizer-grid">
+        <label>
+          <span class="row"><strong>TIMBRE</strong><output id="randomizer-timbre-value">Off</output></span>
+          <input id="randomizer-timbre" type="range" min="-1" max="1" step="0.01" value="0" />
+          <small><span id="randomizer-timbre-profile">Profile</span> · Engine now <output id="randomizer-timbre-active">—</output></small>
+        </label>
+        <label>
+          <span class="row"><strong>MORPH</strong><output id="randomizer-morph-value">Off</output></span>
+          <input id="randomizer-morph" type="range" min="-1" max="1" step="0.01" value="0" />
+          <small><span id="randomizer-morph-profile">Profile</span> · Engine now <output id="randomizer-morph-active">—</output></small>
+        </label>
+      </div>
+    </div>
+    <div class="card">
+      <div class="scope-tabs">
+        <button id="tab-scope" class="active">Scope</button>
+        <button id="tab-spectrum">Spectrum</button>
+      </div>
+      <canvas id="scope" width="720" height="180"></canvas>
+      <div id="preview-wrap" class="hidden"><span class="audio-label">Your package</span><audio id="preview" controls></audio></div>
+      <div id="reference-wrap" class="hidden"><span class="audio-label" id="reference-label">Reference</span><audio id="reference" controls></audio></div>
+      <div class="notice" id="notice"></div>
+    </div>
+  </div>
+</main>
+<script>
+const CONTROL_IDS = ['harmonics', 'timbre', 'morph', 'macro'];
+const RANDOMIZER_DEAD_ZONE = 0.07;
+const state = {
+  controls: { harmonics: 0.5, timbre: 0.5, morph: 0.5, macro: 0.5 },
+  note: 48,
+  triggerHz: 0,
+  scope: 'scope',
+  comparison: '',
+  pkg: null,
+  randomizers: {
+    timbre: 0,
+    morph: 0,
+  },
+};
+const $ = (id) => document.getElementById(id);
+
+function setPill(text, kind) { const p = $('pill'); p.textContent = text; p.className = 'pill' + (kind ? ' ' + kind : ''); }
+function notice(text, isErr) { const n = $('notice'); n.textContent = text || ''; n.className = 'notice' + (isErr ? ' err' : ''); }
+
+function randomizerLabel(value) {
+  const magnitude = Math.abs(value);
+  if (magnitude <= RANDOMIZER_DEAD_ZONE) return 'Off';
+  const position = (magnitude - RANDOMIZER_DEAD_ZONE) /
+    (1 - RANDOMIZER_DEAD_ZONE);
+  const intensity = position * position;
+  return `${value < 0 ? 'Near' : 'Far'} ${Math.max(1, Math.round(intensity * 100))}%`;
+}
+
+function updateRandomizerReadout(id) {
+  $(`randomizer-${id}-value`).textContent = randomizerLabel(state.randomizers[id]);
+}
+
+function drawAudio(buffer, spectrum) {
+  const canvas = $('scope');
+  const view = new DataView(buffer);
+  const samples = Math.max(0, (buffer.byteLength - 44) / 4);
+  const values = Array.from({ length: Math.min(samples, 2048) }, (_, i) => view.getInt16(44 + i * 4, true) / 32768);
+  const ctx = canvas.getContext('2d');
+  if (!ctx || !values.length) return;
+  const { width, height } = canvas;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#171918'; ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = spectrum ? '#f0bd45' : '#78a98b';
+  ctx.lineWidth = 2; ctx.beginPath();
+  if (!spectrum) {
+    values.forEach((v, i) => { const x = i / (values.length - 1) * width; const y = height * (0.5 - v * 0.42); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  } else {
+    const bins = 72;
+    for (let bin = 1; bin <= bins; bin += 1) {
+      let re = 0, im = 0; const step = Math.max(1, Math.floor(values.length / 512));
+      for (let i = 0; i < values.length; i += step) { const a = 2 * Math.PI * bin * i / values.length; re += values[i] * Math.cos(a); im -= values[i] * Math.sin(a); }
+      const mag = Math.min(1, Math.hypot(re, im) / 40); const x = bin / bins * width; const y = height - mag * height * 0.9;
+      bin === 1 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+}
+
+function renderControls() {
+  const wrap = $('controls');
+  wrap.innerHTML = '';
+  const labels = {};
+  (state.pkg.manifest.controls || []).forEach((c) => { labels[c.id] = c; });
+  CONTROL_IDS.forEach((id) => {
+    const meta = labels[id] || { label: id, description: '' };
+    const label = document.createElement('label');
+    label.innerHTML = `<span class="row"><strong>${meta.label}</strong><output>${state.controls[id].toFixed(2)}</output></span>`
+      + `<input type="range" min="0" max="1" step="0.01" value="${state.controls[id]}" />`
+      + (meta.description ? `<small>${meta.description}</small>` : '');
+    const input = label.querySelector('input');
+    const out = label.querySelector('output');
+    input.addEventListener('input', () => { state.controls[id] = Number(input.value); out.textContent = state.controls[id].toFixed(2); pushLiveParams(); });
+    wrap.appendChild(label);
+  });
+  const pitch = document.createElement('label');
+  pitch.innerHTML = `<span class="row"><strong>Pitch</strong><output>${state.note}</output></span><input type="range" min="12" max="108" value="${state.note}" />`;
+  const pinput = pitch.querySelector('input'), pout = pitch.querySelector('output');
+  pinput.addEventListener('input', () => { state.note = Number(pinput.value); pout.textContent = state.note; pushLiveParams(); });
+  wrap.appendChild(pitch);
+}
+
+async function refreshPackage() {
+  try {
+    const response = await fetch('/v1/package', { cache: 'no-store' });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error || 'Local validation failed');
+    state.pkg = value;
+    $('pkg-id').textContent = `${value.manifest.id}@${value.manifest.version}`;
+    $('pkg-digest').textContent = (value.digest || '').slice(0, 22) + '…';
+    const profile = value.randomizerProfile || {};
+    const profileStatus = profile.status || 'fallback';
+    $('randomizer-profile').textContent = profileStatus === 'tuned'
+      ? 'Tuned profile' : (profileStatus === 'seeded' ? 'Seed profile' : 'Fallback profile');
+    for (const parameter of ['timbre', 'morph']) {
+      const parameterProfile = profile[parameter] || {};
+      const archetype = (parameterProfile.archetype || 'fallback').replaceAll('-', ' ');
+      $(`randomizer-${parameter}-profile`).textContent = archetype;
+    }
+    renderControls();
+    $('offline').classList.add('hidden');
+    $('bench').classList.remove('hidden');
+    setPill('Connected', 'on');
+    // Live audition is the primary path when the wasm build is available; the
+    // render-and-listen controls only appear as the fallback (no emcc).
+    $('live-actions').classList.toggle('hidden', !value.live);
+    $('randomizer-card').classList.toggle('hidden', !value.live);
+    $('offline-actions').classList.toggle('hidden', !!value.live);
+    if (value.live) {
+      $('preview-wrap').classList.add('hidden');
+      $('reference-wrap').classList.add('hidden');
+    }
+    if (!value.live) {
+      stopLive();
+    } else if (value.recompiled && audio.running) {
+      // New source was compiled to a fresh .wasm; reload it into the live engine.
+      await startLive();
+    }
+    if (value.live) {
+      // Clear any prior "build failed" status once a refresh succeeds. (A recompile
+      // resets it via startLive; a no-op refresh — e.g. re-saving identical source —
+      // still needs the stale error cleared.)
+      if (audio.running && !value.recompiled) liveStatus('Live — source is up to date.');
+      notice(value.recompiled ? 'Source recompiled — reloaded into the live engine.'
+        : (audio.running ? 'Live audition running. Tweak any control to hear it change.'
+          : 'Connected. Press Live audition, then tweak any control to hear it change.'));
+    } else {
+      notice(value.recompiled ? 'Source changed and recompiled successfully.'
+        : 'Connected and ready. Move a control and render. (Install emcc for real-time live audition.)');
+    }
+  } catch (error) {
+    const msg = error.message || String(error);
+    if (audio.running) {
+      // A failed recompile (usually a source error) never touches the running
+      // engine — the last good build keeps playing. Surface the compiler message
+      // instead of tearing audio down; a good Reload edits clears it.
+      setPill('Build failed', 'off');
+      liveStatus('Edit didn’t compile — still playing the last good build. Fix it and press Reload edits.', true);
+      notice(msg, true);
+    } else {
+      setPill('Offline', 'off');
+      $('offline-notice').textContent = 'Could not reach or validate the package: ' + msg;
+    }
+  }
+}
+
+async function loadCatalog() {
+  try {
+    const response = await fetch('/v1/catalog', { cache: 'no-store' });
+    if (!response.ok) return;
+    const value = await response.json();
+    const select = $('ab');
+    (value.engines || []).forEach((engine) => {
+      const option = document.createElement('option');
+      option.value = engine.id; option.textContent = engine.name;
+      select.appendChild(option);
+    });
+  } catch { /* A/B stays None-only */ }
+}
+
+function requestBody() {
+  return JSON.stringify({
+    durationSeconds: 2,
+    note: state.note,
+    triggerHz: state.triggerHz,
+    controls: Object.fromEntries(CONTROL_IDS.map((id) => [id, [state.controls[id], state.controls[id]]])),
+  });
+}
+
+async function renderPreview() {
+  const button = $('render');
+  button.disabled = true; button.textContent = 'Rendering…';
+  notice('Rendering with the current source and controls…');
+  try {
+    const body = requestBody();
+    const response = await fetch('/v1/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    if (!response.ok) { const v = await response.json(); throw new Error(v.error || 'Preview render failed'); }
+    const data = await response.arrayBuffer();
+    const url = URL.createObjectURL(new Blob([data], { type: 'audio/wav' }));
+    const preview = $('preview'); preview.src = url; $('preview-wrap').classList.remove('hidden'); preview.play().catch(() => {});
+    drawAudio(data, state.scope === 'spectrum');
+    if (state.comparison) {
+      const rr = await fetch(`/v1/reference/${state.comparison}/render`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      if (rr.ok) {
+        const rdata = await rr.arrayBuffer();
+        const rurl = URL.createObjectURL(new Blob([rdata], { type: 'audio/wav' }));
+        $('reference').src = rurl;
+        $('reference-label').textContent = ($('ab').selectedOptions[0]?.textContent || 'Reference') + ' reference';
+        $('reference-wrap').classList.remove('hidden');
+      }
+    } else {
+      $('reference-wrap').classList.add('hidden');
+    }
+    notice(response.headers.get('X-Plaits-Recompiled') === 'true' ? 'Source changed, recompiled, and rendered.' : 'Rendered from the current controls.');
+  } catch (error) {
+    notice(error.message || 'Preview render failed.', true);
+  } finally {
+    button.disabled = false; button.textContent = 'Render preview';
+  }
+}
+
+$('render').addEventListener('click', renderPreview);
+$('recheck').addEventListener('click', refreshPackage);
+$('trigger').addEventListener('change', (e) => { state.triggerHz = e.target.checked ? 4 : 0; });
+$('ab').addEventListener('change', (e) => { state.comparison = e.target.value; });
+$('tab-scope').addEventListener('click', () => { state.scope = 'scope'; $('tab-scope').classList.add('active'); $('tab-spectrum').classList.remove('active'); });
+$('tab-spectrum').addEventListener('click', () => { state.scope = 'spectrum'; $('tab-spectrum').classList.add('active'); $('tab-scope').classList.remove('active'); });
+for (const id of ['timbre', 'morph']) {
+  $(`randomizer-${id}`).addEventListener('input', async (event) => {
+    state.randomizers[id] = Number(event.target.value);
+    updateRandomizerReadout(id);
+    if (await ensureLive()) {
+      postRandomizerAmounts();
+      liveStatus('Continuous random voltages running — no trigger or clock involved.');
+    }
+  });
+}
+
+// ---- Live audition (WebAssembly + AudioWorklet) ----------------------------
+const audio = { ctx: null, node: null, gain: null, analyser: null, running: false, starting: null, moduleAdded: false, raf: 0 };
+
+function liveParamsMsg() {
+  return { type: 'params', note: state.note, harmonics: state.controls.harmonics, timbre: state.controls.timbre, morph: state.controls.morph, macro: state.controls.macro };
+}
+function pushLiveParams() { if (audio.running && audio.node) audio.node.port.postMessage(liveParamsMsg()); }
+function liveStatus(text, isErr) { const s = $('live-status'); s.textContent = text || ''; s.classList.toggle('err', !!isErr); }
+function postRandomizerAmounts() {
+  if (!(audio.running && audio.node)) return;
+  audio.node.port.postMessage({
+    type: 'randomization',
+    timbre: state.randomizers.timbre,
+    morph: state.randomizers.morph,
+  });
+}
+
+function drawLiveFrame() {
+  if (!audio.running || !audio.analyser) return;
+  const canvas = $('scope'), ctx = canvas.getContext('2d');
+  const { width, height } = canvas;
+  ctx.fillStyle = '#171918'; ctx.fillRect(0, 0, width, height);
+  if (state.scope === 'spectrum') {
+    const bins = audio.analyser.frequencyBinCount, fft = audio.analyser.fftSize;
+    const sr = audio.ctx.sampleRate, data = new Float32Array(bins);
+    audio.analyser.getFloatFrequencyData(data);
+    const fMin = 20, fMax = Math.min(sr / 2, 20000);
+    const lMin = Math.log10(fMin), lMax = Math.log10(fMax);
+    // Frequency reference gridlines on a log axis (decades: 100 Hz, 1k, 10k).
+    ctx.font = '10px ui-monospace, monospace'; ctx.textBaseline = 'bottom';
+    for (const f of [100, 1000, 10000]) {
+      const x = (Math.log10(f) - lMin) / (lMax - lMin) * width;
+      ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+      ctx.fillStyle = '#8b7b6e'; ctx.fillText(f >= 1000 ? (f / 1000) + 'k' : f + ' Hz', x + 4, height - 4);
+    }
+    // Spectrum curve, log-frequency so the fundamental region is legible.
+    ctx.strokeStyle = '#f0bd45'; ctx.lineWidth = 2; ctx.beginPath();
+    for (let x = 0; x < width; x++) {
+      const f = Math.pow(10, lMin + (x / (width - 1)) * (lMax - lMin));
+      const bin = Math.round(f * fft / sr);
+      const db = bin < bins ? data[bin] : -140;
+      const mag = Math.max(0, Math.min(1, (db + 100) / 90));
+      const y = height - mag * height * 0.95;
+      x ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  } else {
+    const n = audio.analyser.fftSize, data = new Float32Array(n);
+    audio.analyser.getFloatTimeDomainData(data);
+    // Oscilloscope trigger: lock to the first rising zero-crossing and show ~3
+    // periods, so the trace holds still and you watch the shape evolve rather
+    // than slide. Period is estimated from the next rising crossing.
+    let start = 0;
+    const half = Math.floor(n / 2);
+    for (let i = 1; i < half; i++) { if (data[i - 1] < 0 && data[i] >= 0) { start = i; break; } }
+    let next = 0;
+    for (let i = start + 8; i < n - 1; i++) { if (data[i - 1] < 0 && data[i] >= 0) { next = i; break; } }
+    const period = next > start ? next - start : 0;
+    const win = period > 0 ? Math.min(n - start, period * 3) : Math.min(n - start, half);
+    ctx.strokeStyle = '#78a98b'; ctx.lineWidth = 2; ctx.beginPath();
+    const step = Math.max(1, Math.floor(win / width)), cols = Math.floor(win / step) || 1;
+    let j = 0;
+    for (let k = 0; k < win; k += step, j++) {
+      const x = j / Math.max(cols - 1, 1) * width, y = height * (0.5 - data[start + k] * 0.45);
+      j ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+  audio.raf = requestAnimationFrame(drawLiveFrame);
+}
+
+async function startLive() {
+  try {
+    // Resume audio before fetching/compiling so the user's click or slider drag
+    // remains the gesture that unlocks playback.
+    if (!audio.ctx) audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await audio.ctx.resume();
+    const resp = await fetch('/v1/audition.wasm', { cache: 'no-store' });
+    if (!resp.ok) throw new Error('live audition unavailable — is emcc on PATH?');
+    const module = await WebAssembly.compile(await resp.arrayBuffer());
+    if (!audio.moduleAdded) { await audio.ctx.audioWorklet.addModule('/audition_worklet.js'); audio.moduleAdded = true; }
+    if (audio.node) { try { audio.node.disconnect(); } catch (e) {} }
+    const node = new AudioWorkletNode(audio.ctx, 'plaits-audition', {
+      numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
+      processorOptions: { wasmModule: module, params: liveParamsMsg(), envMode: Number($('live-env').value), stereo: monitorStereo() },
+    });
+    node.port.onmessage = (e) => {
+      if (!e.data) return;
+      if (e.data.type === 'error') liveStatus('engine error: ' + e.data.message, true);
+      else if (e.data.type === 'ready') applyStereoCapability(e.data.stereoCapable);
+      else if (e.data.type === 'modulation-state') {
+        $('randomizer-timbre-active').textContent = e.data.timbre.toFixed(2);
+        $('randomizer-morph-active').textContent = e.data.morph.toFixed(2);
+      }
+    };
+    applyMonitor();
+    node.port.postMessage({ type: 'env', value: Number($('live-env').value) });
+    if (!audio.gain) { audio.gain = audio.ctx.createGain(); audio.gain.gain.value = 0.5; audio.gain.connect(audio.ctx.destination); }
+    if (!audio.analyser) { audio.analyser = audio.ctx.createAnalyser(); audio.analyser.fftSize = 4096; }
+    node.connect(audio.gain);
+    node.connect(audio.analyser);
+    audio.node = node; audio.running = true;
+    postRandomizerAmounts();
+    $('live-toggle').textContent = '■ Stop live'; $('live-toggle').classList.add('primary');
+    liveStatus('Live — move any control to hear it change.');
+    cancelAnimationFrame(audio.raf); audio.raf = requestAnimationFrame(drawLiveFrame);
+  } catch (err) {
+    liveStatus(err.message || 'Could not start live audition', true);
+    stopLive();
+  }
+}
+async function ensureLive() {
+  if (audio.running) return true;
+  if (!audio.starting) {
+    audio.starting = startLive().finally(() => { audio.starting = null; });
+  }
+  await audio.starting;
+  return audio.running;
+}
+function stopLive() {
+  cancelAnimationFrame(audio.raf); audio.raf = 0;
+  if (audio.node) { try { audio.node.disconnect(); } catch (e) {} audio.node = null; }
+  audio.running = false;
+  $('live-toggle').textContent = '▶ Live audition'; $('live-toggle').classList.remove('primary');
+}
+$('live-toggle').addEventListener('click', () => { audio.running ? stopLive() : ensureLive(); });
+async function strikeLive() {
+  if (!audio.running) await ensureLive();   // Strike turns audition on if it isn't — the click is the gesture.
+  if (audio.running && audio.node) {
+    audio.node.port.postMessage({ type: 'trigger' });
+    liveStatus('Strike sent; the continuous random voltages keep running independently.');
+  }
+}
+$('live-strike').addEventListener('click', strikeLive);
+document.addEventListener('keydown', (event) => {
+  if (event.code !== 'Space' || event.repeat) return;
+  const target = event.target;
+  const targetUsesSpace = target && (
+    target.isContentEditable
+    || ['BUTTON', 'SELECT', 'TEXTAREA'].includes(target.tagName)
+    || (target.tagName === 'INPUT' && target.type !== 'range')
+  );
+  if (targetUsesSpace) return;
+  event.preventDefault();
+  void strikeLive();
+});
+$('live-env').addEventListener('change', (e) => { if (audio.running && audio.node) audio.node.port.postMessage({ type: 'env', value: Number(e.target.value) }); });
+$('live-reload').addEventListener('click', refreshPackage);
+
+// Monitor is one control now: 'stereo' renders in stereo (parameters.stereo) and
+// listens L/R; the others render mono and choose the routing.
+function monitorStereo() { return $('live-monitor').value === 'stereo' ? 1 : 0; }
+function monitorRoute() { const v = $('live-monitor').value; return v === 'aux' ? 1 : (v === 'main' ? 0 : 2); }
+function applyMonitor() {
+  if (!(audio.running && audio.node)) return;
+  audio.node.port.postMessage({ type: 'stereo', value: monitorStereo() });
+  audio.node.port.postMessage({ type: 'monitor', value: monitorRoute() });
+}
+$('live-monitor').addEventListener('change', applyMonitor);
+
+// The 'Stereo' monitor option is available only for an engine that renders a real
+// L/R pair; otherwise it's disabled and any stereo selection falls back to Main.
+// Capability is only known once the worklet loads the engine and reports it, so
+// until then the option says so rather than claiming the engine is mono — it read
+// as a statement of fact about the loaded engine and was believed as one.
+function applyStereoCapability(capable) {
+  const opt = $('monitor-stereo-opt');
+  opt.disabled = !capable;
+  opt.textContent = capable ? 'Stereo' : 'Stereo (mono engine)';
+  if (!capable && $('live-monitor').value === 'stereo') { $('live-monitor').value = 'main'; applyMonitor(); }
+}
+
+refreshPackage();
+loadCatalog();
+</script>
+</body>
+</html>

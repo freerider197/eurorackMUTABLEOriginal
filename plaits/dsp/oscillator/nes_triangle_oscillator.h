@@ -32,6 +32,7 @@
 #include <algorithm>
 
 #include "stmlib/dsp/dsp.h"
+#include "plaits/dsp/extended_tzfm.h"
 #include "plaits/dsp/oscillator/wavetable_oscillator.h"
 #include "stmlib/dsp/parameter_interpolator.h"
 #include "stmlib/dsp/polyblep.h"
@@ -54,7 +55,12 @@ class NESTriangleOscillator {
     frequency_ = 0.001f;
   }
   
-  inline void Render(float frequency, float* out, size_t size) {
+  inline void Render(
+      float frequency,
+      float* out,
+      size_t size,
+      const float* root_frequency_offset = NULL,
+      float frequency_offset_scale = 0.0f) {
     // Compute all constants needed to scale the waveform and its
     // discontinuities.
     const int num_steps = 1 << num_bits;
@@ -71,7 +77,35 @@ class NESTriangleOscillator {
     
     float next_sample = next_sample_;
     while (size--) {
-      const float frequency = fm.Next();
+      float frequency = fm.Next();
+      if (root_frequency_offset) {
+        frequency += *root_frequency_offset++ * frequency_offset_scale;
+        CONSTRAIN(frequency, PLAITS_BUILD_EXTENDED_TZFM ? -0.25f : 1.0e-7f, 0.25f);
+      }
+#if PLAITS_BUILD_EXTENDED_TZFM
+      if (root_frequency_offset) {
+        float fade = (fabsf(frequency) - 0.5f / num_steps_f) * 2.0f * num_steps_f;
+        CONSTRAIN(fade, 0.0f, 1.0f);
+        const float ng = 1.0f - fade, tg = fade * 2.0f / scale;
+        float now = next_sample; next_sample = 0.0f;
+        const float start = phase_, end = start + frequency;
+        for (int edge = 0; edge < num_steps; ++edge) {
+          const int previous = (edge + num_steps - 1) % num_steps;
+          const float before = previous < half ? previous : top - previous;
+          const float after = edge < half ? edge : top - edge;
+          const float boundary = float(edge) / num_steps_f;
+          TzfmEdge(start, end, boundary, boundary, (after - before) * ng,
+              0.0f, &now, &next_sample);
+        }
+        TzfmEdge(start, end, 0.0f, 0.0f, 0.0f, 4.0f * tg, &now, &next_sample);
+        TzfmEdge(start, end, 0.5f, 0.5f, 0.0f, -4.0f * tg, &now, &next_sample);
+        phase_ = TzfmWrap(end); step_ = int(phase_ * num_steps_f); ascending_ = phase_ < 0.5f;
+        next_sample += ng * float(step_ < half ? step_ : top - step_) +
+            tg * (phase_ < 0.5f ? 2.0f * phase_ : 2.0f - 2.0f * phase_);
+        *out++ = now * scale - 1.0f;
+        continue;
+      }
+#endif
       phase_ += frequency;
       
       // Compute the point at which we transition between the "full resolution"

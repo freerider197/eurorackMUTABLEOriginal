@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "sdk": "plaits-engine-cpp-v1",
+  "packageType": "builtin-reference",
+  "id": "braids-renaissance/wavetable-chord",
+  "catalogId": "wavetable-chord",
+  "version": "1.0.0",
+  "name": "Wavetable Diatonic Chord",
+  "author": "Tom Burns",
+  "origin": "Community",
+  "license": "MIT",
+  "description": "Diatonic chords over Braids Renaissance's WTCH scan, with independent voice spread and wavetable position. From Tom Burns' Braids Renaissance firmware.",
+  "family": "Polyphonic",
+  "tags": [
+    "braids",
+    "braids renaissance",
+    "chord",
+    "diatonic",
+    "polyphonic",
+    "scale",
+    "wavetable"
+  ],
+  "controls": [
+    {
+      "id": "harmonics",
+      "label": "Chord",
+      "description": "Steps through the same sixteen scale-degree chord shapes as Diatonic Chord."
+    },
+    {
+      "id": "timbre",
+      "label": "Spread",
+      "description": "Spreads the voices symmetrically, independent of the selected table position."
+    },
+    {
+      "id": "morph",
+      "label": "Wavetable",
+      "description": "Scans WTCH's 33-wave mini-wave line."
+    },
+    {
+      "id": "macro",
+      "label": "Scale",
+      "description": "Selects the scale the chord is built from, which decides its quality."
+    }
+  ],
+  "outputs": {
+    "main": "Wavetable chord; the stereo toggle does not change this fixed MAIN/AUX pair.",
+    "aux": "Root voice; the stereo toggle does not change this fixed MAIN/AUX pair."
+  },
+  "trigger": "Realigns every voice so a struck chord starts the same way each time.",
+  "source": {
+    "root": "../../../../..",
+    "header": "plaits/dsp/engine2/wavetable_chord_engine.h",
+    "files": [
+      "plaits/dsp/engine2/wavetable_chord_engine.cc",
+      "plaits/dsp/engine2/scale_voices.cc",
+      "plaits/dsp/engine2/scale_wavetable_voices.cc"
+    ],
+    "className": "WavetableChordEngine"
+  },
+  "postProcessing": {
+    "alreadyEnveloped": false,
+    "outGain": -0.65,
+    "auxGain": -0.65
+  },
+  "scenarios": "tests/scenarios.json",
+  "upstream": "Braids Renaissance WTCH / DigitalOscillator::RenderDiatonicChord (boourns/eurorack-renaissance)"
+}

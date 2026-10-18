@@ -30,6 +30,7 @@
 #define PLAITS_DSP_OSCILLATOR_Z_OSCILLATOR_H_
 
 #include <algorithm>
+#include "plaits/dsp/extended_tzfm.h"
 
 #include "stmlib/dsp/dsp.h"
 #include "stmlib/dsp/parameter_interpolator.h"
@@ -63,6 +64,91 @@ class ZOscillator {
       float mode,
       float* out,
       size_t size) {
+    RenderInternal<false>(
+        carrier_frequency,
+        formant_frequency,
+        carrier_shape,
+        mode,
+        out,
+        size,
+        0,
+        NULL);
+  }
+
+  void Render(
+      float carrier_frequency,
+      float formant_frequency,
+      float carrier_shape,
+      float mode,
+      float* out,
+      size_t size,
+      uint32_t hard_sync) {
+    if (hard_sync) {
+      RenderInternal<true>(
+          carrier_frequency,
+          formant_frequency,
+          carrier_shape,
+          mode,
+          out,
+          size,
+          hard_sync,
+          NULL);
+    } else {
+      RenderInternal<false>(
+          carrier_frequency,
+          formant_frequency,
+          carrier_shape,
+          mode,
+          out,
+          size,
+          0,
+          NULL);
+    }
+  }
+
+  void Render(
+      float carrier_frequency,
+      float formant_frequency,
+      float carrier_shape,
+      float mode,
+      float* out,
+      size_t size,
+      uint32_t hard_sync,
+      const float* carrier_frequency_offset) {
+    if (hard_sync) {
+      RenderInternal<true>(
+          carrier_frequency,
+          formant_frequency,
+          carrier_shape,
+          mode,
+          out,
+          size,
+          hard_sync,
+          carrier_frequency_offset);
+    } else {
+      RenderInternal<false>(
+          carrier_frequency,
+          formant_frequency,
+          carrier_shape,
+          mode,
+          out,
+          size,
+          0,
+          carrier_frequency_offset);
+    }
+  }
+
+ private:
+  template<bool process_hard_sync>
+  void RenderInternal(
+      float carrier_frequency,
+      float formant_frequency,
+      float carrier_shape,
+      float mode,
+      float* out,
+      size_t size,
+      uint32_t hard_sync,
+      const float* carrier_frequency_offset) {
     if (carrier_frequency >= kMaxFrequency * 0.5f) {
       carrier_frequency = kMaxFrequency * 0.5f;
     }
@@ -96,9 +182,54 @@ class ZOscillator {
       float this_sample = next_sample;
       next_sample = 0.0f;
     
-      const float f0 = carrier_frequency_modulation.Next();
-      const float f1 = formant_frequency_modulation.Next();
+      float f0 = carrier_frequency_modulation.Next();
+      float f1 = formant_frequency_modulation.Next();
+      if (carrier_frequency_offset) {
+        f0 += *carrier_frequency_offset++;
+        CONSTRAIN(f0, PLAITS_BUILD_EXTENDED_TZFM ? -kMaxFrequency * 0.5f : 1.0e-7f, kMaxFrequency * 0.5f);
+#if PLAITS_BUILD_EXTENDED_TZFM
+        if (f0 < 0.0f) f1 = -f1;
+#endif
+      }
+
+      if (process_hard_sync) {
+        if (hard_sync & 1) {
+          carrier_phase_ = 0.0f;
+          discontinuity_phase_ = 0.0f;
+          formant_phase_ = 0.0f;
+        }
+        hard_sync >>= 1;
+      }
     
+#if PLAITS_BUILD_EXTENDED_TZFM
+      if (carrier_frequency_offset && f0 < 0.0f) {
+        discontinuity_phase_ += 2.0f * f0;
+        carrier_phase_ += f0;
+        if (discontinuity_phase_ < 0.0f) {
+          reset_time = discontinuity_phase_ / (2.0f * f0);
+          const float before_c = carrier_phase_ < 0.0f ? 0.0f : 0.5f;
+          const float after_c = carrier_phase_ < 0.0f ? 1.0f : 0.5f;
+          const float before = Z(before_c, 0.0f,
+              TzfmWrap(formant_phase_ + (1.0f - reset_time) * f1),
+              carrier_shape_modulation.subsample(1.0f - reset_time),
+              mode_modulation.subsample(1.0f - reset_time));
+          const float after = Z(after_c, 1.0f, 0.0f,
+              carrier_shape_modulation.subsample(1.0f),
+              mode_modulation.subsample(1.0f));
+          this_sample += (after - before) * stmlib::ThisBlepSample(reset_time);
+          next_sample += (after - before) * stmlib::NextBlepSample(reset_time);
+          formant_phase_ = TzfmWrap(reset_time * f1);
+        } else {
+          formant_phase_ = TzfmWrap(formant_phase_ + f1);
+        }
+        carrier_phase_ = TzfmWrap(carrier_phase_);
+        discontinuity_phase_ = TzfmWrap(discontinuity_phase_);
+        next_sample += Z(carrier_phase_, discontinuity_phase_, formant_phase_,
+            carrier_shape_modulation.Next(), mode_modulation.Next());
+        *out++ = this_sample;
+        continue;
+      }
+#endif
       discontinuity_phase_ += 2.0f * f0;
       carrier_phase_ += f0;
       reset = discontinuity_phase_ >= 1.0f;
@@ -154,7 +285,6 @@ class ZOscillator {
     next_sample_ = next_sample;
   }
 
- private:
   inline float Z(float c, float d, float f, float shape, float mode) {
     float ramp_down = 0.5f * (1.0f + Sine(0.5f * d + 0.25f));
     

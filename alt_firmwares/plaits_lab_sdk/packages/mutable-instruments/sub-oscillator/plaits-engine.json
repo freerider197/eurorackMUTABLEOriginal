@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "sdk": "plaits-engine-cpp-v1",
+  "packageType": "builtin-reference",
+  "id": "mutable-instruments/sub-oscillator",
+  "catalogId": "sub-oscillator",
+  "version": "1.0.0",
+  "name": "Sub Osc",
+  "author": "Emilie Gillet",
+  "origin": "Mutable Instruments",
+  "license": "MIT",
+  "description": "A shaped main oscillator against a square sub one or two octaves down, loudest at both ends of the sub control.",
+  "family": "Subtractive",
+  "tags": ["braids", "sub", "oscillator", "subtractive"],
+  "controls": [
+    { "id": "harmonics", "label": "Shape", "description": "Crossfades the main oscillator between a square and a variable saw, off one shared phase." },
+    { "id": "timbre", "label": "Width", "description": "Closes the square's pulse and, at the saw end, drives its two ramps apart into an octave-up double ramp." },
+    { "id": "morph", "label": "Sub level", "description": "Adds the sub two octaves down below noon and one octave down above it, with none at noon." },
+    { "id": "macro", "label": "Sub width", "description": "Narrows the sub oscillator's pulse below noon, leaving it square above." }
+  ],
+  "outputs": {
+    "main": "The main oscillator blended with the sub.",
+    "aux": "The sub oscillator alone, at full level. The stereo toggle does not change this fixed main/sub pair."
+  },
+  "trigger": "The engine itself ignores TRIG and its oscillators free-run; Plaits' shared envelope still shapes a patched note.",
+  "source": {
+    "root": "../../../../..",
+    "header": "plaits/dsp/engine2/sub_oscillator_engine.h",
+    "files": ["plaits/dsp/engine2/sub_oscillator_engine.cc"],
+    "className": "SubOscillatorEngine"
+  },
+  "postProcessing": { "alreadyEnveloped": false, "outGain": -0.45, "auxGain": -0.45 },
+  "scenarios": "tests/scenarios.json",
+  "upstream": "Braids MacroOscillator::RenderSub (SQUARE_SUB, SAW_SUB)"
+}

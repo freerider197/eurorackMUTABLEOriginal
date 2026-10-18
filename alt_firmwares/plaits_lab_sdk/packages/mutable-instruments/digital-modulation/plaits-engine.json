@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "sdk": "plaits-engine-cpp-v1",
+  "packageType": "builtin-reference",
+  "id": "mutable-instruments/digital-modulation",
+  "catalogId": "digital-modulation",
+  "version": "1.0.0",
+  "name": "Digital Modulation",
+  "author": "Emilie Gillet",
+  "origin": "Mutable Instruments",
+  "license": "MIT",
+  "description": "A carrier driven by a framed packet of dibits through a four-point constellation, with an openable frame.",
+  "family": "Digital",
+  "tags": [
+    "braids",
+    "modulation",
+    "packet",
+    "digital"
+  ],
+  "controls": [
+    {
+      "id": "harmonics",
+      "label": "Frame",
+      "description": "Lengthens the packet from a rapid 32-symbol burst to Braids' full 1,088-symbol frame."
+    },
+    {
+      "id": "timbre",
+      "label": "Symbol rate",
+      "description": "Raises the symbol rate from a slow stutter to a buzzing carrier."
+    },
+    {
+      "id": "morph",
+      "label": "Shaping",
+      "description": "Shapes the symbol transitions from hard steps to smooth glides."
+    },
+    {
+      "id": "macro",
+      "label": "Payload",
+      "description": "Sweeps the payload byte around the stock packet contents."
+    }
+  ],
+  "outputs": {
+    "main": "Mono: the complete in-phase plus quadrature carrier. Stereo: the in-phase component on the left.",
+    "aux": "Mono: the DC-blocked symbol staircase. Stereo: the quadrature carrier component on the right."
+  },
+  "trigger": "Restarts the packet from its preamble without resetting the carrier or the byte already in flight.",
+  "source": {
+    "root": "../../../../..",
+    "header": "plaits/dsp/engine2/digital_modulation_engine.h",
+    "files": [
+      "plaits/dsp/engine2/digital_modulation_engine.cc"
+    ],
+    "className": "DigitalModulationEngine"
+  },
+  "postProcessing": {
+    "alreadyEnveloped": false,
+    "outGain": -0.55,
+    "auxGain": -0.5
+  },
+  "scenarios": "tests/scenarios.json",
+  "upstream": "Braids DigitalOscillator::RenderDigitalModulation (QPSK)"
+}

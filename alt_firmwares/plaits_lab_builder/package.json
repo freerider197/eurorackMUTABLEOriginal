@@ -1,0 +1,25 @@
+{
+  "name": "@rubato/plaits-lab-build-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.mts",
+    "dev": "wrangler dev",
+    "catalog:check": "../plaits_lab_catalog/sync_public_catalog.sh --check",
+    "catalog:regen": "../plaits_lab_catalog/sync_public_catalog.sh",
+    "contract:check": "python3 check_manual_contract.py",
+    "deploy": "pnpm run catalog:check && pnpm run contract:check && wrangler deploy --env=\"\"",
+    "deploy:staging": "pnpm run catalog:check && pnpm run contract:check && wrangler deploy --env staging --containers-rollout=immediate",
+    "smoke:staging": "node --experimental-strip-types scripts/staging_smoke.mts"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "5.9.3",
+    "wrangler": "4.110.0"
+  }
+}

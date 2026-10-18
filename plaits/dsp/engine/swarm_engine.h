@@ -25,6 +25,11 @@
 // -----------------------------------------------------------------------------
 //
 // Swarm of sawtooths and sines.
+//
+// OUT: swarm of sawtooths. AUX: swarm of sine waves.
+// alt firmware, stereo mode: the sawtooths are spread across the stereo
+// field - the least detuned voices at the center, the most detuned at the
+// edges - and the sine waves are not rendered.
 
 #ifndef PLAITS_DSP_ENGINE_SWARM_ENGINE_H_
 #define PLAITS_DSP_ENGINE_SWARM_ENGINE_H_
@@ -43,10 +48,10 @@ namespace plaits {
 
 const int kNumSwarmVoices = 8;
 
-class GrainEnvelope {
+class SwarmGrainEnvelope {
  public:
-  GrainEnvelope() { }
-  ~GrainEnvelope() { }
+  SwarmGrainEnvelope() { }
+  ~SwarmGrainEnvelope() { }
   
   void Init() {
     from_ = 0.0f;
@@ -123,7 +128,7 @@ class GrainEnvelope {
   float previous_size_ratio_;
   float filter_coefficient_;
   
-  DISALLOW_COPY_AND_ASSIGN(GrainEnvelope);
+  DISALLOW_COPY_AND_ASSIGN(SwarmGrainEnvelope);
 };
 
 class AdditiveSawOscillator {
@@ -143,6 +148,61 @@ class AdditiveSawOscillator {
       float level,
       float* out,
       size_t size) {
+    RenderInternal<false>(frequency, level, out, size, 0);
+  }
+
+  inline void Render(
+      float frequency,
+      float level,
+      float* out,
+      size_t size,
+      uint32_t hard_sync) {
+    if (hard_sync) {
+      RenderInternal<true>(frequency, level, out, size, hard_sync);
+    } else {
+      RenderInternal<false>(frequency, level, out, size, 0);
+    }
+  }
+
+  inline void RenderLinearFm(
+      float frequency,
+      float level,
+      const float* frequency_offset,
+      float* out,
+      size_t size,
+      uint32_t hard_sync) {
+    if (!frequency_offset) {
+      Render(frequency, level, out, size, hard_sync);
+      return;
+    }
+    stmlib::ParameterInterpolator fm(&frequency_, frequency, size);
+    stmlib::ParameterInterpolator gain(&gain_, level, size);
+    while (size--) {
+      if (hard_sync & 1) {
+        phase_ = 0.0f;
+      }
+      hard_sync >>= 1;
+      float f = fm.Next() + *frequency_offset++;
+      CONSTRAIN(f, -kMaxFrequency, kMaxFrequency);
+      phase_ += f;
+      if (phase_ >= 1.0f) {
+        phase_ -= 1.0f;
+      } else if (phase_ < 0.0f) {
+        phase_ += 1.0f;
+      }
+      *out++ += (2.0f * phase_ - 1.0f) * gain.Next();
+    }
+    next_sample_ = phase_;
+  }
+
+ private:
+  template<bool process_hard_sync>
+  inline void RenderInternal(
+      float frequency,
+      float level,
+      float* out,
+      size_t size,
+      uint32_t hard_sync) {
     if (frequency >= kMaxFrequency) {
       frequency = kMaxFrequency;
     }
@@ -157,6 +217,16 @@ class AdditiveSawOscillator {
       next_sample = 0.0f;
 
       const float frequency = fm.Next();
+
+      if (process_hard_sync) {
+        if (hard_sync & 1) {
+          // Align every member of the swarm at the requested output-sample
+          // boundary. Keep the pending polyBLEP contribution so a reset does
+          // not discard the oscillator's antialiasing history.
+          phase = 0.0f;
+        }
+        hard_sync >>= 1;
+      }
 
       phase += frequency;
   
@@ -174,7 +244,6 @@ class AdditiveSawOscillator {
     next_sample_ = next_sample;
   }
 
- private:
   // Oscillator state.
   float phase_;
   float next_sample_;
@@ -207,26 +276,82 @@ class SwarmVoice {
       float size_ratio,
       float* saw,
       float* sine,
-      size_t size) {
+      size_t size,
+      uint32_t hard_sync,
+      const float* frequency_offset) {
+    const float root = f0;
+    const float amplitude = Step(
+        density, burst_mode, start_burst, spread, size_ratio, &f0);
+    if (frequency_offset) {
+      float scaled_offset[kMaxBlockSize];
+      const float ratio = f0 / (root > 1.0e-9f ? root : 1.0e-9f);
+      for (size_t i = 0; i < size; ++i) {
+        scaled_offset[i] = frequency_offset[i] * ratio;
+      }
+      saw_.RenderLinearFm(
+          f0, amplitude, scaled_offset, saw, size, hard_sync);
+      sine_.RenderLinearFm(
+          f0, amplitude, scaled_offset, sine, size, hard_sync);
+    } else {
+      saw_.Render(f0, amplitude, saw, size, hard_sync);
+      sine_.Render(f0, amplitude, sine, size, hard_sync);
+    }
+  };
+
+  // alt firmware: stereo render - the sawtooth only, the sine bank is
+  // skipped. The grain envelope advances exactly as in Render.
+  void RenderSaw(
+      float f0,
+      float density,
+      bool burst_mode,
+      bool start_burst,
+      float spread,
+      float size_ratio,
+      float* saw,
+      size_t size,
+      uint32_t hard_sync,
+      const float* frequency_offset) {
+    const float root = f0;
+    const float amplitude = Step(
+        density, burst_mode, start_burst, spread, size_ratio, &f0);
+    if (frequency_offset) {
+      float scaled_offset[kMaxBlockSize];
+      const float ratio = f0 / (root > 1.0e-9f ? root : 1.0e-9f);
+      for (size_t i = 0; i < size; ++i) {
+        scaled_offset[i] = frequency_offset[i] * ratio;
+      }
+      saw_.RenderLinearFm(
+          f0, amplitude, scaled_offset, saw, size, hard_sync);
+    } else {
+      saw_.Render(f0, amplitude, saw, size, hard_sync);
+    }
+  };
+
+ private:
+  inline float Step(
+      float density,
+      bool burst_mode,
+      bool start_burst,
+      float spread,
+      float size_ratio,
+      float* f0) {
     envelope_.Step(density, burst_mode, start_burst);
-    
+
     const float scale = 1.0f / kNumSwarmVoices;
     const float amplitude = envelope_.amplitude(size_ratio) * scale;
 
     const float expo_amount = envelope_.frequency(size_ratio);
-    f0 *= stmlib::SemitonesToRatio(48.0f * expo_amount * spread * rank_);
-    
-    const float linear_amount = rank_ * (rank_ + 0.01f) * spread * 0.25f;
-    f0 *= 1.0f + linear_amount;
+    *f0 *= stmlib::SemitonesToRatio(48.0f * expo_amount * spread * rank_);
 
-    saw_.Render(f0, amplitude, saw, size);
-    sine_.Render(f0, amplitude, sine, size);
-  };
-  
- private:
+    const float linear_amount = rank_ * (rank_ + 0.01f) * spread * 0.25f;
+    *f0 *= 1.0f + linear_amount;
+
+    return amplitude;
+  }
+
   float rank_;
 
-  GrainEnvelope envelope_;
+  SwarmGrainEnvelope envelope_;
   AdditiveSawOscillator saw_;
   FastSineOscillator sine_;
 };
@@ -244,7 +369,12 @@ class SwarmEngine : public Engine {
       float* aux,
       size_t size,
       bool* already_enveloped);
-  
+  virtual bool stereo_capable() const { return PLAITS_STEREO_SWARM; }
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+  virtual bool hard_sync_capable() const { return true; }
+#endif
+  virtual bool linear_tzfm_capable() const { return true; }
+
  private:
   SwarmVoice* swarm_voice_;
   

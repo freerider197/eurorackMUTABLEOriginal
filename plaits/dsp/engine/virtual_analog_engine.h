@@ -24,7 +24,7 @@
 //
 // -----------------------------------------------------------------------------
 //
-// 2 variable shape oscillators with sync and crossfading.
+// The production Plaits virtual-analog voice (the former VA_VARIANT 2).
 
 #ifndef PLAITS_DSP_ENGINE_VIRTUAL_ANALOG_ENGINE_H_
 #define PLAITS_DSP_ENGINE_VIRTUAL_ANALOG_ENGINE_H_
@@ -32,8 +32,6 @@
 #include "plaits/dsp/engine/engine.h"
 #include "plaits/dsp/oscillator/variable_saw_oscillator.h"
 #include "plaits/dsp/oscillator/variable_shape_oscillator.h"
-
-#define VA_VARIANT 2
 
 namespace plaits {
   
@@ -50,7 +48,15 @@ class VirtualAnalogEngine : public Engine {
       float* aux,
       size_t size,
       bool* already_enveloped);
-  
+  // OUT/AUX carry L/R when stereo is requested: the engine's saw and sync
+  // square are panned across the field, and the monster-sync AUX is dropped.
+  virtual bool stereo_capable() const { return PLAITS_STEREO_VIRTUAL_ANALOG; }
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+  virtual bool hard_sync_capable() const { return true; }
+#endif
+  virtual bool linear_tzfm_capable() const { return true; }
+  virtual bool fast_fm_capable() const { return true; }
+
  private:
   float ComputeDetuning(float detune) const;
   

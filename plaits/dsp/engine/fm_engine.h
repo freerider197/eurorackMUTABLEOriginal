@@ -25,18 +25,34 @@
 // -----------------------------------------------------------------------------
 //
 // Classic 2-op FM, as found in Braids, Rings and Elements.
+//
+// OUT: FM carrier. AUX: sub-oscillator (half frequency, PM'd by the carrier).
+// alt firmware, stereo mode: the carrier is panned to 0.4 and the sub to 0.6 -
+// a gentle octave-spread kept near centre.
 
 #ifndef PLAITS_DSP_ENGINE_FM_ENGINE_H_
 #define PLAITS_DSP_ENGINE_FM_ENGINE_H_
 
 #include "plaits/dsp/engine/engine.h"
+#include "plaits/dsp/engine/twist_tuning.h"
 
 namespace plaits {
   
 class FMEngine : public Engine {
  public:
-  FMEngine() { }
+  // NARROW by default since 2026-10: TWIST detunes the modulator +/-1
+  // semitone around the HARMONICS ratio instead of +/-12, chosen by ear
+  // (fm_engine.cc). The build-wide PLAITS_BUILD_TWIST_TUNING_RANGE no longer
+  // applies to this engine; set_twist_tuning() still overrides per instance.
+  FMEngine() : twist_tuning_(TWIST_TUNING_NARROW) { }
   ~FMEngine() { }
+
+  // Which TWIST span this INSTANCE uses. Registration runs before Voice::Init
+  // (voice.cc calls PLAITS_REGISTER_ENGINES and only then Init on each
+  // registered engine), and neither Init() nor Reset() touches this, so a
+  // generated config can register the same engine class more than once and
+  // give each copy a different span.
+  void set_twist_tuning(TwistTuning mode) { twist_tuning_ = mode; }
   
   virtual void Init(stmlib::BufferAllocator* allocator);
   virtual void Reset();
@@ -46,8 +62,22 @@ class FMEngine : public Engine {
       float* aux,
       size_t size,
       bool* already_enveloped);
-  
+  virtual bool stereo_capable() const { return PLAITS_STEREO_TWO_OP_FM; }
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+  virtual bool hard_sync_capable() const { return true; }
+#endif
+  virtual bool linear_tzfm_capable() const { return true; }
+  virtual bool fast_fm_capable() const { return true; }
+
  private:
+  template<bool process_hard_sync>
+  void RenderInternal(
+      const EngineParameters& parameters,
+      float* out,
+      float* aux,
+      size_t size,
+      bool* already_enveloped);
+
   uint32_t carrier_phase_;
   uint32_t modulator_phase_;
   uint32_t sub_phase_;
@@ -61,6 +91,8 @@ class FMEngine : public Engine {
   float sub_fir_;
   float carrier_fir_;
   
+  TwistTuning twist_tuning_;
+
   DISALLOW_COPY_AND_ASSIGN(FMEngine);
 };
 

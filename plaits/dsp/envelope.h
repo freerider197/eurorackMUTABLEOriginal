@@ -52,13 +52,14 @@ class LPGEnvelope {
   
   inline void ProcessPing(
       float attack,
+      float peak,
       float short_decay,
       float decay_tail,
       float hf) {
     if (ramp_up_) {
       vactrol_state_ += attack;
-      if (vactrol_state_ >= 1.0f) {
-        vactrol_state_ = 1.0f;
+      if (vactrol_state_ >= peak) {
+        vactrol_state_ = peak;
         ramp_up_ = false;
       }
     }
@@ -123,6 +124,73 @@ class DecayEnvelope {
   float value_;
   
   DISALLOW_COPY_AND_ASSIGN(DecayEnvelope);
+};
+
+// Gate-aware, one-knob envelopes adapted from Elements' exciter contour.
+// MODE_TRIGGERED spends the entire range on a one-shot AD shape spectrum and
+// ignores the falling edge. MODE_GATED spends the entire range on a full-
+// sustain ASR gesture and follows the gate. Each mode has resonator and synth
+// timing profiles because a resonator supplies more of its own audible tail.
+//
+// Process is called once per Plaits audio block. Curve and rate lookup tables
+// live in envelope.cc; their compact fixed-point representation keeps the
+// complete feature below 1 KB of table data without evaluating powf/expf in the
+// audio callback.
+class OneKnobEnvelope {
+ public:
+  enum Profile {
+    PROFILE_ELEMENTS_RESONATOR,
+    PROFILE_SYNTH
+  };
+
+  enum Mode {
+    MODE_TRIGGERED,
+    MODE_GATED
+  };
+
+  OneKnobEnvelope() { }
+  ~OneKnobEnvelope() { }
+
+  void Init();
+
+  float Process(
+      float shape,
+      bool gate,
+      bool rising_edge,
+      Profile profile,
+      Mode mode);
+
+  inline float value() const { return value_; }
+  inline bool active() const { return segment_ != SEGMENT_DONE; }
+
+#if defined(TEST)
+  // Host-test access to the curve approximations. These are not part of the
+  // firmware API and compile out of production builds.
+  static float TestGatedAttackCurve(float phase);
+  static float TestExponentialCurve(float phase);
+  static float TestTimeIncrement(float time);
+#endif
+
+ private:
+  enum Segment {
+    SEGMENT_ATTACK,
+    SEGMENT_DECAY,
+    SEGMENT_SUSTAIN,
+    SEGMENT_RELEASE,
+    SEGMENT_DONE
+  };
+
+  static float GatedAttackCurve(float phase);
+  static float InverseGatedAttackCurve(float value);
+  static float ExponentialCurve(float phase);
+  static float TimeIncrement(float time);
+
+  Segment segment_;
+  float phase_;
+  float start_value_;
+  float value_;
+
+  DISALLOW_COPY_AND_ASSIGN(OneKnobEnvelope);
 };
 
 }  // namespace plaits

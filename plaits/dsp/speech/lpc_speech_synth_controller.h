@@ -30,10 +30,15 @@
 #define PLAITS_DSP_SPEECH_LPC_SPEECH_SYNTH_CONTROLLER_H_
 
 #include "plaits/dsp/speech/lpc_speech_synth.h"
+#include "plaits/dsp/extended_tzfm.h"
 
 #include "stmlib/utils/buffer_allocator.h"
 
 namespace plaits {
+
+#ifndef PLAITS_HAS_CUSTOM_SPEECH_BANKS
+#define PLAITS_HAS_CUSTOM_SPEECH_BANKS 0
+#endif
 
 class BitStream {
  public:
@@ -85,6 +90,7 @@ class BitStream {
 };
 
 const int kLPCSpeechSynthMaxWords = 32;
+const int kLPCSpeechSynthMaxWordBoundaries = kLPCSpeechSynthMaxWords + 1;
 const int kLPCSpeechSynthMaxFrames = 1024;
 const int kLPCSpeechSynthNumVowels = 5;
 const int kLPCSpeechSynthNumConsonants = 10;
@@ -92,10 +98,31 @@ const int kLPCSpeechSynthNumPhonemes = \
     kLPCSpeechSynthNumVowels + kLPCSpeechSynthNumConsonants;
 const float kLPCSpeechSynthFPS = 40.0f;
 
+// The custom-bank analyzer was calibrated at one fifth of the shipped TI
+// banks' level. Match decoded custom frames to the stock energy range while
+// preserving silence and capping at the highest playable stock energy (0xa1;
+// the next TI nibble is the end-of-word marker).
+inline uint8_t MatchCustomSpeechBankEnergy(uint8_t energy) {
+  const uint16_t matched = static_cast<uint16_t>(energy) * 5;
+  return matched > 0xa1 ? 0xa1 : static_cast<uint8_t>(matched);
+}
+
 struct LPCSpeechSynthWordBankData {
   const uint8_t* data;
   size_t size;
 };
+
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+// Custom banks already contain decoded LPC frames. Keeping them in this form
+// avoids forcing newly analysed speech through the legacy TI bitstream format;
+// the selected bank is copied into the controller's existing working buffer.
+struct LPCSpeechSynthRawWordBankData {
+  const LPCSpeechSynth::Frame* frames;
+  const uint16_t* word_boundaries;
+  uint16_t num_frames;
+  uint8_t num_words;
+};
+#endif
 
 class LPCSpeechSynthWordBank {
  public:
@@ -106,6 +133,14 @@ class LPCSpeechSynthWordBank {
       const LPCSpeechSynthWordBankData* word_banks,
       int num_banks,
       stmlib::BufferAllocator* allocator);
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+  void Init(
+      const LPCSpeechSynthWordBankData* word_banks,
+      int num_banks,
+      const LPCSpeechSynthRawWordBankData* raw_word_banks,
+      int num_raw_word_banks,
+      stmlib::BufferAllocator* allocator);
+#endif
   
   bool Load(int index);
   void Reset();
@@ -130,8 +165,14 @@ class LPCSpeechSynthWordBank {
   size_t LoadNextWord(const uint8_t* data);
   
   const LPCSpeechSynthWordBankData* word_banks_;
-  
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+  const LPCSpeechSynthRawWordBankData* raw_word_banks_;
+#endif
+
   int num_banks_;
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+  int num_raw_word_banks_;
+#endif
   int loaded_bank_;
   int num_frames_;
   int num_words_;
@@ -153,6 +194,17 @@ class LPCSpeechSynthWordBank {
   static const int8_t k9_lut_[8];
 };
 
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+// The generated bank data is compiled once into this controller translation
+// unit, then shared by every speech engine in the palette. Keeping engines
+// behind these helpers prevents a palette containing both Original Speech and
+// LPC Words from embedding a second copy of the same frames.
+void InitRecipeSpeechWordBank(
+    LPCSpeechSynthWordBank* word_bank,
+    stmlib::BufferAllocator* allocator);
+int RecipeSpeechWordBankCount();
+#endif
+
 class LPCSpeechSynthController {
  public:
   LPCSpeechSynthController() { }
@@ -172,10 +224,17 @@ class LPCSpeechSynthController {
       float gain,
       float* excitation,
       float* output,
-      size_t size);
+      size_t size
+#if PLAITS_BUILD_EXTENDED_TZFM
+      , const float* frequency_offset = NULL
+#endif
+      );
   
  private:
   float clock_phase_;
+#if PLAITS_BUILD_EXTENDED_TZFM
+  float fm_integral_;
+#endif
   float sample_[2];
   float next_sample_[2];
   float gain_;

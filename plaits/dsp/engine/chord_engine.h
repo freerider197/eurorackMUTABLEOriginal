@@ -25,6 +25,11 @@
 // -----------------------------------------------------------------------------
 //
 // Chords: wavetable and divide-down organ/string machine.
+//
+// OUT: all notes. AUX: the notes selected by the chord inversion, boosted.
+// alt firmware, stereo mode: the center oscillator is shared equally and the
+// four outer oscillator slots alternate left/right, preserving the original
+// note layout without five separate pan-and-accumulate passes.
 
 #ifndef PLAITS_DSP_ENGINE_CHORD_ENGINE_H_
 #define PLAITS_DSP_ENGINE_CHORD_ENGINE_H_
@@ -51,6 +56,20 @@ class ChordEngine : public Engine {
       float* aux,
       size_t size,
       bool* already_enveloped);
+  virtual bool stereo_capable() const { return PLAITS_STEREO_CHORDS; }
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+  virtual void HardSync() {
+    for (int i = 0; i < kChordNumVoices; ++i) {
+      divide_down_voice_[i].Init();
+      wavetable_voice_[i].Init();
+    }
+  }
+#endif
+
+#if PLAITS_BUILD_EXTENDED_TZFM
+  // Qualified separately from the stock Plaits catalog's CPU policy.
+  virtual bool linear_tzfm_capable() const { return true; }
+#endif
 
  private:
   void ComputeRegistration(float registration, float* amplitudes);

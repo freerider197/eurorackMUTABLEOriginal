@@ -25,15 +25,25 @@
 // -----------------------------------------------------------------------------
 //
 // 808 and synthetic snare drum generators.
+//
+// OUT: analog 808 snare. AUX: synthetic snare.
+// alt firmware, stereo mode: the analog snare is panned to 0.3 and the
+// synthetic snare to 0.7 - snares tolerate more width than kicks.
 
 #include "plaits/dsp/engine/snare_drum_engine.h"
 
 #include <algorithm>
 
+#include "plaits/build_config.h"
+
 namespace plaits {
 
 using namespace std;
 using namespace stmlib;
+
+// Equal-power gains for the fixed 0.3 / 0.7 stereo positions.
+const float kSnareNearPan = 0.836660028f;  // sqrt(0.7)
+const float kSnareFarPan = 0.547722578f;  // sqrt(0.3)
 
 void SnareDrumEngine::Init(BufferAllocator* allocator) {
   analog_snare_drum_.Init();
@@ -51,6 +61,51 @@ void SnareDrumEngine::Render(
     size_t size,
     bool* already_enveloped) {
   const float f0 = NoteToFrequency(parameters.note);
+  const float mode_spread = ApplyMacro(
+      1.0f, 0.5f, 1.75f, parameters.macro);
+
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  if (parameters.frequency_offset) {
+    const bool sustain = parameters.trigger & TRIGGER_UNPATCHED;
+    const bool trigger = parameters.trigger & TRIGGER_RISING_EDGE;
+    for (size_t sample = 0; sample < size; ++sample) {
+      float instantaneous_f0 = max(
+          1e-7f, f0 + parameters.frequency_offset[sample]);
+      instantaneous_f0 = min(instantaneous_f0, 0.49f);
+      analog_snare_drum_.Render(
+          sustain,
+          trigger && sample == 0,
+          parameters.accent,
+          instantaneous_f0,
+          parameters.timbre,
+          parameters.morph,
+          parameters.harmonics,
+          mode_spread,
+          out + sample,
+          1);
+      synthetic_snare_drum_.Render(
+          sustain,
+          trigger && sample == 0,
+          parameters.accent,
+          instantaneous_f0,
+          parameters.timbre,
+          parameters.morph,
+          parameters.harmonics,
+          mode_spread,
+          aux + sample,
+          1);
+    }
+    if ((PLAITS_STEREO_ANALOG_SNARE && parameters.stereo)) {
+      for (size_t i = 0; i < size; ++i) {
+        const float analog = out[i];
+        const float synthetic = aux[i];
+        out[i] = analog * kSnareNearPan + synthetic * kSnareFarPan;
+        aux[i] = analog * kSnareFarPan + synthetic * kSnareNearPan;
+      }
+    }
+    return;
+  }
+#endif
   
   analog_snare_drum_.Render(
       parameters.trigger & TRIGGER_UNPATCHED,
@@ -60,6 +115,7 @@ void SnareDrumEngine::Render(
       parameters.timbre,
       parameters.morph,
       parameters.harmonics,
+      mode_spread,
       out,
       size);
   
@@ -71,8 +127,20 @@ void SnareDrumEngine::Render(
       parameters.timbre,
       parameters.morph,
       parameters.harmonics,
+      mode_spread,
       aux,
       size);
+
+  if ((PLAITS_STEREO_ANALOG_SNARE && parameters.stereo)) {
+    // Spread the two snare models across the stereo field; snares tolerate
+    // more width than kicks.
+    for (size_t i = 0; i < size; ++i) {
+      const float analog = out[i];
+      const float synthetic = aux[i];
+      out[i] = analog * kSnareNearPan + synthetic * kSnareFarPan;
+      aux[i] = analog * kSnareFarPan + synthetic * kSnareNearPan;
+    }
+  }
 }
 
 }  // namespace plaits

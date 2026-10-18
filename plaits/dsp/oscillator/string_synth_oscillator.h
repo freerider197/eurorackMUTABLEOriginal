@@ -39,6 +39,7 @@
 #define PLAITS_DSP_OSCILLATOR_STRING_SYNTH_OSCILLATOR_H_
 
 #include <algorithm>
+#include "plaits/dsp/extended_tzfm.h"
 
 #include "stmlib/dsp/dsp.h"
 #include "stmlib/dsp/parameter_interpolator.h"
@@ -68,89 +69,137 @@ class StringSynthOscillator {
       const float* unshifted_registration,
       float gain,
       float* out,
-      size_t size) {
+      size_t size,
+      const float* root_frequency_offset = NULL,
+      float frequency_offset_scale = 0.0f,
+      bool signed_fm = false) {
     frequency *= 8.0f;
+    frequency_offset_scale *= 8.0f;
     
     // Deal with very high frequencies by shifting everything 1 or 2 octave
     // down: Instead of playing the 1st harmonic of a 8kHz wave, we play the
     // second harmonic of a 4kHz wave.
     size_t shift = 0;
-    while (frequency > 0.5f) {
+    while ((PLAITS_BUILD_EXTENDED_TZFM ? fabsf(frequency) : frequency) > 0.5f) {
       shift += 2;
       frequency *= 0.5f;
+#if PLAITS_BUILD_EXTENDED_TZFM
+      frequency_offset_scale *= 0.5f;
+#endif
     }
     // Frequency is just too high.
     if (shift >= 8) {
       return;
     }
     
+    // An explicit loop: std::fill/std::copy of at most seven floats compiled
+    // to library memset/memmove calls, made for every voice on every block.
     float registration[7];
-    std::fill(&registration[0], &registration[shift], 0.0f);
-    std::copy(
-        &unshifted_registration[0],
-        &unshifted_registration[7 - shift],
-        &registration[shift]);
+    for (size_t i = 0; i < 7; ++i) {
+      registration[i] = i < shift ? 0.0f : unshifted_registration[i - shift];
+    }
     
-    stmlib::ParameterInterpolator fm(&frequency_, frequency, size);
+    // One shared 1 / size: initialised with a size, each interpolator
+    // divides by it (14 cycles on the M4, five per voice here). The
+    // reciprocal differs from the division by at most an ulp.
+    const float step = 1.0f / static_cast<float>(size);
+    stmlib::ParameterInterpolator fm(&frequency_, frequency, step);
     stmlib::ParameterInterpolator saw_8_gain_modulation(
         &saw_8_gain_,
         (registration[0] + 2.0f * registration[1]) * gain,
-        size);
+        step);
     stmlib::ParameterInterpolator saw_4_gain_modulation(
         &saw_4_gain_,
         (registration[2] - registration[1] + 2.0f * registration[3]) * gain,
-        size);
+        step);
     stmlib::ParameterInterpolator saw_2_gain_modulation(
         &saw_2_gain_,
         (registration[4] - registration[3] + 2.0f * registration[5]) * gain,
-        size);
+        step);
     stmlib::ParameterInterpolator saw_1_gain_modulation(
         &saw_1_gain_,
         (registration[6] - registration[5]) * gain,
-        size);
+        step);
     
     float phase = phase_;
     float next_sample = next_sample_;
     int segment = segment_;
+    // segment & 4, & 6 and & 7 as floats, converted only when the segment
+    // changes rather than three int-to-float conversions per sample.
+    float segment_4 = static_cast<float>(segment & 4);
+    float segment_6 = static_cast<float>(segment & 6);
+    float segment_7 = static_cast<float>(segment & 7);
     while (size--) {
       float this_sample = next_sample;
       next_sample = 0.0f;
   
-      const float frequency = fm.Next();
+      float frequency = fm.Next();
+      if (root_frequency_offset) {
+        frequency += *root_frequency_offset++ * frequency_offset_scale;
+        CONSTRAIN(frequency, PLAITS_BUILD_EXTENDED_TZFM ? -0.5f : 1.0e-7f, 0.5f);
+      }
       const float saw_8_gain = saw_8_gain_modulation.Next();
       const float saw_4_gain = saw_4_gain_modulation.Next();
       const float saw_2_gain = saw_2_gain_modulation.Next();
       const float saw_1_gain = saw_1_gain_modulation.Next();
 
-      phase += frequency;
-      int next_segment = static_cast<int>(phase);
+      int next_segment;
+#if PLAITS_BUILD_EXTENDED_TZFM
+      if (root_frequency_offset || signed_fm || frequency < 0.0f) {
+        const float old_phase = phase;
+        phase += frequency;
+        const int crossed = frequency >= 0.0f ? int(floorf(phase)) : int(floorf(old_phase));
+        if (int(floorf(phase)) != int(floorf(old_phase))) {
+          float jump = -saw_1_gain;
+          if ((crossed & 1) == 0) jump -= saw_2_gain;
+          if ((crossed & 3) == 0) jump -= saw_4_gain;
+          if ((crossed & 7) == 0) jump -= saw_8_gain;
+          const float time = (phase - crossed) / frequency;
+          if (frequency < 0.0f) jump = -jump;
+          this_sample += stmlib::ThisBlepSample(time) * jump;
+          next_sample += stmlib::NextBlepSample(time) * jump;
+        }
+        if (phase < 0.0f) phase += 8.0f;
+        if (phase >= 8.0f) phase -= 8.0f;
+        next_segment = static_cast<int>(phase);
+      } else
+#endif
+      {
+        phase += frequency;
+        next_segment = static_cast<int>(phase);
+        if (next_segment != segment) {
+          float discontinuity = 0.0f;
+          if (next_segment == 8) {
+            phase -= 8.0f;
+            next_segment -= 8;
+            discontinuity -= saw_8_gain;
+          }
+          if ((next_segment & 3) == 0) {
+            discontinuity -= saw_4_gain;
+          }
+          if ((next_segment & 1) == 0) {
+            discontinuity -= saw_2_gain;
+          }
+          discontinuity -= saw_1_gain;
+          if (discontinuity != 0.0f) {
+            float fraction = phase - static_cast<float>(next_segment);
+            float t = fraction / frequency;
+            this_sample += stmlib::ThisBlepSample(t) * discontinuity;
+            next_sample += stmlib::NextBlepSample(t) * discontinuity;
+          }
+        }
+      }
       if (next_segment != segment) {
-        float discontinuity = 0.0f;
-        if (next_segment == 8) {
-          phase -= 8.0f;
-          next_segment -= 8;
-          discontinuity -= saw_8_gain;
-        }
-        if ((next_segment & 3) == 0) {
-          discontinuity -= saw_4_gain;
-        }
-        if ((next_segment & 1) == 0) {
-          discontinuity -= saw_2_gain;
-        }
-        discontinuity -= saw_1_gain;
-        if (discontinuity != 0.0f) {
-          float fraction = phase - static_cast<float>(next_segment);
-          float t = fraction / frequency;
-          this_sample += stmlib::ThisBlepSample(t) * discontinuity;
-          next_sample += stmlib::NextBlepSample(t) * discontinuity;
-        }
+        segment_4 = static_cast<float>(next_segment & 4);
+        segment_6 = static_cast<float>(next_segment & 6);
+        segment_7 = static_cast<float>(next_segment & 7);
       }
       segment = next_segment;
       
       next_sample += (phase - 4.0f) * saw_8_gain * 0.125f;
-      next_sample += (phase - float(segment & 4) - 2.0f) * saw_4_gain * 0.25f;
-      next_sample += (phase - float(segment & 6) - 1.0f) * saw_2_gain * 0.5f;
-      next_sample += (phase - float(segment & 7) - 0.5f) * saw_1_gain;
+      next_sample += (phase - segment_4 - 2.0f) * saw_4_gain * 0.25f;
+      next_sample += (phase - segment_6 - 1.0f) * saw_2_gain * 0.5f;
+      next_sample += (phase - segment_7 - 0.5f) * saw_1_gain;
       *out++ += 2.0f * this_sample;
     }
     next_sample_ = next_sample;

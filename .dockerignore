@@ -1,0 +1,15 @@
+.git
+.claude
+build
+tmp
+output
+node_modules
+**/node_modules
+.wrangler
+**/.wrangler
+**/__pycache__
+*.wav
+*.o
+*.d
+*.elf
+*.bin

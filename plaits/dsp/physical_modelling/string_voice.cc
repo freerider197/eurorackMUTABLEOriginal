@@ -58,9 +58,9 @@ void StringVoice::Render(
     float structure,
     float brightness,
     float damping,
+    float exciter_size,
     float* temp,
     float* out,
-    float* aux,
     size_t size) {
   const float density = brightness * brightness;
 
@@ -75,7 +75,11 @@ void StringVoice::Render(
         f * SemitonesToRatio((brightness * (2.0f - brightness) - 0.5f) * range),
         0.499f);
     const float q = sustain ? 1.0f : 0.5f;
-    remaining_noise_samples_ = static_cast<size_t>(1.0f / f0);
+    // Continuous excitation must not queue a pluck for when sustain ends.
+    // Only a trigger in plucked mode starts a finite burst; entering sustain
+    // also discards any burst left over from the preceding plucked note.
+    remaining_noise_samples_ = sustain
+        ? 0 : static_cast<size_t>(exciter_size / f0);
     excitation_filter_.set_f_q<FREQUENCY_DIRTY>(cutoff, q);
   }
 
@@ -99,11 +103,7 @@ void StringVoice::Render(
     fill(&temp[0], &temp[size], 0.0f);
   }
   
-  excitation_filter_.Process<FILTER_MODE_LOW_PASS>(temp, temp, size);
-  for (size_t i = 0; i < size; ++i) {
-    aux[i] += temp[i];
-  }
-  
+  excitation_filter_.ProcessBuffer<FILTER_MODE_LOW_PASS>(temp, temp, size);
   float non_linearity = structure < 0.24f
       ? (structure - 0.24f) * 4.166f
       : (structure > 0.26f ? (structure - 0.26f) * 1.35135f : 0.0f);

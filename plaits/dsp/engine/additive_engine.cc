@@ -24,14 +24,26 @@
 //
 // -----------------------------------------------------------------------------
 //
-// Additive synthesis with 32 partials.
+// Additive synthesis with 24+8 partials.
+//
+// OUT: 24 integer harmonics. AUX: 8 harmonics of the organ subset.
+// alt firmware, stereo mode: OUT carries the 24-harmonic voice and AUX carries
+// a short all-pass phase rotation of it. This keeps the spectrum and level
+// matched while avoiding a second 24-partial accumulation.
 
 #include "plaits/dsp/engine/additive_engine.h"
 
 #include <algorithm>
 
 #include "stmlib/dsp/cosine_oscillator.h"
+#include "plaits/build_config.h"
 #include "plaits/dsp/oscillator/sine_oscillator.h"
+
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+#define PLAITS_HARD_SYNC_EVENTS(parameters) ((parameters).hard_sync)
+#else
+#define PLAITS_HARD_SYNC_EVENTS(parameters) 0u
+#endif
 
 namespace plaits {
 
@@ -43,6 +55,7 @@ void AdditiveEngine::Init(BufferAllocator* allocator) {
   for (int i = 0; i < kNumHarmonicOscillators; ++i) {
     harmonic_oscillator_[i].Init();
   }
+  stereo_allpass_.Init();
 }
 
 void AdditiveEngine::Reset() {
@@ -58,7 +71,9 @@ void AdditiveEngine::UpdateAmplitudes(
     float bumps,
     float* amplitudes,
     const int* harmonic_indices,
-    size_t num_harmonics) {
+    size_t num_harmonics,
+    float odd_gain,
+    float even_gain) {
   const float n = (static_cast<float>(num_harmonics) - 1.0f);
   const float margin = (1.0f / slope - 1.0f) / (1.0f + bumps);
   const float center = centroid * (n + margin) - 0.5f * margin;
@@ -79,6 +94,11 @@ void AdditiveEngine::UpdateAmplitudes(
     gain *= gain;
     
     int j = harmonic_indices[i];
+
+    // The odd/even tilt scales the TARGET amplitude, never the smoothed state
+    // below: amplitudes[] is the one-pole's memory, so tilting it in place fed
+    // the gain back through the filter on every block.
+    gain *= (j & 1) ? even_gain : odd_gain;
     
     // Warning about the following line: this is not a proper LP filter because
     // of the normalization. But in spite of its strange working, this line
@@ -127,15 +147,82 @@ void AdditiveEngine::Render(
   const float raw_slope = (1.0f - 0.6f * raw_bumps) * parameters.morph;
   const float slope = 0.01f + 1.99f * raw_slope * raw_slope * raw_slope;
   const float bumps = 16.0f * raw_bumps * raw_bumps;
+  // The 2.25/0.25 extremes are deliberately wider than a stock-value macro's
+  // usual +/-50%: the tilt used to be applied to the one-pole's state and so
+  // settled at roughly the square of its nominal ratio, and this range keeps
+  // the depth people already have in their fingers now that it applies once.
+  const float odd_gain = ApplyMacro(
+      1.0f, 2.25f, 0.25f, parameters.macro);
+  const float even_gain = ApplyMacro(
+      1.0f, 0.25f, 2.25f, parameters.macro);
   UpdateAmplitudes(
       centroid,
       slope,
       bumps,
       &amplitudes_[0],
       integer_harmonics,
-      24);
-  harmonic_oscillator_[0].Render<1>(f0, &amplitudes_[0], out, size);
-  harmonic_oscillator_[1].Render<13>(f0, &amplitudes_[12], out, size);
+      24,
+      odd_gain,
+      even_gain);
+
+  const uint32_t hard_sync = PLAITS_HARD_SYNC_EVENTS(parameters);
+
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  const float* frequency_offset = parameters.frequency_offset;
+  if (frequency_offset) {
+    if ((PLAITS_STEREO_HARMONIC && parameters.stereo)) {
+      harmonic_oscillator_[0].RenderLinearFm<1>(
+          f0, frequency_offset, &amplitudes_[0], out, size, hard_sync);
+      harmonic_oscillator_[1].RenderLinearFm<13>(
+          f0, frequency_offset, &amplitudes_[12], out, size, hard_sync);
+      for (size_t i = 0; i < size; ++i) {
+        aux[i] = stereo_allpass_.Process(out[i]);
+      }
+      return;
+    }
+
+    harmonic_oscillator_[0].RenderLinearFm<1>(
+        f0, frequency_offset, &amplitudes_[0], out, size, hard_sync);
+    harmonic_oscillator_[1].RenderLinearFm<13>(
+        f0, frequency_offset, &amplitudes_[12], out, size, hard_sync);
+    if (parameters.aux_discarded) {
+      return;
+    }
+    UpdateAmplitudes(
+        centroid,
+        slope,
+        bumps,
+        &amplitudes_[24],
+        organ_harmonics,
+        8);
+    harmonic_oscillator_[2].RenderLinearFm<1>(
+        f0, frequency_offset, &amplitudes_[24], aux, size, hard_sync);
+    return;
+  }
+#endif
+
+  if ((PLAITS_STEREO_HARMONIC && parameters.stereo)) {
+    harmonic_oscillator_[0].Render<1>(
+        f0, &amplitudes_[0], out, size, hard_sync);
+    harmonic_oscillator_[1].Render<13>(
+        f0, &amplitudes_[12], out, size, hard_sync);
+    for (size_t i = 0; i < size; ++i) {
+      aux[i] = stereo_allpass_.Process(out[i]);
+    }
+    return;
+  }
+
+  harmonic_oscillator_[0].Render<1>(
+      f0, &amplitudes_[0], out, size, hard_sync);
+  harmonic_oscillator_[1].Render<13>(
+      f0, &amplitudes_[12], out, size, hard_sync);
+
+  // AUX is its own 8-harmonic organ bank. When the voice discards AUX it is
+  // neither updated nor rendered (its amplitudes resume smoothly from where
+  // they were).
+  if (parameters.aux_discarded) {
+    return;
+  }
 
   UpdateAmplitudes(
       centroid,
@@ -145,7 +232,10 @@ void AdditiveEngine::Render(
       organ_harmonics,
       8);
 
-  harmonic_oscillator_[2].Render<1>(f0, &amplitudes_[24], aux, size);
+  harmonic_oscillator_[2].Render<1>(
+      f0, &amplitudes_[24], aux, size, hard_sync);
 }
 
 }  // namespace plaits
+
+#undef PLAITS_HARD_SYNC_EVENTS

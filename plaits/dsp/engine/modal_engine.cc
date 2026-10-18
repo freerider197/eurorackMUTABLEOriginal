@@ -25,10 +25,18 @@
 // -----------------------------------------------------------------------------
 //
 // One voice of modal synthesis.
+//
+// OUT: modal resonator excited by a mallet or by dust noise. AUX: raw
+// exciter signal.
+// alt firmware, stereo mode: even-numbered modes lean left and odd-numbered
+// modes lean right - equal-power, every mode audible on both sides - and the
+// raw exciter is not sent to AUX.
 
 #include "plaits/dsp/engine/modal_engine.h"
 
 #include <algorithm>
+
+#include "plaits/build_config.h"
 
 namespace plaits {
 
@@ -53,17 +61,86 @@ void ModalEngine::Render(
     bool* already_enveloped) {
   fill(&out[0], &out[size], 0.0f);
   fill(&aux[0], &aux[size], 0.0f);
-  
+
   ONE_POLE(harmonics_lp_, parameters.harmonics, 0.01f);
   
+  const bool contour_excitation = parameters.articulation_envelope_active;
+  const bool sustain =
+      (parameters.trigger & TRIGGER_UNPATCHED) || contour_excitation;
+  const float accent = contour_excitation
+      ? parameters.accent * parameters.articulation_envelope
+      : parameters.accent;
+  const float stock_exciter_q = sustain ? 0.7f : 1.5f;
+  const float exciter_q = ApplyMacro(
+      stock_exciter_q, 0.5f, 6.0f, parameters.macro);
+  const float f0 = NoteToFrequency(parameters.note);
+
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  if (parameters.frequency_offset) {
+    const bool trigger = parameters.trigger & TRIGGER_RISING_EDGE;
+    for (size_t i = 0; i < size; ++i) {
+      const float instantaneous_f0 = max(
+          1e-7f, f0 + parameters.frequency_offset[i]);
+      if ((PLAITS_STEREO_MODAL_RESONATOR && parameters.stereo)) {
+        voice_.RenderStereo(
+            sustain,
+            trigger && i == 0,
+            accent,
+            instantaneous_f0,
+            harmonics_lp_,
+            parameters.timbre,
+            parameters.morph,
+            exciter_q,
+            temp_buffer_ + i,
+            out + i,
+            aux + i,
+            1);
+      } else {
+        voice_.Render(
+            sustain,
+            trigger && i == 0,
+            accent,
+            instantaneous_f0,
+            harmonics_lp_,
+            parameters.timbre,
+            parameters.morph,
+            exciter_q,
+            temp_buffer_ + i,
+            out + i,
+            aux + i,
+            1);
+      }
+    }
+    return;
+  }
+#endif
+
+  if ((PLAITS_STEREO_MODAL_RESONATOR && parameters.stereo)) {
+    voice_.RenderStereo(
+        sustain,
+        parameters.trigger & TRIGGER_RISING_EDGE,
+        accent,
+        f0,
+        harmonics_lp_,
+        parameters.timbre,
+        parameters.morph,
+        exciter_q,
+        temp_buffer_,
+        out,
+        aux,
+        size);
+    return;
+  }
+
   voice_.Render(
-      parameters.trigger & TRIGGER_UNPATCHED,
+      sustain,
       parameters.trigger & TRIGGER_RISING_EDGE,
-      parameters.accent,
-      NoteToFrequency(parameters.note),
+      accent,
+      f0,
       harmonics_lp_,
       parameters.timbre,
       parameters.morph,
+      exciter_q,
       temp_buffer_,
       out,
       aux,

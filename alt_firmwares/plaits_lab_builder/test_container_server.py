@@ -1,0 +1,593 @@
+from __future__ import annotations
+
+import json
+import base64
+import struct
+import tempfile
+import unittest
+import wave
+from pathlib import Path
+from unittest.mock import patch
+
+from container_server import (
+    ALL_STEREO_MACROS,
+    BuildError,
+    FLASH_BUDGET_BYTES,
+    MAX_REQUEST_BYTES,
+    RAM_BUDGET_BYTES,
+    RAM_STACK_RESERVE_BYTES,
+    _build_targets,
+    build_firmware,
+    SLOW_FLASH_DATA_OBJECTS,
+    _check_shared_buffer_alignment,
+    _validate_shared_buffer_layout,
+    _concatenate_pcm_wavs,
+    _declared_region_count,
+    _natural_speech_bank_preview_job_key,
+    _speech_job_key,
+    _validate_saved_bank_preview_request,
+    parse_ram_bytes,
+    _validate_speech_request,
+    _write_saved_plan,
+    encode_natural_speech_recording,
+    _recipe_is_stereo,
+    _stereo_disable_flags,
+    classify_link_failure,
+    request_size_is_valid,
+    validate_linked_firmware,
+)
+from generate_engine_config import (
+    DEFAULT_CHORD_TABLES,
+    DEFAULT_CONFIGURATION,
+    validate_recipe,
+)
+
+
+class ClassifyLinkFailureTest(unittest.TestCase):
+    def test_flash_overflow_reports_the_exact_overage(self) -> None:
+        log = (
+            "arm-none-eabi/bin/ld: <build-root>/plaits/plaits.elf "
+            "section `.text' will not fit in region `FLASH'\n"
+            "arm-none-eabi/bin/ld: region `FLASH' overflowed by 4096 bytes\n"
+            "collect2: error: ld returned 1 exit status\n"
+        )
+        result = classify_link_failure(log)
+        self.assertIsNotNone(result)
+        code, message = result
+        self.assertEqual(code, "flash_budget_exceeded")
+        self.assertIn("4096 bytes", message)
+        self.assertIn("flash", message.lower())
+
+    def test_flash_overflow_without_a_byte_count_still_classifies(self) -> None:
+        # Some ld invocations emit only the section "will not fit" line.
+        log = "ld: section `.rodata' will not fit in region `FLASH'\n"
+        code, message = classify_link_failure(log)
+        self.assertEqual(code, "flash_budget_exceeded")
+        self.assertNotIn("None", message)
+        self.assertNotIn("bytes", message)  # no overage available -> no count
+
+    def test_ram_overflow_is_classified_as_ram_not_compiler(self) -> None:
+        log = (
+            "ld: region `RAM' overflowed by 512 bytes\n"
+            "ld: section `.bss' will not fit in region `RAM'\n"
+        )
+        code, message = classify_link_failure(log)
+        self.assertEqual(code, "ram_budget_exceeded")
+        self.assertIn("512 bytes", message)
+        self.assertIn("RAM", message)
+
+    def test_a_genuine_compiler_error_is_not_a_region_overflow(self) -> None:
+        log = (
+            "plaits/dsp/voice.cc:42:3: error: 'foo' was not declared in this scope\n"
+            "make: *** [voice.o] Error 1\n"
+        )
+        self.assertIsNone(classify_link_failure(log))
+
+
+class LinkedFirmwareSafetyTest(unittest.TestCase):
+    def elf(self, directory: str) -> Path:
+        path = Path(directory) / "plaits.elf"
+        path.write_bytes(b"ELF")
+        return path
+
+    @patch("container_server._linked_flash_span", return_value=1200)
+    @patch("container_server.parse_size", return_value=(1000, 100, 200))
+    @patch("container_server.parse_ram_bytes", return_value=300)
+    @patch("container_server.check_elf")
+    @patch("container_server._check_shared_buffer_alignment", return_value=0x20000c98)
+    def test_safe_build_checks_user_data_layout(
+        self, alignment, check, _ram, _size, _span
+    ) -> None:
+        config = "#define PLAITS_USER_DATA_REGION_COUNT 2\n"
+        with tempfile.TemporaryDirectory() as directory:
+            result = validate_linked_firmware(self.elf(directory), config)
+        check.assert_called_once()
+        alignment.assert_called_once()
+        self.assertEqual(result["sharedBufferAddress"], 0x20000c98)
+        self.assertEqual(result["flashBytes"], 1200)
+        self.assertEqual(result["userDataRegions"], 2)
+
+    @patch("container_server._linked_flash_span", return_value=0)
+    @patch("container_server.parse_size")
+    def test_flash_overflow_fails_closed(self, size, _span) -> None:
+        size.return_value = (FLASH_BUDGET_BYTES + 1, 0, 0)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(BuildError) as raised:
+                validate_linked_firmware(self.elf(directory), "")
+        self.assertEqual(raised.exception.code, "flash_budget_exceeded")
+
+    @patch("container_server._linked_flash_span", return_value=1000)
+    @patch("container_server.parse_size", return_value=(1000, 0, 0))
+    @patch("container_server.parse_ram_bytes",
+           return_value=RAM_BUDGET_BYTES - RAM_STACK_RESERVE_BYTES + 1)
+    def test_ram_overflow_includes_the_stack_reserve(self, _ram, _size, _span) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(BuildError) as raised:
+                validate_linked_firmware(self.elf(directory), "")
+        self.assertEqual(raised.exception.code, "ram_budget_exceeded")
+
+    @patch("container_server.subprocess.run")
+    def test_ram_bytes_count_every_sram_section(self, run) -> None:
+        # .data is copied into RAM at startup. Code placed there to run from
+        # SRAM makes it large, and the Berkeley `size` columns then file it
+        # under text with data 0, so RAM comes from the section list:
+        # everything linked at an SRAM address.
+        run.return_value.stdout = (
+            "plaits.elf  :\nsection  size  addr\n"
+            ".isr_vector  392  134250496\n"
+            ".text  120000  134250888\n"
+            f".data  864  {0x20000000}\n"
+            f".bss  21344  {0x20000000 + 864}\n"
+            f"._user_heap_stack  1024  {0x20000000 + 864 + 21344}\n"
+            ".ARM.attributes  48  0\n"
+            "Total  143672\n")
+        self.assertEqual(parse_ram_bytes(Path("plaits.elf")), 864 + 21344 + 1024)
+        self.assertEqual(run.call_args.args[0][1:], ["-A", "plaits.elf"])
+
+    @patch("container_server.check_elf", side_effect=ValueError("shared page"))
+    def test_unsafe_user_data_layout_fails_closed(self, _check) -> None:
+        config = "#define PLAITS_USER_DATA_REGION_COUNT 1\n"
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(BuildError) as raised:
+                validate_linked_firmware(self.elf(directory), config)
+        self.assertEqual(raised.exception.code, "unsafe_flash_layout")
+
+
+class SharedBufferLayoutTest(unittest.TestCase):
+    def test_aligned_arena_passes(self) -> None:
+        self.assertEqual(_validate_shared_buffer_layout(
+            "20000c98 00004000 B shared_buffer\n"), 0x20000c98)
+
+    def test_v4_canary_misalignment_is_rejected(self) -> None:
+        with self.assertRaises(BuildError) as raised:
+            _validate_shared_buffer_layout("20000c99 00004000 B shared_buffer\n")
+        self.assertEqual(raised.exception.code, "unsafe_ram_layout")
+        self.assertIn("0x20000c99", raised.exception.detail)
+
+    def test_all_non_aligned_offsets_are_rejected(self) -> None:
+        for offset in range(1, 8):
+            with self.subTest(offset=offset), self.assertRaises(BuildError):
+                _validate_shared_buffer_layout(
+                    f"{0x20001000 + offset:08x} 00004000 B shared_buffer\n")
+
+    def test_missing_duplicate_wrong_size_or_out_of_ram_fail_closed(self) -> None:
+        for symbols in (
+            "", "garbled output\n", "20001000 B shared_buffer\n",
+            "20001000 00003fff B shared_buffer\n",
+            "08001000 00004000 B shared_buffer\n",
+            "20004008 00004000 B shared_buffer\n",
+            "20001000 00004000 B shared_buffer\n" * 2,
+        ):
+            with self.subTest(symbols=symbols), self.assertRaises(BuildError):
+                _validate_shared_buffer_layout(symbols)
+
+    @patch("container_server.subprocess.run")
+    def test_elf_checker_uses_linked_symbols(self, run) -> None:
+        run.return_value.stdout = "20000c98 00004000 B shared_buffer\n"
+        self.assertEqual(_check_shared_buffer_alignment(Path("test.elf")), 0x20000c98)
+        self.assertEqual(run.call_args.args[0][1:],
+                         ["-S", "--defined-only", "test.elf"])
+
+    @patch("container_server._linked_flash_span", return_value=1000)
+    @patch("container_server.parse_size", return_value=(1000, 0, 20000))
+    @patch("container_server.parse_ram_bytes", return_value=20000)
+    @patch("container_server._check_shared_buffer_alignment",
+           side_effect=BuildError("unsafe_ram_layout", "misaligned buffer"))
+    def test_gate_applies_even_without_custom_resources(
+            self, alignment, _ram, _size, _span):
+        with tempfile.TemporaryDirectory() as directory:
+            elf = Path(directory) / "plaits.elf"
+            elf.write_bytes(b"ELF")
+            with self.assertRaises(BuildError) as raised:
+                validate_linked_firmware(elf, "#define PLAITS_ENGINE_COUNT 24\n")
+        self.assertEqual(raised.exception.code, "unsafe_ram_layout")
+        alignment.assert_called_once()
+
+
+class UserDataRegionCountTest(unittest.TestCase):
+    def test_generated_region_macro_counts_fm_and_custom_model_regions(self) -> None:
+        config = "#define PLAITS_USER_DATA_REGION_COUNT 5\n"
+        self.assertEqual(_declared_region_count(config), 5)
+        self.assertEqual(_declared_region_count("#define PLAITS_ENGINE_COUNT 24\n"), 0)
+
+
+class RequestSizeBudgetTest(unittest.TestCase):
+    """The container transport limit must cover every normalized recipe shape.
+
+    FM patches are 4 KiB as binary data, but the Worker forwards their packed
+    bytes as decimal JSON arrays. The original 32 KiB cap predated custom banks
+    and rejected valid one- and two-bank recipes before compilation.
+    """
+
+    @staticmethod
+    def bank_document(index: int) -> dict:
+        return {
+            "id": f"bank-{index}",
+            "packageId": f"local/bank-{index}",
+            "version": "1.0.0",
+            "digest": None,
+            "name": "N" * 80,
+            "author": "A" * 80,
+            "license": "Private",
+            "origin": "Local",
+            "description": "D" * 240,
+            "voices": [
+                {
+                    "name": "V" * 16,
+                    "algorithm": 32,
+                    # Three decimal digits per byte exercises the largest
+                    # canonical JSON representation a valid patch can have.
+                    "packed": [127] * 128,
+                }
+                for _voice in range(32)
+            ],
+        }
+
+    def maximum_bank_recipe_request(self) -> bytes:
+        recipe = {
+            "schemaVersion": 12,
+            "target": "mutable-instruments-plaits",
+            "firmware": "rubato-plaits",
+            "output": "audio-wav",
+            "slots": ["dx7-bank-a"] * 32,
+            "preferences": dict(DEFAULT_CONFIGURATION["preferences"]),
+            "initialOptions": dict(DEFAULT_CONFIGURATION["initialOptions"]),
+            "resources": {
+                "chordTables": [dict(table) for table in DEFAULT_CHORD_TABLES],
+                "userDataBanks": [
+                    {"slot": slot, "bank": self.bank_document(slot)}
+                    for slot in range(32)
+                ],
+            },
+        }
+        # Prove this is a contract-valid recipe before measuring the exact
+        # compact JSON shape the Worker forwards to the container.
+        validate_recipe(recipe)
+        return json.dumps(
+            {"buildKey": "a" * 64, "recipe": recipe},
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    def test_all_32_supported_custom_banks_fit_the_transport_budget(self) -> None:
+        request = self.maximum_bank_recipe_request()
+        self.assertGreater(len(request), 32 * 1024)
+        self.assertLessEqual(len(request), MAX_REQUEST_BYTES)
+        self.assertTrue(request_size_is_valid(len(request)))
+
+    def test_transport_budget_still_rejects_empty_and_oversized_bodies(self) -> None:
+        self.assertFalse(request_size_is_valid(0))
+        self.assertTrue(request_size_is_valid(MAX_REQUEST_BYTES))
+        self.assertFalse(request_size_is_valid(MAX_REQUEST_BYTES + 1))
+
+
+class SavedSpeechPreviewTest(unittest.TestCase):
+    def request(self) -> dict:
+        frame = struct.Struct("<BBhh8b")
+        first = (5, 20, 100, -100, 1, 2, 3, 4, 5, 6, 7, 8)
+        second = (6, 21, 101, -101, -1, -2, -3, -4, -5, -6, -7, -8)
+        packed = frame.pack(*first) + frame.pack(*second) + frame.pack(*second)
+        return {
+            "format": "rubato.plaits-lpc-bank-preview/v1",
+            "bank": {
+                "words": ["hello"],
+                "wordBoundaries": [0, 3],
+                "frameData": base64.b64encode(packed).decode("ascii"),
+            },
+        }
+
+    def test_saved_bank_reuses_the_firmware_resource_shape(self) -> None:
+        bank = _validate_saved_bank_preview_request(self.request())
+        self.assertEqual(bank["words"], ["hello"])
+        self.assertEqual(len(bank["frames"]), 3)
+
+    def test_plan_writer_removes_only_the_duplicate_firmware_guard(self) -> None:
+        frames = _validate_saved_bank_preview_request(self.request())["frames"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "word.plan"
+            _write_saved_plan(path, frames)
+            self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 2)
+
+    def test_malformed_saved_bank_is_rejected(self) -> None:
+        request = self.request()
+        request["bank"]["wordBoundaries"] = [0, 4]
+        with self.assertRaisesRegex(Exception, "saved Speech bank is invalid"):
+            _validate_saved_bank_preview_request(request)
+
+    def test_word_previews_with_different_lengths_concatenate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = [root / "short.wav", root / "long.wav"]
+            for source, frames in zip(sources, (b"\x00\x00", b"\x01\x00\x02\x00")):
+                with wave.open(str(source), "wb") as output:
+                    output.setnchannels(1)
+                    output.setsampwidth(2)
+                    output.setframerate(48000)
+                    output.writeframes(frames)
+            target = root / "bank.wav"
+            _concatenate_pcm_wavs(sources, target)
+            with wave.open(str(target), "rb") as result:
+                self.assertEqual(result.getnframes(), 3)
+
+
+class SavedNaturalSpeechPreviewTest(unittest.TestCase):
+    def test_cache_key_cannot_reuse_the_obsolete_fixed_window_preview(self) -> None:
+        encoded = b'{"bank":"starter"}'
+        old_fixed_window_key = _speech_job_key(
+            encoded, "saved-natural-speech-bank-preview-v1")
+        self.assertNotEqual(
+            _natural_speech_bank_preview_job_key(encoded),
+            old_fixed_window_key,
+        )
+
+    def test_cache_key_tracks_the_renderer_source_revision(self) -> None:
+        encoded = b'{"bank":"starter"}'
+        with patch("container_server.SOURCE_REVISION", "renderer-a"):
+            first = _natural_speech_bank_preview_job_key(encoded)
+        with patch("container_server.SOURCE_REVISION", "renderer-b"):
+            second = _natural_speech_bank_preview_job_key(encoded)
+        self.assertNotEqual(first, second)
+
+
+class SpeechEncodeRequestTest(unittest.TestCase):
+    @staticmethod
+    def request(word_count: int) -> dict:
+        return {
+            "format": "rubato.plaits-lpc-word-bank/v1",
+            "name": "Capacity test",
+            "language": "en-US",
+            "entries": [
+                {"word": f"word {index + 1}"} for index in range(word_count)
+            ],
+            "synthesis": {
+                "voice": "af_heart",
+                "pitchContour": "flat-to-natural",
+                "referencePitchHz": 100,
+            },
+        }
+
+    def test_accepts_thirty_two_words_but_not_thirty_three(self) -> None:
+        self.assertEqual(len(_validate_speech_request(self.request(32))["entries"]), 32)
+        with self.assertRaisesRegex(Exception, "between 1 and 32"):
+            _validate_speech_request(self.request(33))
+
+
+class FirmwareOutputTargetTest(unittest.TestCase):
+    def test_wav_uses_the_audio_encoder_target(self) -> None:
+        self.assertEqual(_build_targets("audio-wav"), ["wav"])
+
+    def test_hex_is_application_only_and_keeps_the_binary_digest(self) -> None:
+        targets = _build_targets("intel-hex")
+        self.assertEqual(targets, ["bin", "hex"])
+        self.assertNotIn("wav", targets)
+        self.assertFalse(any("combo" in target or "bootloader" in target for target in targets))
+
+
+class StereoSelectionTest(unittest.TestCase):
+    """The seam where the aux-output NUMBER decides whether stereo is compiled.
+
+    Nothing else notices when the firmware renumbers that option: the recipe
+    binds by name, the build still succeeds, and the only symptom is a stereo
+    firmware that plays mono. So read it back through validate_recipe rather
+    than restating the number.
+    """
+
+    def recipe_for(self, aux_output: str) -> object:
+        recipe = json.loads(
+            (Path(__file__).parent / "default_recipe.json").read_text(encoding="utf-8")
+        )
+        recipe["schemaVersion"] = 4
+        recipe["preferences"] = {"navigationMode": "linear"}
+        recipe["initialOptions"] = dict(
+            DEFAULT_CONFIGURATION["initialOptions"], auxOutput=aux_output
+        )
+        return validate_recipe(recipe)
+
+    def test_only_a_stereo_recipe_selects_the_stereo_render_path(self) -> None:
+        self.assertTrue(_recipe_is_stereo(self.recipe_for("stereo")))
+        for aux_output in ("alternate-model", "square-subosc", "sine-subosc"):
+            self.assertFalse(
+                _recipe_is_stereo(self.recipe_for(aux_output)), msg=aux_output
+            )
+
+    def test_a_stereo_recipe_without_a_list_keeps_every_engine_stereo(self) -> None:
+        # Schema <= 9 carried no per-engine list; the whole build is stereo.
+        self.assertEqual(_stereo_disable_flags(True, None), [])
+
+    def test_a_mono_recipe_disables_every_engine_stereo_path(self) -> None:
+        self.assertEqual(
+            len(_stereo_disable_flags(False, None)), len(ALL_STEREO_MACROS)
+        )
+
+
+class StereoMacroRegistrationTest(unittest.TestCase):
+    """STEREO_MACROS and the makefile's PLAITS_STEREO_MODELS must agree.
+
+    They are two hand-maintained lists of the same fact -- which engines have a
+    gated stereo render path. Drift is SILENT and asymmetric: a macro the
+    makefile knows and this map does not can never be switched off (the engine
+    always pays for its stereo branch), while a macro this map emits and the
+    makefile does not is a make variable nothing consumes. Neither breaks a
+    build, so only a test catches it. Adding four Braids ports to both lists at
+    once is what motivated this.
+    """
+
+    def makefile_macros(self) -> set[str]:
+        makefile = (
+            Path(__file__).resolve().parents[2] / "plaits" / "makefile"
+        ).read_text()
+        start = makefile.index("PLAITS_STEREO_MODELS =")
+        # A backslash-continued make variable: take lines until one does not
+        # continue.
+        lines = []
+        for line in makefile[start:].splitlines():
+            lines.append(line)
+            if not line.rstrip().endswith("\\"):
+                break
+        body = " ".join(lines).replace("\\", "")
+        body = body.split("=", 1)[1]
+        return {pair.split(":", 1)[0] for pair in body.split()}
+
+    def test_every_makefile_macro_is_mapped_from_a_catalog_id(self) -> None:
+        self.assertEqual(self.makefile_macros(), set(ALL_STEREO_MACROS))
+
+
+class NaturalSpeechRecordingPreviewTest(unittest.TestCase):
+    """Every preview the editor offers a button for has to come back.
+
+    "Use my voice" renders three whole-bank previews -- Source, Natural, Flat --
+    and the Source one silently had no audio to play because the manifest and
+    this handler both listed only two modes. A dropped key in a comprehension
+    reads as an unremarkable line, so the shape is asserted rather than eyeballed.
+    """
+
+    MODES = ("source", "natural", "flat")
+
+    def fake_run(self, _script: str, argv: list[str]) -> None:
+        output = Path(argv[argv.index("--output-dir") + 1])
+        files = {}
+        for mode in self.MODES:
+            name = f"bank-{mode}.wav"
+            (output / name).write_bytes(mode.encode("ascii"))
+            files[mode] = name
+        for mode in self.MODES:
+            (output / f"word-00-{mode}.wav").write_bytes(b"w")
+        (output / "recording-manifest.json").write_text(json.dumps({
+            "entries": [{
+                "index": 0, "frames": 40, "guardFrames": 0, "frameBytes": 920,
+                "durationSeconds": 1.0,
+                "files": {mode: f"word-00-{mode}.wav" for mode in self.MODES},
+            }],
+            "bank": {"wordBoundaries": [0, 40], "frameData": ""},
+            "bankFiles": files,
+            "totals": {"words": 1, "frames": 40},
+            "segmentation": {}, "normalization": {}, "sampleRate": 16000,
+        }), encoding="utf-8")
+
+    def encode(self) -> dict:
+        with patch("container_server._run_speech_script", side_effect=self.fake_run):
+            return encode_natural_speech_recording(b"RIFF")
+
+    def test_the_whole_bank_carries_a_preview_for_every_mode(self) -> None:
+        result = self.encode()
+        self.assertEqual(set(result["bankAudio"]), set(self.MODES))
+        for mode in self.MODES:
+            self.assertTrue(result["bankAudio"][mode].startswith("data:audio/wav;base64,"))
+
+    def test_each_word_carries_a_preview_for_every_mode(self) -> None:
+        result = self.encode()
+        self.assertEqual(set(result["entries"][0]["audio"]), set(self.MODES))
+
+
+class SineTableFallbackTests(unittest.TestCase):
+    """lut_sine is linked into SRAM unless that breaks the RAM budget."""
+
+    def _build(self, results: list) -> tuple[list[list[str]], dict[str, str], Path]:
+        calls: list[list[str]] = []
+        root = Path(tempfile.mkdtemp())
+
+        def fake_make(command, _environment, build_dir, _output, _config):
+            calls.append(list(command))
+            outcome = results[len(calls) - 1]
+            if isinstance(outcome, BuildError):
+                (build_dir / "plaits").mkdir(exist_ok=True)
+                (build_dir / "plaits" / "resources.o").write_bytes(b"sram")
+                raise outcome
+            artifacts = build_dir / "plaits"
+            artifacts.mkdir(exist_ok=True)
+            (artifacts / "plaits.bin").write_bytes(b"bin")
+            (artifacts / "plaits.wav").write_bytes(b"wav")
+            return ("log", artifacts / "plaits.wav", artifacts / "plaits.bin",
+                    {"textBytes": 1, "dataBytes": 2, "bssBytes": 3})
+
+        recipe = json.loads(
+            (Path(__file__).with_name("default_recipe.json")).read_text())
+        with patch("container_server.BUILD_ROOT", root), \
+             patch("container_server._make_and_validate", side_effect=fake_make):
+            _, _, metadata = build_firmware({"buildKey": "a" * 64, "recipe": recipe})
+        return calls, metadata, root / ("a" * 64)
+
+    def test_the_table_goes_to_sram_when_it_fits(self) -> None:
+        calls, metadata, _ = self._build(["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertIn("PLAITS_SINE_LUT_IN_RAM=1", calls[0])
+        self.assertIn("PLAITS_SLOW_FLASH_DATA=1", calls[0])
+        self.assertEqual(metadata["X-Plaits-Sine-Table"], "sram")
+        self.assertEqual(metadata["X-Plaits-Slow-Flash-Data"], "on")
+
+    def test_a_palette_short_of_ram_is_relinked_with_the_table_in_flash(self) -> None:
+        calls, metadata, build_dir = self._build(
+            [BuildError("ram_budget_exceeded", "over"), "ok"])
+        self.assertEqual(len(calls), 2)
+        self.assertIn("PLAITS_SINE_LUT_IN_RAM=1", calls[0])
+        self.assertIn("PLAITS_SINE_LUT_IN_RAM=0", calls[1])
+        self.assertNotIn("PLAITS_SINE_LUT_IN_RAM=1", calls[1])
+        self.assertFalse((build_dir / "plaits" / "resources.o").exists())
+        self.assertEqual(metadata["X-Plaits-Sine-Table"], "flash")
+
+    def test_other_failures_are_not_retried(self) -> None:
+        with self.assertRaises(BuildError) as raised:
+            self._build([BuildError("compiler_failed", "error")])
+        self.assertEqual(raised.exception.code, "compiler_failed")
+
+    def test_a_palette_over_flash_even_without_the_flag_still_fails(self) -> None:
+        with self.assertRaises(BuildError) as raised:
+            self._build([BuildError("flash_budget_exceeded", "over"),
+                         BuildError("flash_budget_exceeded", "still over")])
+        self.assertEqual(raised.exception.code, "flash_budget_exceeded")
+
+    def test_a_palette_short_of_flash_drops_slow_flash_data(self) -> None:
+        calls, metadata, build_dir = self._build(
+            [BuildError("flash_budget_exceeded", "over"), "ok"])
+        self.assertEqual(len(calls), 2)
+        self.assertIn("PLAITS_SLOW_FLASH_DATA=1", calls[0])
+        self.assertIn("PLAITS_SLOW_FLASH_DATA=0", calls[1])
+        self.assertIn("PLAITS_SINE_LUT_IN_RAM=1", calls[1])
+        self.assertEqual(metadata["X-Plaits-Slow-Flash-Data"], "off")
+        self.assertEqual(metadata["X-Plaits-Sine-Table"], "sram")
+
+    def test_ram_and_flash_fallbacks_combine(self) -> None:
+        calls, metadata, _ = self._build([
+            BuildError("ram_budget_exceeded", "over"),
+            BuildError("flash_budget_exceeded", "over"),
+            "ok"])
+        self.assertEqual(len(calls), 3)
+        self.assertIn("PLAITS_SINE_LUT_IN_RAM=0", calls[2])
+        self.assertIn("PLAITS_SLOW_FLASH_DATA=0", calls[2])
+        self.assertEqual(metadata["X-Plaits-Sine-Table"], "flash")
+        self.assertEqual(metadata["X-Plaits-Slow-Flash-Data"], "off")
+
+    def test_the_slow_flash_data_list_matches_the_makefile(self) -> None:
+        makefile = (Path(__file__).resolve().parents[2] / "plaits" / "makefile").read_text()
+        block = makefile.split("PLAITS_SLOW_FLASH_DATA_OBJECTS =", 1)[1].split("\nifeq", 1)[0]
+        listed = block.replace("\\", " ").split()
+        self.assertEqual(sorted(listed), sorted(SLOW_FLASH_DATA_OBJECTS))
+
+    def test_a_palette_over_budget_even_in_flash_still_fails(self) -> None:
+        with self.assertRaises(BuildError) as raised:
+            self._build([BuildError("ram_budget_exceeded", "over"),
+                         BuildError("ram_budget_exceeded", "still over")])
+        self.assertEqual(raised.exception.code, "ram_budget_exceeded")
+
+
+if __name__ == "__main__":
+    unittest.main()

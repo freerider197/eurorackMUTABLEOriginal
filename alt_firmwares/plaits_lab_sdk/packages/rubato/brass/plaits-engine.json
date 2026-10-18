@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "sdk": "plaits-engine-cpp-v1",
+  "packageType": "builtin-reference",
+  "id": "rubato/brass",
+  "catalogId": "brass",
+  "version": "1.0.0",
+  "name": "Brass",
+  "author": "Lyle Mills, after Perry R. Cook and Gary P. Scavone",
+  "origin": "Rubato Lab",
+  "license": "MIT",
+  "description": "A lip-reed brass instrument after Perry R. Cook and Gary P. Scavone's STK brass model. Breath makes it speak, and the lip knob climbs the bore's harmonic series the way a bugle player does.",
+  "family": "Physical",
+  "tags": [
+    "brass",
+    "lip",
+    "physical",
+    "waveguide",
+    "wind",
+    "stk"
+  ],
+  "controls": [
+    {
+      "id": "harmonics",
+      "label": "Lip",
+      "description": "Lip tension. Climbs the bore's partials — unison, fifth, octave, tenth, twelfth — and bends each one sharp as it rises."
+    },
+    {
+      "id": "timbre",
+      "label": "Breath",
+      "description": "Raises breath pressure from gentle to strong, staying above the model's oscillation threshold across the full range."
+    },
+    {
+      "id": "morph",
+      "label": "Bell",
+      "description": "Bell size, from a stopped horn that barely sustains to an open one that rings and overblows easily."
+    },
+    {
+      "id": "macro",
+      "label": "Buzz",
+      "description": "Buzz. How far the lips swing into closure each cycle — a soft flutter at the bottom, a real mouthpiece buzz at the top."
+    }
+  ],
+  "outputs": {
+    "main": "Pressure inside the mouthpiece; the stereo toggle does not change this fixed MAIN/AUX pair.",
+    "aux": "Valve flow that drives the bore; the stereo toggle does not change this fixed MAIN/AUX pair."
+  },
+  "trigger": "Empties the bore and resets the lips so each note starts the same way.",
+  "source": {
+    "root": "../../../../..",
+    "header": "plaits/dsp/engine2/brass_engine.h",
+    "files": [
+      "plaits/dsp/engine2/brass_engine.cc"
+    ],
+    "className": "BrassEngine"
+  },
+  "postProcessing": {
+    "alreadyEnveloped": false,
+    "outGain": -1.0,
+    "auxGain": 0.8
+  },
+  "scenarios": "tests/scenarios.json",
+  "upstream": "After STK Brass (Cook's TBone/HosePlayer); redesigned because upstream does not sustain"
+}

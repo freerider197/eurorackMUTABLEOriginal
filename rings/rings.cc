@@ -93,8 +93,8 @@ void FillBuffer(Codec::Frame* input, Codec::Frame* output, size_t size) {
   Patch patch;
   
   cv_scaler.DetectAudioNormalization(input, size);
-  cv_scaler.Read(&patch, &performance_state);
-  
+  cv_scaler.Read(&patch, &performance_state, &settings);
+
   if (settings.state().easter_egg) {
     for (size_t i = 0; i < size; ++i) {
       in[i] = static_cast<float>(input[i].r) / 32768.0f;
@@ -115,7 +115,7 @@ void FillBuffer(Codec::Frame* input, Codec::Frame* output, size_t size) {
     strummer.Process(in, size, &performance_state);
     part.Process(performance_state, patch, in, out, aux, size);
   }
-  
+
   for (size_t i = 0; i < size; ++i) {
     output[i].l = Clip16(static_cast<int32_t>(out[i] * 32768.0f));
     output[i].r = Clip16(static_cast<int32_t>(aux[i] * 32768.0f));

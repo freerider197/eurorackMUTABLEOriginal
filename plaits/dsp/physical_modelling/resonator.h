@@ -67,8 +67,14 @@ class ResonatorSvf {
     float gains[batch_size];
     for (int i = 0; i < batch_size; ++i) {
       g[i] = stmlib::OnePole::tan<stmlib::FREQUENCY_FAST>(f[i]);
-      r[i] = 1.0f / q[i];
-      h[i] = 1.0f / (1.0f + r[i] * g[i] + g[i] * g[i]);
+      // One divide where there were two (14 cycles each, FPU stalled, for
+      // every mode on every block): with d = q + g + q g^2,
+      // r = 1 / q = d / (q d) and h = 1 / (1 + r g + g^2) = q^2 / (q d).
+      // Same coefficients up to rounding; q >= 1, so q d cannot underflow.
+      const float d = q[i] + g[i] + q[i] * g[i] * g[i];
+      const float inverse = 1.0f / (q[i] * d);
+      r[i] = d * inverse;
+      h[i] = q[i] * q[i] * inverse;
       r_plus_g[i] = r[i] + g[i];
       state_1[i] = state_1_[i];
       state_2[i] = state_2_[i];
@@ -97,7 +103,71 @@ class ResonatorSvf {
       state_2_[i] = state_2[i];
     }
   }
-  
+
+  // Same filter bank, but the modes at even batch positions accumulate into
+  // `even` and those at odd positions into `odd`, each with one gain as in
+  // Process(). Resonator::ProcessStereo pans by mode parity with one fixed
+  // gain pair per parity, so it applies the panning to the two sums once per
+  // sample instead of carrying a second gain and accumulator per mode, which
+  // ran out of FPU registers and nearly doubled the per-mode cost.
+  template<stmlib::FilterMode mode>
+  void ProcessEvenOdd(
+      const float* f,
+      const float* q,
+      const float* gain,
+      const float* in,
+      float* even,
+      float* odd,
+      size_t size) {
+    float g[batch_size];
+    float r[batch_size];
+    float r_plus_g[batch_size];
+    float h[batch_size];
+    float state_1[batch_size];
+    float state_2[batch_size];
+    float gains[batch_size];
+    for (int i = 0; i < batch_size; ++i) {
+      g[i] = stmlib::OnePole::tan<stmlib::FREQUENCY_FAST>(f[i]);
+      // One divide where there were two (14 cycles each, FPU stalled, for
+      // every mode on every block): with d = q + g + q g^2,
+      // r = 1 / q = d / (q d) and h = 1 / (1 + r g + g^2) = q^2 / (q d).
+      // Same coefficients up to rounding; q >= 1, so q d cannot underflow.
+      const float d = q[i] + g[i] + q[i] * g[i] * g[i];
+      const float inverse = 1.0f / (q[i] * d);
+      r[i] = d * inverse;
+      h[i] = q[i] * q[i] * inverse;
+      r_plus_g[i] = r[i] + g[i];
+      state_1[i] = state_1_[i];
+      state_2[i] = state_2_[i];
+      gains[i] = gain[i];
+    }
+
+    while (size--) {
+      float s_in = *in++;
+      float s_even = 0.0f;
+      float s_odd = 0.0f;
+      for (int i = 0; i < batch_size; ++i) {
+        const float hp = (s_in - r_plus_g[i] * state_1[i] - state_2[i]) * h[i];
+        const float bp = g[i] * hp + state_1[i];
+        state_1[i] = g[i] * hp + bp;
+        const float lp = g[i] * bp + state_2[i];
+        state_2[i] = g[i] * bp + lp;
+        const float s = (mode == stmlib::FILTER_MODE_LOW_PASS) ? lp : bp;
+        if (i & 1) {
+          s_odd += gains[i] * s;
+        } else {
+          s_even += gains[i] * s;
+        }
+      }
+      *even++ += s_even;
+      *odd++ += s_odd;
+    }
+    for (int i = 0; i < batch_size; ++i) {
+      state_1_[i] = state_1[i];
+      state_2_[i] = state_2[i];
+    }
+  }
+
  private:
   float state_1_[batch_size];
   float state_2_[batch_size];
@@ -119,7 +189,21 @@ class Resonator {
       const float* in,
       float* out,
       size_t size);
-  
+  // alt firmware: stereo variant - even-numbered modes lean left and
+  // odd-numbered modes lean right, with equal-power gains, so that every
+  // mode remains audible on both channels. Unlike Process(), it does not
+  // add to `left`/`right`: both must be zero on entry (it sums the two
+  // parities there, then pans them in place).
+  void ProcessStereo(
+      float f0,
+      float structure,
+      float brightness,
+      float damping,
+      const float* in,
+      float* left,
+      float* right,
+      size_t size);
+
  private:
   int resolution_;
   

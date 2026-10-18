@@ -35,6 +35,8 @@
 
 #include "plaits/dsp/oscillator/oscillator.h"
 
+#include "plaits/dsp/extended_tzfm.h"
+
 namespace plaits {
 
 using namespace std;
@@ -114,22 +116,62 @@ void LPCSpeechSynthWordBank::Init(
     const LPCSpeechSynthWordBankData* word_banks,
     int num_banks,
     BufferAllocator* allocator) {
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+  Init(word_banks, num_banks, NULL, 0, allocator);
+#else
   word_banks_ = word_banks;
   num_banks_ = num_banks;
   frames_ = allocator->Allocate<LPCSpeechSynth::Frame>(
       kLPCSpeechSynthMaxFrames);
-  word_boundaries_ = allocator->Allocate<int>(kLPCSpeechSynthMaxWords);
+  word_boundaries_ = allocator->Allocate<int>(
+      kLPCSpeechSynthMaxWordBoundaries);
+  Reset();
+#endif
+}
+
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+void LPCSpeechSynthWordBank::Init(
+    const LPCSpeechSynthWordBankData* word_banks,
+    int num_banks,
+    const LPCSpeechSynthRawWordBankData* raw_word_banks,
+    int num_raw_word_banks,
+    BufferAllocator* allocator) {
+  word_banks_ = word_banks;
+  num_banks_ = num_banks;
+  raw_word_banks_ = raw_word_banks;
+  num_raw_word_banks_ = num_raw_word_banks;
+  frames_ = allocator->Allocate<LPCSpeechSynth::Frame>(
+      kLPCSpeechSynthMaxFrames);
+  word_boundaries_ = allocator->Allocate<int>(
+      kLPCSpeechSynthMaxWordBoundaries);
   Reset();
 }
+#endif
 
 void LPCSpeechSynthWordBank::Reset() {
   loaded_bank_ = -1;
   num_frames_ = 0;
   num_words_ = 0;
-  fill(
-      &word_boundaries_[0],
-      &word_boundaries_[kLPCSpeechSynthMaxWords], 0);
+  // GetWordBoundaries() does not read the array while num_words_ is zero, and
+  // Load() overwrites every live boundary before publishing a non-zero count.
 }
+
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+void InitRecipeSpeechWordBank(
+    LPCSpeechSynthWordBank* word_bank,
+    BufferAllocator* allocator) {
+  word_bank->Init(
+      custom_speech_stock_word_banks,
+      CUSTOM_SPEECH_NUM_STOCK_BANKS,
+      custom_speech_word_banks,
+      CUSTOM_SPEECH_NUM_WORD_BANKS,
+      allocator);
+}
+
+int RecipeSpeechWordBankCount() {
+  return CUSTOM_SPEECH_NUM_STOCK_BANKS + CUSTOM_SPEECH_NUM_WORD_BANKS;
+}
+#endif
 
 size_t LPCSpeechSynthWordBank::LoadNextWord(const uint8_t* data) {
   BitStream bitstream;
@@ -181,12 +223,39 @@ size_t LPCSpeechSynthWordBank::LoadNextWord(const uint8_t* data) {
 }
 
 bool LPCSpeechSynthWordBank::Load(int bank) {
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+  if (bank == loaded_bank_ || bank < 0 ||
+      bank >= num_banks_ + num_raw_word_banks_) {
+#else
   if (bank == loaded_bank_ || bank >= num_banks_) {
+#endif
     return false;
   }
 
   num_frames_ = 0;
   num_words_ = 0;
+
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+  if (bank >= num_banks_) {
+    const LPCSpeechSynthRawWordBankData& raw = raw_word_banks_[bank - num_banks_];
+    if (raw.num_words > kLPCSpeechSynthMaxWords ||
+        raw.num_frames > kLPCSpeechSynthMaxFrames) {
+      return false;
+    }
+    num_frames_ = raw.num_frames;
+    num_words_ = raw.num_words;
+    copy(raw.frames, raw.frames + num_frames_, frames_);
+    for (int i = 0; i < num_frames_; ++i) {
+      frames_[i].energy = MatchCustomSpeechBankEnergy(frames_[i].energy);
+    }
+    copy(
+        raw.word_boundaries,
+        raw.word_boundaries + num_words_ + 1,
+        word_boundaries_);
+    loaded_bank_ = bank;
+    return true;
+  }
+#endif
   
   const uint8_t* data = word_banks_[bank].data;
   size_t size = word_banks_[bank].size;
@@ -208,6 +277,9 @@ void LPCSpeechSynthController::Init(LPCSpeechSynthWordBank* word_bank) {
   word_bank_ = word_bank;
   
   clock_phase_ = 0.0f;
+#if PLAITS_BUILD_EXTENDED_TZFM
+  fm_integral_ = 0.0f;
+#endif
   playback_frame_ = -1;
   last_playback_frame_ = -1;
   remaining_frame_samples_ = 0;
@@ -232,7 +304,11 @@ void LPCSpeechSynthController::Render(
     float gain,
     float* excitation,
     float* output,
-    size_t size) {
+    size_t size
+#if PLAITS_BUILD_EXTENDED_TZFM
+    , const float* frequency_offset
+#endif
+    ) {
   const float rate_ratio = SemitonesToRatio((formant_shift - 0.5f) * 36.0f);
   const float rate = rate_ratio / 6.0f;
   
@@ -248,6 +324,7 @@ void LPCSpeechSynthController::Render(
     if (reset_everything) {
       playback_frame_ = -1;
       last_playback_frame_ = -1;
+      if (!free_running) remaining_frame_samples_ = 0;
     }
   }
   
@@ -276,6 +353,18 @@ void LPCSpeechSynthController::Render(
     remaining_frame_samples_ = 0;
   }
   
+  // Word banks with a patched trigger must wait for an utterance. The idle
+  // scan frame is otherwise audible on every unused polyphonic voice, and
+  // again whenever a bank change resets playback. Vowels and unpatched
+  // scanning intentionally remain continuous.
+  if (bank >= 0 && !free_running && playback_frame_ == -1) {
+    gain = 0.0f;
+    // Vowel scanning can leave the interpolator at unity while the outer
+    // LPG is closed. Entering a triggered word bank bypasses that LPG, so
+    // the old gain must not leak through as a one-block fade to silence.
+    gain_ = 0.0f;
+  }
+
   if (playback_frame_ == -1 && remaining_frame_samples_ == 0) {
     synth_.PlayFrame(
         frames,
@@ -302,17 +391,31 @@ void LPCSpeechSynthController::Render(
     copy(&next_sample_[0], &next_sample_[2], &this_sample[0]);
     fill(&next_sample_[0], &next_sample_[2], 0.0f);
     
+#if PLAITS_BUILD_EXTENDED_TZFM
+    float tick_offset = 0.0f;
+    const float offset = frequency_offset ? *frequency_offset++ : 0.0f;
+    if (!frequency_offset) fm_integral_ = 0.0f;
+    fm_integral_ += offset;
+#endif
     clock_phase_ += rate;
     if (clock_phase_ >= 1.0f) {
       clock_phase_ -= 1.0f;
       float reset_time = clock_phase_ / rate;
+#if PLAITS_BUILD_EXTENDED_TZFM
+      tick_offset = fm_integral_ - offset * reset_time;
+      fm_integral_ = offset * reset_time;
+#endif
       float new_sample[2];
       
       synth_.Render(
           prosody_amount,
           pitch_shift,
           &new_sample[0],
-          &new_sample[1], 1);
+          &new_sample[1], 1
+#if PLAITS_BUILD_EXTENDED_TZFM
+          , tick_offset, frequency_offset != NULL
+#endif
+          );
       
       float discontinuity[2] = {
         new_sample[0] - sample_[0],

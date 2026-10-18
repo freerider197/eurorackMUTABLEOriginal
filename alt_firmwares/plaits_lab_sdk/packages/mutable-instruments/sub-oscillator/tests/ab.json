@@ -1,0 +1,233 @@
+{
+  "note": "This package merges TWO Braids shapes (SQUARE_SUB, SAW_SUB), so every case sets its own \"shape\" key rather than relying on a top-level default. p1 (TIMBRE, macro_oscillator.cc:230) drives the main oscillator's own shape parameter -- pulse width for SQUARE_SUB (analog_oscillator.cc:206), ramp spacing for SAW_SUB (analog_oscillator.cc:353) -- and maps to the engine's TIMBRE. p2 (COLOR, macro_oscillator.cc:236-249) drives both the sub's octave choice and its blend level and maps to the engine's MORPH. HARMONICS is the port's own continuous stand-in for Braids' discrete shape switch, so it is pinned to 0.0 (SQUARE_SUB) or 1.0 (SAW_SUB) per case rather than swept. MACRO has no Braids equivalent and sits at 0.5 in every case but `square-macro-max`, which checks the other end of ApplyMacro's stock plateau. TOLERANCE POLICY: the baseline is acRmsDb 1.0, spectrumDb 1.0, cents 2.0. All 21 cases pass. Three proven measurement exceptions are encoded explicitly instead of leaving the suite permanently red. (1) `square-timbre-sweep` uses spectrumDb 1.9 for its measured 1.70 dB: comparing the REFERENCE against its own DC-detrend already reads 1.44 dB, so the baseline is unreachable for any port that removes DC; `saw-timbre-sweep` is the committed zero-mean control and passes at 0.39 dB. (2) `square-timbre-max-high-note` uses spectrumDb 1.6 for its measured 1.35 dB because the reference renderer's halfband rings past full scale and then int16-clamps 47.4% of its samples; float-decimating the same reference puts the port at 0.80 dB. (3) four cases omit `cents` because the estimator is unusable there: two low-sub cases return its own f_max boundary on both sides, while both note-84 maximum-TIMBRE cases lock the 48 kHz port to a four-period lag and report about -2400 cents. The note-84 saw control has no thin notch or reference clamp, passes spectrum at 0.38 dB, and produces the same false pitch, proving the metric rather than the waveform is broken.",
+  "cases": [
+    {
+      "id": "square-stock",
+      "name": "SQUARE_SUB, both knobs centred",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.5, "p2": 0.5},
+      "engine": {"timbre": 0.5, "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-timbre-min",
+      "name": "SQUARE_SUB, TIMBRE at minimum (symmetric pulse)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.0, "p2": 0.5},
+      "engine": {"timbre": 0.0, "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-timbre-tolerance-edge",
+      "name": "SQUARE_SUB, TIMBRE 0.88 (where the old pulse-width law first broke)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.88, "p2": 0.5},
+      "engine": {"timbre": 0.88, "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "Kept as the lower bound of the region the wave-1 pulse-width law got wrong. That law (`pw = 0.5 - 0.48*timbre`) first broke 1 dB HERE, at +1.11 dB AC RMS / 1.51 dB spectrum. The engine now takes its width from Braids' own integer -- `(32768 - min(int16(timbre*32767), 32000)) / 65536` -- and this case MEASURES +0.02 dB / 0.31 dB.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-timbre-knee",
+      "name": "SQUARE_SUB, TIMBRE 0.977 (Braids' 32000 clamp knee)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.977, "p2": 0.5},
+      "engine": {"timbre": 0.977, "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "The knee itself: `parameter_ = int16(0.977 * 32767) = 32013` meets RenderSquare's 32000 clamp (analog_oscillator.cc:194-196), so from here up the pulse holds at 768/65536 = 0.011719 instead of continuing to narrow. This was the WORST point of the wave-1 law -- its pulse was 0.0310 against Braids' 0.0117, +4.44 dB AC RMS / 5.13 dB spectrum. Reproducing the clamp on the integer MEASURES -0.08 dB / 0.43 dB, identical to square-timbre-max below, which is the point: past the knee the two settings are the same waveform.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-timbre-max",
+      "name": "SQUARE_SUB, TIMBRE at maximum (thinnest pulse)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 1.0, "p2": 0.5},
+      "engine": {"timbre": 1.0, "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "MEASURED -0.08 dB AC RMS / 0.43 dB spectrum, against +2.56 dB / 2.98 dB before the pulse-width law was reproduced.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-timbre-sweep",
+      "name": "SQUARE_SUB, TIMBRE swept 0 -> 1 across the render",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": [0.0, 1.0], "p2": 0.5},
+      "engine": {"timbre": [0.0, 1.0], "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "DECLARED DC-POLICY EXCEPTION. MEASURED -0.51 dB AC RMS / 1.70 dB spectrum, of which 1.44 dB is the retained Braids DC arriving in the spectral metric. Braids' pulse-width-dependent offset ramps 0.017 -> 0.949 across this render; this port removes it analytically because keeping it fails the SDK audio-health gate and thumps the LPG. Strip the slow DC from the reference and this engine measures 0.44 dB / -0.16 dB against it. Compare the reference against its OWN detrend and the metric still reads 1.44 dB, proving the baseline 1.0 dB is unreachable for any DC-removing port. The case-specific 1.9 dB tolerance is the measured 1.70 plus 0.2 dB regression margin; the zero-mean control `saw-timbre-sweep` stays at the 1.0 dB baseline and passes at 0.39 dB.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.9}
+    },
+    {
+      "id": "square-timbre-max-retrigger",
+      "name": "SQUARE_SUB, TIMBRE at maximum, retriggered at 2 Hz",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "triggerHz": 2,
+      "braids": {"p1": 1.0, "p2": 0.5},
+      "engine": {"timbre": 1.0, "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "The trigger path, which nothing used to cover. Braids' MacroOscillator::Strike() touches only digital_oscillator_ (macro_oscillator.h:80-82), so a note-on does NOTHING to a SUB model, and this engine now matches that exactly. It is the same setting as square-timbre-max and MEASURES the same numbers to two decimals (-0.08 dB AC RMS / 0.43 dB spectrum), which is the assertion: a trigger changes nothing. Wave 1's Render() called Reset() here, which zeroed a DC blocker that then re-armed from scratch -- a 0.54 full-scale DC step decaying over ~20 ms on EVERY note, the thump the blocker existed to remove -- and re-Init'd the oscillators, gliding the pitch up from their 0.01 default across the first block.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-stock-high-note",
+      "name": "SQUARE_SUB, both knobs centred, note 84",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 84,
+      "braids": {"p1": 0.5, "p2": 0.5},
+      "engine": {"timbre": 0.5, "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "The control for square-timbre-max-high-note: MEASURED +0.05 dB AC RMS / 0.49 dB spectrum. Pitch is an axis for this engine because wave 1 clamped its pulse width against FREQUENCY where Braids does not; at a moderate width that clamp never engaged, so this case was clean then too.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-timbre-max-high-note",
+      "name": "SQUARE_SUB, TIMBRE at maximum, note 84",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 84,
+      "braids": {"p1": 1.0, "p2": 0.5},
+      "engine": {"timbre": 1.0, "harmonics": 0.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "The case that caught wave 1's frequency-dependent pulse-width floor. It read +8.35 dB AC RMS / 5.04 dB spectrum and now reads -0.92 dB / 1.35 dB. The remaining spectrum figure is the reference renderer: its 127-tap decimation rings past full scale and the WAV writer clamps 47.4% of the reference samples. Float-decimating the same 96 kHz render puts this engine at 0.80 dB, inside the baseline. The 1.6 dB case tolerance is the measured clamped-reference result plus margin. `cents` is omitted because autocorrelation locks the 48 kHz port to a four-period lag and reports -2398 cents; the saw control at the same note has no thin notch, passes spectrum at 0.38 dB, and reports the same false octave.",
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 1.6}
+    },
+    {
+      "id": "square-morph-low-octave",
+      "name": "SQUARE_SUB, MORPH fully down (sub two octaves down, max blend)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.5, "p2": 0.0},
+      "engine": {"timbre": 0.5, "harmonics": 0.0, "morph": 0.0, "macro": 0.5},
+      "note_case": "Also the check that the sub really is 24 semitones down: the f0 estimator locks the sub at 27.5007 Hz for Braids and 27.5729 Hz for the port, a raw +4.54 cents, which is exactly the kCorrectedSampleRate offset the harness subtracts -- so the octave constant is exact.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-morph-high-octave",
+      "name": "SQUARE_SUB, MORPH fully up (sub one octave down, max blend)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.5, "p2": 1.0},
+      "engine": {"timbre": 0.5, "harmonics": 0.0, "morph": 1.0, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-morph-sweep",
+      "name": "SQUARE_SUB, COLOR swept 0 -> 1 (both blend ramps and the octave switch)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.5, "p2": [0.0, 1.0]},
+      "engine": {"timbre": 0.5, "harmonics": 0.0, "morph": [0.0, 1.0], "macro": 0.5},
+      "note_case": "The one case that exercises MORPH as a continuum rather than at three points: both legs of the V, and the octave crossover at the centre. The engine now reproduces Braids' intra-block smoothing here too -- it interpolates the RAW 15-bit COLOR integer across the block and re-folds the V per sample, as BEGIN/INTERPOLATE_PARAMETER_1 does (macro_oscillator.cc:242-249), rather than interpolating the folded gain, which would cut the corner off the V. MEASURED -0.05 dB AC RMS / 0.28 dB spectrum.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-morph-low-octave-low-note",
+      "name": "SQUARE_SUB, MORPH fully down, note 24 (sub at 8.2 Hz)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 24,
+      "braids": {"p1": 0.5, "p2": 0.0},
+      "engine": {"timbre": 0.5, "harmonics": 0.0, "morph": 0.0, "macro": 0.5},
+      "note_case": "The case that priced wave 1's DC blocker. Its 0.999 pole put the corner at (1 - 0.999) * 47872.34 / 2pi = 7.6 Hz, which the two-octave sub CROSSES at note 21 and clears by only 3.6x at note 45; at note 24 the sub sits at 8.18 Hz, 1.07x the corner, and the blocker took 2.7 dB and 43 degrees off it -- MEASURED -1.11 dB AC RMS / 0.83 dB spectrum. The blocker is gone: DC is now subtracted analytically (`1 - 2*pw` for a square, exactly zero for the variable saw), which is exact at every note and adds no phase. MEASURED -0.01 dB / 0.34 dB. `cents` is omitted: the f0 estimator returns its own f_max boundary (2000.0 Hz) for BOTH sides here, so the metric measures nothing and a tolerance on it would be theatre.",
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "square-macro-max",
+      "name": "SQUARE_SUB, MACRO at maximum (the far end of ApplyMacro's stock plateau)",
+      "shape": "SQUARE_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.5, "p2": 0.0},
+      "engine": {"timbre": 0.5, "harmonics": 0.0, "morph": 0.0, "macro": 1.0},
+      "note_case": "MACRO cannot be A/B'd as an axis -- Braids has no equivalent control -- but its STOCK PLATEAU can be, and this is the check that the plateau is really flat. ApplyMacro(0.5, 0.12, 0.5, macro) has maximum == stock, so everything from the detent up should be Braids exactly. This case MEASURES identically to square-morph-low-octave (-0.00 dB AC RMS / 0.22 dB spectrum), which is the assertion.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "saw-stock",
+      "name": "SAW_SUB, both knobs centred",
+      "shape": "SAW_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.5, "p2": 0.5},
+      "engine": {"timbre": 0.5, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "TIMBRE 0.5 puts Braids' RenderVariableSaw pw at 16383/65536 = 0.25, and its naive waveform is `(phase_>>18) + ((phase_-pw)>>18)` (analog_oscillator.cc:414-415) -- two ramps a quarter cycle apart. Wave 1 rendered a plain naive ramp here regardless of TIMBRE, at +3.57 dB AC RMS / 1.32 dB spectrum with a +9.35 dB error in the 160-320 Hz band. The closed form is now written out (`2p - pw` below pw, `2p - pw - 1` above) and this case MEASURES -0.01 dB / 0.31 dB.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "saw-timbre-min",
+      "name": "SAW_SUB, TIMBRE at minimum",
+      "shape": "SAW_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.0, "p2": 0.5},
+      "engine": {"timbre": 0.0, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "The BOTTOM of the axis, which was wrong too and which the 1.28 dB aggregate very nearly hid. Braids floors parameter_ at 1024 (analog_oscillator.cc:344-346), so pw floors at 1024/65536 = 0.015625 rather than zero, the two ramps sit 1/64 cycle apart, and that puts a comb null on harmonic 32 (3520 Hz at note 45) and its odd multiples. Wave 1's plain ramp had no such null: +10.94 dB in the 2560-5120 Hz band and +3.33 dB at 1280-2560 Hz. The 1024 floor is now reproduced on the integer and this case MEASURES -0.01 dB AC RMS / 0.27 dB spectrum.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "saw-timbre-max",
+      "name": "SAW_SUB, TIMBRE at maximum",
+      "shape": "SAW_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 1.0, "p2": 0.5},
+      "engine": {"timbre": 1.0, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "The single worst wave-1 case, and the one that proved SAW_SUB was not ported at all. Braids' pw here is 32767/65536 = 0.49998, so its two ramps sit half a cycle apart, the waveform doubles to an octave-up saw and its amplitude HALVES -- the reference reads 220.0 Hz where wave 1's unchanged ramp read 110.3 Hz. MEASURED then: +6.01 dB AC RMS / -1200 cents / 1.57 dB spectrum, with +42.46 dB in the 80-160 Hz band. The cause was that HARMONICS 1.0 put VariableShapeOscillator's waveshape at exactly 0.5, where square_amount and triangle_amount (variable_shape_oscillator.h:137-138) are both exactly zero and pw reaches the output through nothing at all. MEASURED now: -0.02 dB AC RMS / -0.4 cents / 0.28 dB spectrum.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "saw-timbre-sweep",
+      "name": "SAW_SUB, TIMBRE swept 0 -> 1 across the render",
+      "shape": "SAW_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": [0.0, 1.0], "p2": 0.5},
+      "engine": {"timbre": [0.0, 1.0], "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "THE COMMITTED CONTROL FOR square-timbre-sweep's FAILURE. Identical sweep, identical note, identical MORPH -- the only difference is which waveform TIMBRE is driving. RenderVariableSaw's naive mean is EXACTLY ZERO at every pw (the two ramps' offsets cancel), so this engine's analytic DC subtraction removes nothing here and the two sides carry the same DC: none. MEASURED 0.39 dB spectrum / -0.01 dB AC RMS, comfortably inside the same 1.0 dB baseline that the square sweep breaks at 1.70 dB. That is the evidence that the square sweep's residual is the DC policy and not the sweep, the interpolation or the waveform.",
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "saw-timbre-max-high-note",
+      "name": "SAW_SUB, TIMBRE at maximum, note 84",
+      "shape": "SAW_SUB",
+      "seconds": 3,
+      "note": 84,
+      "braids": {"p1": 1.0, "p2": 0.5},
+      "engine": {"timbre": 1.0, "harmonics": 1.0, "morph": 0.5, "macro": 0.5},
+      "note_case": "THE COMMITTED CONTROL FOR square-timbre-max-high-note's unusable cents metric. At the same note and TIMBRE this waveform is two half-cycle ramps: no thin pulse and none of the pedestal that makes the reference WAV clamp. It passes at 0.38 dB spectrum / -0.22 dB AC RMS, yet autocorrelation still locks the 48 kHz port to four periods and reports -2399 cents. `cents` is therefore omitted on both note-84 cases; the passing level and spectrum remain the regression assertions.",
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "saw-morph-low-octave",
+      "name": "SAW_SUB, MORPH fully down (sub two octaves down, max blend)",
+      "shape": "SAW_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.5, "p2": 0.0},
+      "engine": {"timbre": 0.5, "harmonics": 1.0, "morph": 0.0, "macro": 0.5},
+      "note_case": "MEASURED -0.01 dB AC RMS / 0.26 dB spectrum. `cents` is OMITTED rather than widened: the f0 estimator returns its own f_max boundary (2000.0 Hz) for BOTH the reference and the port, so the raw delta is exactly 0 and the harness's fixed 4.61-cent kCorrectedSampleRate correction turns a non-measurement into a plausible-looking '-4.6 cents'. Widening the cents tolerance here would be dressing up a metric that never ran.",
+      "tolerance": {"acRmsDb": 1.0, "spectrumDb": 1.0}
+    },
+    {
+      "id": "saw-morph-high-octave",
+      "name": "SAW_SUB, MORPH fully up (sub one octave down, max blend)",
+      "shape": "SAW_SUB",
+      "seconds": 3,
+      "note": 45,
+      "braids": {"p1": 0.5, "p2": 1.0},
+      "engine": {"timbre": 0.5, "harmonics": 1.0, "morph": 1.0, "macro": 0.5},
+      "tolerance": {"acRmsDb": 1.0, "cents": 2.0, "spectrumDb": 1.0}
+    }
+  ]
+}

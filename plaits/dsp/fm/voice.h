@@ -35,6 +35,7 @@
 #include "plaits/dsp/fm/dx_units.h"
 #include "plaits/dsp/fm/envelope.h"
 #include "plaits/dsp/fm/patch.h"
+#include "plaits/dsp/fm/carrier_timbre.h"
 
 // When enabled, the amplitude modulation LFO linearly modulates the amplitude
 // of an operator. Otherwise, a more complex formula involving an exponential
@@ -60,6 +61,7 @@ class Voice {
     float envelope_control;
     float pitch_mod;
     float amp_mod;
+    float modulator_detune;
   };
   
   inline void Init(
@@ -88,7 +90,17 @@ class Voice {
     normalized_velocity_ = 10.0f;
     
     dirty_ = true;
+#if PLAITS_BUILD_EXTENDED_TZFM
+    frequency_offset_ = 0.0f;
+#endif
+    carrier_timbre_.Init();
   }
+
+#ifdef TEST
+  void set_carrier_timbre_enabled(bool enabled) {
+    carrier_timbre_.set_enabled(enabled);
+  }
+#endif
   
   inline void SetPatch(const Patch* patch) {
     patch_ = patch;
@@ -123,11 +135,30 @@ class Voice {
       ratios_[i] = sign * FrequencyRatio(op);
     }
     dirty_ = false;
+    carrier_timbre_.SetPatch(*patch_, ratios_);
     return true;
   }
   
+#if PLAITS_BUILD_EXTENDED_TZFM
+  void set_frequency_offset(float offset) { frequency_offset_ = offset; }
+#endif
   inline float op_level(int i) const {
     return level_[i];
+  }
+
+  inline bool audible(float threshold) const {
+    if (!patch_) {
+      return false;
+    }
+    for (int i = 0; i < num_operators; ++i) {
+      // Only carrier operators contribute directly to the output. A modulator
+      // cannot be audible once every carrier it feeds has faded out.
+      if (!algorithms_->is_modulator(patch_->algorithm, i) &&
+          fabsf(operator_[i].amplitude) > threshold) {
+        return true;
+      }
+    }
+    return false;
   }
   
   inline void Render(
@@ -200,10 +231,22 @@ class Voice {
     // Compute frequencies and amplitudes.
     float f[num_operators];
     float a[num_operators];
+    const float modulator_ratio = stmlib::SemitonesToRatioSafe(
+        parameters.modulator_detune);
     for (int i = 0; i < num_operators; ++i) {
       const Patch::Operator& op = patch_->op[i];
       
-      f[i] = ratios_[i] * (ratios_[i] < 0.0f ? -one_hz_ : f0);
+      // Fixed-Hz DX operators remain fixed; ratio operators follow the signed root.
+      f[i] = ratios_[i] * (ratios_[i] < 0.0f ? -one_hz_ :
+#if PLAITS_BUILD_EXTENDED_TZFM
+          f0 + frequency_offset_
+#else
+          f0
+#endif
+      );
+      if (algorithms_->is_modulator(patch_->algorithm, i)) {
+        f[i] *= modulator_ratio;
+      }
 
       const float rate_scaling = RateScaling(note_, op.rate_scaling);
       float level = parameters.sustain
@@ -218,7 +261,7 @@ class Voice {
           float(op.velocity_sensitivity);
       const float brightness = algorithms_->is_modulator(patch_->algorithm, i)
           ? (parameters.brightness - 0.5f) * 32.0f
-          : 0.0f;
+          : carrier_timbre_.LevelOffset(i, parameters.brightness);
       
       level += 0.125f * std::min(
           kb_scaling + velocity_scaling + brightness,
@@ -240,7 +283,7 @@ class Voice {
     for (int i = 0; i < num_operators; ) {
       const typename Algorithms<num_operators>::RenderCall& call = \
           algorithms_->render_call(patch_->algorithm, i);
-      (*call.render_fn)(
+      (*algorithms_->render_fn(call))(
           &operator_[i],
           &f[i],
           &a[i],
@@ -254,6 +297,10 @@ class Voice {
   }
   
  private:
+#if PLAITS_BUILD_EXTENDED_TZFM
+  float frequency_offset_;
+#endif
+  CarrierTimbre<num_operators> carrier_timbre_;
   const Algorithms<num_operators>* algorithms_;
   float sample_rate_;
   float one_hz_;

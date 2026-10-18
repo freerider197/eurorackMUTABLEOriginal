@@ -26,11 +26,20 @@
 //
 // 808-style HH with two noise sources - one faithful to the original, the other
 // more metallic.
+//
+// OUT: faithful 808 hi-hat (hi_hat_1). AUX: metallic hi-hat (hi_hat_2).
+// alt firmware, stereo mode: the faithful hi-hat is panned to 0.28 and the
+// metallic one to 0.72.
 
 #include "plaits/dsp/engine/hi_hat_engine.h"
 
+#include <algorithm>
+
+#include "plaits/build_config.h"
+
 namespace plaits {
 
+using namespace std;
 using namespace stmlib;
 
 void HiHatEngine::Init(BufferAllocator* allocator) {
@@ -50,6 +59,63 @@ void HiHatEngine::Render(
     size_t size,
     bool* already_enveloped) {
   const float f0 = NoteToFrequency(parameters.note);
+  const float metallic_spread = ApplyMacro(
+      1.0f, 0.55f, 1.6f, parameters.macro);
+
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  if (parameters.frequency_offset) {
+    const bool sustain = parameters.trigger & TRIGGER_UNPATCHED;
+    const bool trigger = parameters.trigger & TRIGGER_RISING_EDGE;
+    for (size_t sample = 0; sample < size; ++sample) {
+      float instantaneous_f0 = max(
+          1e-7f, f0 + parameters.frequency_offset[sample]);
+      instantaneous_f0 = min(instantaneous_f0, 0.49f);
+      const bool signed_fm = parameters.extended_tzfm_active();
+      const float signed_scale = signed_fm
+          ? 1.0f + parameters.frequency_offset[sample] / std::max(1.0e-7f, f0) : 1.0f;
+      if (signed_fm) instantaneous_f0 = f0;
+      hi_hat_1_.Render(
+          sustain,
+          trigger && sample == 0,
+          parameters.accent,
+          instantaneous_f0,
+          parameters.timbre,
+          parameters.morph,
+          parameters.harmonics,
+          metallic_spread,
+          temp_buffer_ + sample,
+          temp_buffer_ + kMaxBlockSize + sample,
+          out + sample,
+          1, signed_scale, signed_fm);
+      hi_hat_2_.Render(
+          sustain,
+          trigger && sample == 0,
+          parameters.accent,
+          instantaneous_f0,
+          parameters.timbre,
+          parameters.morph,
+          parameters.harmonics,
+          metallic_spread,
+          temp_buffer_ + sample,
+          temp_buffer_ + kMaxBlockSize + sample,
+          aux + sample,
+          1, signed_scale, signed_fm);
+    }
+    if ((PLAITS_STEREO_ANALOG_HI_HAT && parameters.stereo)) {
+      float faithful_left, faithful_right;
+      float metallic_left, metallic_right;
+      StereoPanGains(0.28f, &faithful_left, &faithful_right);
+      StereoPanGains(0.72f, &metallic_left, &metallic_right);
+      for (size_t i = 0; i < size; ++i) {
+        const float faithful = out[i];
+        const float metallic = aux[i];
+        out[i] = faithful * faithful_left + metallic * metallic_left;
+        aux[i] = faithful * faithful_right + metallic * metallic_right;
+      }
+    }
+    return;
+  }
+#endif
   
   hi_hat_1_.Render(
       parameters.trigger & TRIGGER_UNPATCHED,
@@ -59,6 +125,7 @@ void HiHatEngine::Render(
       parameters.timbre,
       parameters.morph,
       parameters.harmonics,
+      metallic_spread,
       temp_buffer_,
       temp_buffer_ + size,
       out,
@@ -72,10 +139,25 @@ void HiHatEngine::Render(
       parameters.timbre,
       parameters.morph,
       parameters.harmonics,
+      metallic_spread,
       temp_buffer_,
       temp_buffer_ + size,
       aux,
       size);
+
+  if ((PLAITS_STEREO_ANALOG_HI_HAT && parameters.stereo)) {
+    // Spread the faithful and metallic hi-hats across the stereo field.
+    float faithful_left, faithful_right;
+    float metallic_left, metallic_right;
+    StereoPanGains(0.28f, &faithful_left, &faithful_right);
+    StereoPanGains(0.72f, &metallic_left, &metallic_right);
+    for (size_t i = 0; i < size; ++i) {
+      const float faithful = out[i];
+      const float metallic = aux[i];
+      out[i] = faithful * faithful_left + metallic * metallic_left;
+      aux[i] = faithful * faithful_right + metallic * metallic_right;
+    }
+  }
 }
 
 }  // namespace plaits

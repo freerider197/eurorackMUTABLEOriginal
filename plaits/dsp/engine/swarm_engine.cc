@@ -25,10 +25,23 @@
 // -----------------------------------------------------------------------------
 //
 // Swarm of sawtooths and sines.
+//
+// OUT: swarm of sawtooths. AUX: swarm of sine waves.
+// alt firmware, stereo mode: the sawtooths are spread across the stereo
+// field - the least detuned voices at the center, the most detuned at the
+// edges - and the sine waves are not rendered.
 
 #include "plaits/dsp/engine/swarm_engine.h"
 
 #include <algorithm>
+
+#include "plaits/build_config.h"
+
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+#define PLAITS_HARD_SYNC_EVENTS(parameters) ((parameters).hard_sync)
+#else
+#define PLAITS_HARD_SYNC_EVENTS(parameters) 0u
+#endif
 
 namespace plaits {
 
@@ -47,6 +60,12 @@ void SwarmEngine::Reset() {
   }
 }
 
+// Voice i has rank (i - 3.5) / 3.5: detune grows from the middle indices
+// outwards, so detune-symmetric pairs mirror around the center.
+const float swarm_pan[kNumSwarmVoices] = {
+  0.0f, 0.1f, 0.25f, 0.5f, 0.5f, 0.75f, 0.9f, 1.0f
+};
+
 void SwarmEngine::Render(
     const EngineParameters& parameters,
     float* out,
@@ -61,26 +80,58 @@ void SwarmEngine::Render(
       parameters.harmonics;
   float size_ratio = 0.25f * SemitonesToRatio(
       (1.0f - parameters.morph) * 84.0f);
+  const float size_dispersion = ApplyMacro(
+      0.97f, 0.86f, 1.04f, parameters.macro);
   
   const bool burst_mode = !(parameters.trigger & TRIGGER_UNPATCHED);
   const bool start_burst = parameters.trigger & TRIGGER_RISING_EDGE;
+  const uint32_t hard_sync = PLAITS_HARD_SYNC_EVENTS(parameters);
 
   fill(&out[0], &out[size], 0.0f);
   fill(&aux[0], &aux[size], 0.0f);
-  
-  for (int i = 0; i < kNumSwarmVoices; ++i) {
-    swarm_voice_[i].Render(
-        f0,
-        density,
-        burst_mode,
-        start_burst,
-        spread,
-        size_ratio,
-        out,
-        aux,
-        size);
-    size_ratio *= 0.97f;
+
+  if ((PLAITS_STEREO_SWARM && parameters.stereo)) {
+    for (int i = 0; i < kNumSwarmVoices; ++i) {
+      float saw[kMaxBlockSize];
+      fill(&saw[0], &saw[size], 0.0f);
+      swarm_voice_[i].RenderSaw(
+          f0,
+          density,
+          burst_mode,
+          start_burst,
+          spread,
+          size_ratio,
+          saw,
+          size,
+          hard_sync,
+          parameters.frequency_offset);
+      float left_gain, right_gain;
+      StereoPanGains(swarm_pan[i], &left_gain, &right_gain);
+      for (size_t j = 0; j < size; ++j) {
+        out[j] += saw[j] * left_gain;
+        aux[j] += saw[j] * right_gain;
+      }
+      size_ratio *= size_dispersion;
+    }
+  } else {
+    for (int i = 0; i < kNumSwarmVoices; ++i) {
+      swarm_voice_[i].Render(
+          f0,
+          density,
+          burst_mode,
+          start_burst,
+          spread,
+          size_ratio,
+          out,
+          aux,
+          size,
+          hard_sync,
+          parameters.frequency_offset);
+      size_ratio *= size_dispersion;
+    }
   }
 }
 
 }  // namespace plaits
+
+#undef PLAITS_HARD_SYNC_EVENTS

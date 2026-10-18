@@ -68,7 +68,24 @@ class Oscillator {
 
   template<OscillatorShape shape>
   void Render(float frequency, float pw, float* out, size_t size) {
-    Render<shape, false, false>(frequency, pw, NULL, out, size);
+    RenderInternal<shape, false, false, false, false>(
+        frequency, pw, NULL, out, size, 0);
+  }
+
+  template<OscillatorShape shape>
+  void Render(
+      float frequency,
+      float pw,
+      float* out,
+      size_t size,
+      uint32_t hard_sync) {
+    if (hard_sync) {
+      RenderInternal<shape, false, false, false, true>(
+          frequency, pw, NULL, out, size, hard_sync);
+    } else {
+      RenderInternal<shape, false, false, false, false>(
+          frequency, pw, NULL, out, size, 0);
+    }
   }
   
   template<OscillatorShape shape>
@@ -79,19 +96,49 @@ class Oscillator {
       float* out,
       size_t size) {
     if (!fm) {
-      Render<shape, false, false>(frequency, pw, NULL, out, size);
+      RenderInternal<shape, false, false, false, false>(
+          frequency, pw, NULL, out, size, 0);
     } else {
-      Render<shape, true, true>(frequency, pw, fm, out, size);
+      RenderInternal<shape, true, true, false, false>(
+          frequency, pw, fm, out, size, 0);
     }
   }
 
-  template<OscillatorShape shape, bool has_external_fm, bool through_zero_fm>
-  void Render(
+  // Like the existing FM overload, but each sample is an absolute signed
+  // frequency offset (cycles/sample) rather than a ratio of the carrier.
+  template<OscillatorShape shape>
+  void RenderLinearFm(
+      float frequency,
+      float pw,
+      const float* fm,
+      float* out,
+      size_t size,
+      uint32_t hard_sync = 0) {
+    if (!fm) {
+      Render<shape>(frequency, pw, out, size, hard_sync);
+    } else if (hard_sync) {
+      RenderInternal<shape, true, true, true, true>(
+          frequency, pw, fm, out, size, hard_sync);
+    } else {
+      RenderInternal<shape, true, true, true, false>(
+          frequency, pw, fm, out, size, 0);
+    }
+  }
+
+ private:
+  template<
+      OscillatorShape shape,
+      bool has_external_fm,
+      bool through_zero_fm,
+      bool absolute_fm,
+      bool process_hard_sync>
+  void RenderInternal(
       float frequency,
       float pw,
       const float* external_fm,
       float* out,
-      size_t size) {
+      size_t size,
+      uint32_t hard_sync) {
     
     if (!has_external_fm) {
       if (!through_zero_fm) {
@@ -113,7 +160,11 @@ class Oscillator {
 
       float frequency = fm.Next();
       if (has_external_fm) {
-        frequency *= (1.0f + *external_fm++);
+        if (absolute_fm) {
+          frequency += *external_fm++;
+        } else {
+          frequency *= (1.0f + *external_fm++);
+        }
         if (!through_zero_fm) {
           CONSTRAIN(frequency, kMinFrequency, kMaxFrequency);
         } else {
@@ -124,6 +175,30 @@ class Oscillator {
                   shape == OSCILLATOR_SHAPE_TRIANGLE) ? 0.5f : pwm.Next();
       if (has_external_fm) {
         CONSTRAIN(pw, fabsf(frequency) * 2.0f, 1.0f - 2.0f * fabsf(frequency))
+      }
+
+      if (process_hard_sync) {
+        if (hard_sync & 1) {
+          float value = phase_;
+          if (shape > OSCILLATOR_SHAPE_SAW &&
+              shape <= OSCILLATOR_SHAPE_SLOPE) {
+            const float slope_up = 1.0f / pw;
+            const float slope_down = 1.0f / (1.0f - pw);
+            value = phase_ < pw
+                ? phase_ * slope_up
+                : 1.0f - (phase_ - pw) * slope_down;
+          } else if (shape > OSCILLATOR_SHAPE_SLOPE) {
+            value = phase_ < pw ? 0.0f : 1.0f;
+          }
+          // Reset at this sample boundary. The two-sample polyBLEP removes
+          // the arbitrary value discontinuity without clearing the oscillator
+          // filters or parameter interpolators.
+          this_sample -= value * stmlib::ThisBlepSample(1.0f);
+          next_sample -= value * stmlib::NextBlepSample(1.0f);
+          phase_ = 0.0f;
+          high_ = shape <= OSCILLATOR_SHAPE_SLOPE;
+        }
+        hard_sync >>= 1;
       }
       phase_ += frequency;
       
@@ -156,13 +231,33 @@ class Oscillator {
           slope_down = 1.0f / (1.0f - pw);
         }
         if (high_ ^ (phase_ < pw)) {
-          float t = (phase_ - pw) / frequency;
           float discontinuity = (slope_up + slope_down) * frequency;
           if (through_zero_fm && frequency < 0.0f) {
             discontinuity = -discontinuity;
           }
-          this_sample -= stmlib::ThisIntegratedBlepSample(t) * discontinuity;
-          next_sample -= stmlib::NextIntegratedBlepSample(t) * discontinuity;
+          if (through_zero_fm) {
+            // At a through-zero stall the interpolated pulse width can cross
+            // the stationary phase. Dividing by a zero (or nearly zero)
+            // oscillator velocity makes t infinite and 0 * poly(infinity)
+            // becomes a latched NaN. A phase-driven crossing always produces
+            // t in [0, 1]; skip only the degenerate parameter-driven case,
+            // whose true bandlimited correction tends to zero with velocity.
+            if (fabsf(frequency) > 1.0e-7f) {
+              const float t = (phase_ - pw) / frequency;
+              if (t >= 0.0f && t <= 1.0f) {
+                this_sample -=
+                    stmlib::ThisIntegratedBlepSample(t) * discontinuity;
+                next_sample -=
+                    stmlib::NextIntegratedBlepSample(t) * discontinuity;
+              }
+            }
+          } else {
+            const float t = (phase_ - pw) / frequency;
+            this_sample -=
+                stmlib::ThisIntegratedBlepSample(t) * discontinuity;
+            next_sample -=
+                stmlib::NextIntegratedBlepSample(t) * discontinuity;
+          }
           high_ = phase_ < pw;
         }
         if (phase_ >= 1.0f) {
@@ -234,7 +329,6 @@ class Oscillator {
     next_sample_ = next_sample;
   }
   
- private:
   // Oscillator state.
   float phase_;
   float next_sample_;

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "sdk": "plaits-engine-cpp-v1",
+  "packageType": "builtin-reference",
+  "id": "mutable-instruments/virtual-analog-crossfade",
+  "catalogId": "virtual-analog-crossfade",
+  "version": "1.0.0",
+  "name": "Virtual Analog Crossfade",
+  "author": "Emilie Gillet",
+  "origin": "Mutable Instruments",
+  "license": "MIT",
+  "description": "One of Emilie Gillet's alternate virtual-analog designs preserved in the Plaits source: a waveform pair crossfading from detune through dry tone to hard sync.",
+  "family": "Subtractive",
+  "tags": ["analog", "oscillator", "sync", "variant"],
+  "controls": [
+    { "id": "harmonics", "label": "Detune", "description": "Detunes the secondary oscillator through closely spaced and musical intervals." },
+    { "id": "timbre", "label": "Detune to sync", "description": "Moves the main output from a detuned pair through the dry primary to progressively harder synchronization." },
+    { "id": "morph", "label": "Common waveform", "description": "Changes the common oscillator waveform continuously from saw through square and pulse shapes." },
+    { "id": "macro", "label": "Detune range", "description": "Scales interval detuning from unison to twice the original range; the midpoint is Emilie's original spread." }
+  ],
+  "outputs": {
+    "main": "Mono: detuned-pair to dry-primary to hard-sync path. Stereo: a nearby left point on that crossfade.",
+    "aux": "Mono: detuned secondary oscillator. Stereo: a nearby right point on the detune-to-sync crossfade."
+  },
+  "trigger": "The oscillator phases free-run; patched TRIG restarts Plaits' shared decay and low-pass-gate envelope.",
+  "source": {
+    "root": "../../../../..",
+    "header": "plaits/dsp/engine/virtual_analog_crossfade_engine.h",
+    "files": ["plaits/dsp/engine/virtual_analog_crossfade_engine.cc"],
+    "className": "VirtualAnalogCrossfadeEngine"
+  },
+  "postProcessing": { "alreadyEnveloped": false, "outGain": 0.8, "auxGain": 0.8 },
+  "scenarios": "tests/scenarios.json",
+  "upstream": "Mutable Instruments eurorack Plaits source, original VA_VARIANT 1 with Plaits Palette macro and stereo integration"
+}

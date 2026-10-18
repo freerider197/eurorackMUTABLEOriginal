@@ -51,7 +51,18 @@ class GrainEngine : public Engine {
       float* aux,
       size_t size,
       bool* already_enveloped);
-    
+  // OUT/AUX carry L/R when stereo is requested: the two grainlets are
+  // DC-blocked separately and panned, and the AUX Z-oscillator is dropped.
+  virtual bool stereo_capable() const { return PLAITS_STEREO_GRANULAR_FORMANT; }
+#if PLAITS_BUILD_ENABLE_SYNC_INPUT
+  virtual bool hard_sync_capable() const { return true; }
+#endif
+
+#if PLAITS_BUILD_EXTENDED_TZFM
+  // Qualified separately from the stock Plaits catalog's CPU policy.
+  virtual bool linear_tzfm_capable() const { return true; }
+#endif
+
  private:
   GrainletOscillator grainlet_[2];
   // VOSIMOscillator vosim_oscillator_;

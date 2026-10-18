@@ -25,10 +25,17 @@
 // -----------------------------------------------------------------------------
 //
 // Three voices of string synthesis.
+//
+// OUT: sum of the three strings. AUX: raw exciter signals.
+// alt firmware, stereo mode: each string is panned to a fixed position -
+// left, center, right in round-robin order - and the exciter bus is not
+// rendered.
 
 #include "plaits/dsp/engine/string_engine.h"
 
 #include <algorithm>
+
+#include "plaits/build_config.h"
 
 namespace plaits {
 
@@ -52,12 +59,28 @@ void StringEngine::Reset() {
   }
 }
 
+// Equal-power gains for the three fixed pan positions (0.15, 0.5, 0.85).
+// Keep the one-ULP asymmetry between sqrt(0.15) and sqrt(1.0f - 0.85f).
+const float string_pan_left[kNumStrings] = {
+  0.921954453f, 0.707106769f, 0.387298316f
+};
+const float string_pan_right[kNumStrings] = {
+  0.387298346f, 0.707106769f, 0.921954453f
+};
+
 void StringEngine::Render(
     const EngineParameters& parameters,
     float* out,
     float* aux,
     size_t size,
     bool* already_enveloped) {
+  const bool contour_excitation = parameters.articulation_envelope_active;
+  const bool sustain =
+      (parameters.trigger & TRIGGER_UNPATCHED) || contour_excitation;
+  const float accent = contour_excitation
+      ? parameters.accent * parameters.articulation_envelope
+      : parameters.accent;
+
   if (parameters.trigger & TRIGGER_RISING_EDGE) {
     // 8 in original firmware version.
     // 05.01.18: mic.w: problem with microbrute.
@@ -66,25 +89,103 @@ void StringEngine::Render(
   }
   
   const float f0 = NoteToFrequency(parameters.note);
-  f0_[active_string_] = f0;
-  f0_delay_.Write(f0);
-  
   fill(&out[0], &out[size], 0.0f);
   fill(&aux[0], &aux[size], 0.0f);
-  
+  const float exciter_size = ApplyMacro(
+      1.0f, 0.25f, 4.0f, parameters.macro);
+
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  if (parameters.frequency_offset) {
+    const bool trigger = parameters.trigger & TRIGGER_RISING_EDGE;
+    const bool stereo = PLAITS_STEREO_INHARMONIC_STRING && parameters.stereo;
+    for (size_t sample = 0; sample < size; ++sample) {
+      f0_[active_string_] = max(
+          1e-7f, f0 + parameters.frequency_offset[sample]);
+      for (int string = 0; string < kNumStrings; ++string) {
+        const bool active = string == active_string_;
+        if (stereo) {
+          float string_out = 0.0f;
+          voice_[string].Render(
+              sustain && active,
+              trigger && sample == 0 && active,
+              accent,
+              f0_[string],
+              parameters.harmonics,
+              parameters.timbre * parameters.timbre,
+              parameters.morph,
+              exciter_size,
+              temp_buffer_ + sample,
+              &string_out,
+              1);
+          out[sample] += string_out * string_pan_left[string];
+          aux[sample] += string_out * string_pan_right[string];
+        } else {
+          voice_[string].Render(
+              sustain && active,
+              trigger && sample == 0 && active,
+              accent,
+              f0_[string],
+              parameters.harmonics,
+              parameters.timbre * parameters.timbre,
+              parameters.morph,
+              exciter_size,
+              temp_buffer_ + sample,
+              out + sample,
+              1);
+          aux[sample] += temp_buffer_[sample];
+        }
+      }
+    }
+    f0_delay_.Write(f0_[active_string_]);
+    return;
+  }
+#endif
+
+  f0_[active_string_] = f0;
+  f0_delay_.Write(f0);
+
+  if ((PLAITS_STEREO_INHARMONIC_STRING && parameters.stereo)) {
+    for (int i = 0; i < kNumStrings; ++i) {
+      float string_out[kMaxBlockSize];
+      fill(&string_out[0], &string_out[size], 0.0f);
+      voice_[i].Render(
+          sustain && i == active_string_,
+          parameters.trigger & TRIGGER_RISING_EDGE && i == active_string_,
+          accent,
+          f0_[i],
+          parameters.harmonics,
+          parameters.timbre * parameters.timbre,
+          parameters.morph,
+          exciter_size,
+          temp_buffer_,
+          string_out,
+          size);
+      const float left_gain = string_pan_left[i];
+      const float right_gain = string_pan_right[i];
+      for (size_t j = 0; j < size; ++j) {
+        out[j] += string_out[j] * left_gain;
+        aux[j] += string_out[j] * right_gain;
+      }
+    }
+    return;
+  }
+
   for (int i = 0; i < kNumStrings; ++i) {
     voice_[i].Render(
-        parameters.trigger & TRIGGER_UNPATCHED && i == active_string_,
+        sustain && i == active_string_,
         parameters.trigger & TRIGGER_RISING_EDGE && i == active_string_,
-        parameters.accent,
+        accent,
         f0_[i],
         parameters.harmonics,
         parameters.timbre * parameters.timbre,
         parameters.morph,
+        exciter_size,
         temp_buffer_,
         out,
-        aux,
         size);
+    for (size_t j = 0; j < size; ++j) {
+      aux[j] += temp_buffer_[j];
+    }
   }
 }
 

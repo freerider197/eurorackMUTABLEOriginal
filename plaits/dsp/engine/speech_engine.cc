@@ -28,6 +28,7 @@
 
 #include "plaits/dsp/engine/speech_engine.h"
 
+#include "plaits/build_config.h"
 #include "plaits/dsp/speech/lpc_speech_synth_words.h"
 
 namespace plaits {
@@ -38,22 +39,35 @@ using namespace stmlib;
 void SpeechEngine::Init(BufferAllocator* allocator) {
   sam_speech_synth_.Init();
   naive_speech_synth_.Init();
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+  InitRecipeSpeechWordBank(&lpc_speech_synth_word_bank_, allocator);
+#else
   lpc_speech_synth_word_bank_.Init(
       word_banks_,
       LPC_SPEECH_SYNTH_NUM_WORD_BANKS,
       allocator);
+#endif
   lpc_speech_synth_controller_.Init(&lpc_speech_synth_word_bank_);
+#if PLAITS_HAS_CUSTOM_SPEECH_BANKS
+  word_bank_quantizer_.Init(
+      RecipeSpeechWordBankCount() + 1,
+      0.1f,
+      false);
+#else
   word_bank_quantizer_.Init(LPC_SPEECH_SYNTH_NUM_WORD_BANKS + 1, 0.1f, false);
+#endif
   
   temp_buffer_[0] = allocator->Allocate<float>(kMaxBlockSize);
   temp_buffer_[1] = allocator->Allocate<float>(kMaxBlockSize);
   
   prosody_amount_ = 0.0f;
   speed_ = 0.0f;
+  post_filter_ = 0.0f;
 }
 
 void SpeechEngine::Reset() {
   lpc_speech_synth_word_bank_.Reset();
+  post_filter_ = 0.0f;
 }
 
 void SpeechEngine::Render(
@@ -62,6 +76,27 @@ void SpeechEngine::Render(
     float* aux,
     size_t size,
     bool* already_enveloped) {
+#if PLAITS_BUILD_EXTENDED_TZFM
+  const float* signed_fm = parameters.extended_tzfm_active()
+      ? static_cast<const float*>(parameters.frequency_offset) : NULL;
+#endif
+#if PLAITS_BUILD_FREQUENCY_OFFSET_FM
+  if (parameters.frequency_offset && !parameters.extended_tzfm_active()) {
+    EngineParameters sample_parameters = parameters;
+    sample_parameters.frequency_offset = NULL;
+    const float base_frequency = NoteToFrequency(parameters.note);
+    for (size_t i = 0; i < size; ++i) {
+      sample_parameters.note = NoteWithFrequencyOffset(
+          parameters.note, base_frequency, parameters.frequency_offset[i]);
+      sample_parameters.trigger = i == 0
+          ? parameters.trigger
+          : parameters.trigger & ~TRIGGER_RISING_EDGE;
+      Render(
+          sample_parameters, out + i, aux + i, 1, already_enveloped);
+    }
+    return;
+  }
+#endif
   const float f0 = NoteToFrequency(parameters.note);
   
   const float group = parameters.harmonics * 6.0f;
@@ -80,7 +115,11 @@ void SpeechEngine::Render(
           temp_buffer_[0],
           aux,
           out,
-          size);
+          size
+#if PLAITS_BUILD_EXTENDED_TZFM
+        , signed_fm
+#endif
+        );
     } else {
       lpc_speech_synth_controller_.Render(
           parameters.trigger & TRIGGER_UNPATCHED,
@@ -94,7 +133,11 @@ void SpeechEngine::Render(
           1.0f,
           aux,
           out,
-          size);
+          size
+#if PLAITS_BUILD_EXTENDED_TZFM
+        , signed_fm
+#endif
+        );
       blend = 2.0f - blend;
     }
   
@@ -105,7 +148,11 @@ void SpeechEngine::Render(
         parameters.timbre,
         temp_buffer_[0],
         temp_buffer_[1],
-        size);
+        size
+#if PLAITS_BUILD_EXTENDED_TZFM
+        , signed_fm
+#endif
+        );
     
     blend *= blend * (3.0f - 2.0f * blend);
     blend *= blend * (3.0f - 2.0f * blend);
@@ -135,7 +182,39 @@ void SpeechEngine::Render(
         replay_prosody ? parameters.accent : 1.0f,
         aux,
         out,
-        size);
+        size
+#if PLAITS_BUILD_EXTENDED_TZFM
+        , signed_fm
+#endif
+        );
+  }
+
+  if ((PLAITS_STEREO_SPEECH && parameters.stereo)) {
+    // OUT/AUX become L/R: replace the MACRO mix with a gentle equal-power pan
+    // of the two existing paths so both are audible as a widened voice. The
+    // voice path leans slightly left, the secondary formant path slightly
+    // right; both appear on both channels, so a mono sum does not cancel.
+    float voice_l, voice_r, secondary_l, secondary_r;
+    StereoPanGains(0.4f, &voice_l, &voice_r);
+    StereoPanGains(0.6f, &secondary_l, &secondary_r);
+    for (size_t i = 0; i < size; ++i) {
+      const float voice = out[i];
+      const float secondary = aux[i];
+      out[i] = voice * voice_l + secondary * secondary_l;
+      aux[i] = voice * voice_r + secondary * secondary_r;
+    }
+  } else {
+    const float voice_amount = parameters.macro * 2.0f;
+    const float spectral_sharpening = (parameters.macro - 0.5f) * 5.0f;
+    for (size_t i = 0; i < size; ++i) {
+      const float voice = out[i];
+      ONE_POLE(post_filter_, voice, 0.12f);
+      if (parameters.macro < 0.5f) {
+        out[i] = aux[i] + (out[i] - aux[i]) * voice_amount;
+      } else {
+        out[i] = voice + (voice - post_filter_) * spectral_sharpening;
+      }
+    }
   }
 }
 
