@@ -1,7 +1,7 @@
 # Rings tools (freerider197 fork)
 
 Base: Lyle Mills' Mini-Elements Rings firmware (lylepmills/eurorack) plus FM
-voice changes. Known-good on hardware: tag `rings-fm-v1`.
+voice changes. Known-good on hardware: commit 20b257c (`alt_firmwares/rings_mini_elements_fm_loudness.wav`).
 
 - `build.sh` builds the firmware with a modern gcc and writes the update .wav.
 - `qpsk_encode.py` is a Python 3 port of `stm_audio_bootloader/qpsk/encoder.py`
