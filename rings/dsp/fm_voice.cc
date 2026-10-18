@@ -40,6 +40,25 @@ namespace rings {
 
 using namespace stmlib;
 
+// Loudness compensation, in dB, as a function of DAMPING (17 points from 0 to
+// 1). Short decays carry much less energy over the ear's ~200ms integration
+// window than long decays or the drone, so without compensation the perceived
+// level changes by ~16dB across the knob. The peak level is already at the
+// limiter's threshold, so short decays get louder through the hold stage below,
+// and long decays/drone are pulled down. Residual spread is ~3dB.
+static const float kLoudnessCompensationDb[17] = {
+  0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -0.7f, -1.6f, -2.5f,
+  -3.4f, -4.0f, -4.5f, -4.9f, -5.2f, -5.4f, -5.8f, -6.0f,
+};
+
+// For short decays, the internal envelope is held at full level for a fraction
+// of its decay time: this adds body (and loudness) without raising the peak.
+const float kHoldRatio = 0.3f;
+const float kMaxHoldTime = 0.03f;
+
+// Dead band around the center of the feedback control (POSITION).
+const float kFeedbackDeadBand = 0.03f;
+
 void FMVoice::Init() {
   set_frequency(220.0f / kSampleRate);
   set_ratio(0.5f);
@@ -61,6 +80,9 @@ void FMVoice::Init() {
   modulator_phase_ = 0;
   gain_ = 0.0f;
   fm_amount_ = 0.0f;
+  loudness_compensation_ = 1.0f;
+  hold_samples_ = 0;
+  hold_counter_ = 0;
   
   follower_.Init(
       8.0f / kSampleRate,
@@ -77,6 +99,12 @@ void FMVoice::Process(const float* in, float* out, float* aux, size_t size) {
 
   float brightness_rt60 = 0.1f * SemitonesToRatio(damping_ * 84.0f) * kSampleRate;
   float brightness_decay = 1.0f - powf(0.001f, 1.0f / brightness_rt60);
+
+  hold_samples_ = static_cast<int32_t>(
+      std::min(kHoldRatio * amplitude_rt60, kMaxHoldTime * kSampleRate));
+  // dB to semitones: 12 * log2(10) / 20.
+  float loudness_compensation = SemitonesToRatio(
+      Interpolate(kLoudnessCompensationDb, damping_, 16.0f) * 1.993157f);
   
   float ratio = Interpolate(lut_fm_frequency_quantizer, ratio_, 128.0f);
   float modulator_frequency = carrier_frequency_ * SemitonesToRatio(ratio);
@@ -86,6 +114,12 @@ void FMVoice::Process(const float* in, float* out, float* aux, size_t size) {
   }
   
   float feedback = (feedback_amount_ - 0.5f) * 2.0f;
+  // Linear response with a small dead band around the center. The amount used
+  // to be squared, which left a wide region around noon with no audible
+  // effect.
+  float feedback_magnitude = std::max(
+      fabsf(feedback) - kFeedbackDeadBand, 0.0f) / (1.0f - kFeedbackDeadBand);
+  feedback = feedback < 0.0f ? -feedback_magnitude : feedback_magnitude;
   
   ParameterInterpolator carrier_increment(
       &previous_carrier_frequency_, carrier_frequency_, size);
@@ -95,6 +129,8 @@ void FMVoice::Process(const float* in, float* out, float* aux, size_t size) {
       &previous_brightness_, brightness_, size);
   ParameterInterpolator feedback_amount(
       &previous_feedback_amount_, feedback, size);
+  ParameterInterpolator compensation(
+      &loudness_compensation_, loudness_compensation, size);
 
   uint32_t carrier_phase = carrier_phase_;
   uint32_t modulator_phase = modulator_phase_;
@@ -110,7 +146,12 @@ void FMVoice::Process(const float* in, float* out, float* aux, size_t size) {
     
     brightness_envelope *= 2.0f * amplitude_envelope * (2.0f - amplitude_envelope);
     
-    SLOPE(amplitude_envelope_, amplitude_envelope, 0.05f, amplitude_decay);
+    if (hold_counter_) {
+      --hold_counter_;
+      SLOPE(amplitude_envelope_, amplitude_envelope, 0.05f, 0.0f);
+    } else {
+      SLOPE(amplitude_envelope_, amplitude_envelope, 0.05f, amplitude_decay);
+    }
     SLOPE(brightness_envelope_, brightness_envelope, 0.01f, brightness_decay);
     
     // Compute envelopes.
@@ -127,20 +168,21 @@ void FMVoice::Process(const float* in, float* out, float* aux, size_t size) {
     SLEW(fm_amount_, fm_amount, 0.005f + fm_amount_max * 0.015f);
 
     // FM synthesis in itself
-    float phase_feedback = feedback < 0.0f ? 0.5f * feedback * feedback : 0.0f;
+    float feedback = feedback_amount.Next();
+    float phase_feedback = feedback < 0.0f ? -0.5f * feedback : 0.0f;
     modulator_phase += static_cast<uint32_t>(4294967296.0f * \
       modulator_increment.Next() * (1.0f + previous_sample * phase_feedback));
     carrier_phase += static_cast<uint32_t>(4294967296.0f * \
         carrier_increment.Next());
 
-    float feedback = feedback_amount.Next();
-    float modulator_fb = feedback > 0.0f ? 0.25f * feedback * feedback : 0.0f;
+    float modulator_fb = feedback > 0.0f ? 0.25f * feedback : 0.0f;
     float modulator = SineFm(modulator_phase, modulator_fb * previous_sample);
     float carrier = SineFm(carrier_phase, fm_amount_ * modulator);
     ONE_POLE(previous_sample, carrier, 0.1f);
 
     // Compute amplitude envelope.
     float gain = 1.0f + envelope_amount * (amplitude_envelope_ - 1.0f);
+    gain *= compensation.Next();
     ONE_POLE(gain_, gain, 0.005f + 0.045f * fm_amount_);
     
     *out++ = (carrier + 0.5f * modulator) * gain_;

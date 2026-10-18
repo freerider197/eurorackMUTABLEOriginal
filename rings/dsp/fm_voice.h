@@ -83,6 +83,7 @@ class FMVoice {
   inline void TriggerInternalEnvelope() {
     amplitude_envelope_ = 1.0f;
     brightness_envelope_ = 1.0f;
+    hold_counter_ = hold_samples_;
   }
   
   inline float SineFm(uint32_t phase, float fm) const {
@@ -112,6 +113,9 @@ class FMVoice {
   float brightness_envelope_;
   float gain_;
   float fm_amount_;
+  float loudness_compensation_;
+  int32_t hold_samples_;
+  int32_t hold_counter_;
   uint32_t carrier_phase_;
   uint32_t modulator_phase_;
   float previous_sample_;
