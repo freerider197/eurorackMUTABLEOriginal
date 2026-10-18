@@ -89,6 +89,11 @@ const float kSelfFeedbackMakeupDb = 4.0f;
 // Dead band around the center of the feedback control (POSITION).
 const float kFeedbackDeadBand = 0.03f;
 
+// Response curves (exponents) of POSITION away from noon. Larger = slower
+// start, finer control of subtle amounts. The maximum is unchanged.
+const float kFeedbackCurve = 3.0f;
+const float kSelfFeedbackCurve = 1.5f;
+
 // Maximum DX7-style self-feedback, in cycles of phase offset per unit of
 // output. 0.5 is the DX7's level 7, which breaks into noise; 0.3 (about
 // level 6) is the brightest setting that stays a clean saw.
@@ -106,13 +111,11 @@ void FMVoice::Init() {
   set_ratio(0.5f);
   set_brightness(0.5f);
   set_damping(0.5f);
-  set_position(0.5f);
   set_feedback_amount(0.0f);
   
   previous_carrier_frequency_ = carrier_frequency_;
   previous_modulator_frequency_ = carrier_frequency_;
   previous_brightness_ = brightness_;
-  previous_damping_ = damping_;
   previous_feedback_amount_ = feedback_amount_;
   previous_modulator_self_feedback_ = 0.0f;
   
@@ -147,15 +150,31 @@ void FMVoice::Process(const float* in, float* out, float* aux, size_t size) {
 
   hold_samples_ = static_cast<int32_t>(
       std::min(kHoldRatio * amplitude_rt60, kMaxHoldTime * kSampleRate));
+
+  // POSITION: small dead band around noon, then a curve on each side so that
+  // the first part of the travel gives subtle changes.
+  float feedback = (feedback_amount_ - 0.5f) * 2.0f;
+  float feedback_magnitude = std::max(
+      fabsf(feedback) - kFeedbackDeadBand, 0.0f) / (1.0f - kFeedbackDeadBand);
+  // Left of noon: DX7-style modulator self-feedback. Right of noon: the
+  // carrier modulates the modulator's phase (original Rings behaviour).
+  float self_feedback_magnitude = 0.0f;
+  if (feedback < 0.0f) {
+    self_feedback_magnitude = powf(feedback_magnitude, kSelfFeedbackCurve);
+    feedback = 0.0f;
+  } else {
+    feedback = powf(feedback_magnitude, kFeedbackCurve);
+  }
+  // From here on, feedback is the classic (right side) amount, >= 0.
+
   // dB to semitones: 12 * log2(10) / 20.
   float compensation_db = Interpolate(kLoudnessCompensationDb, damping_, 16.0f);
   compensation_db += Interpolate(kBrightnessCompensationDb, brightness_, 8.0f);
-  if (feedback_amount_ > 0.5f) {
-    float m = std::min((feedback_amount_ - 0.5f) * 2.0f, 1.0f);
-    compensation_db += m * Interpolate(
+  if (feedback > 0.0f) {
+    compensation_db += feedback * Interpolate(
         kFeedbackCompensationDb, brightness_, 8.0f);
   } else {
-    float m = std::min((0.5f - feedback_amount_) * 2.0f, 1.0f);
+    float m = self_feedback_magnitude;
     // Fitted to the measured drop: flat 0.5-0.6, fading out at 0.3 and 1.
     float w = std::min(
         std::max((brightness_ - 0.3f) * 5.0f, 0.0f),
@@ -173,22 +192,7 @@ void FMVoice::Process(const float* in, float* out, float* aux, size_t size) {
     modulator_frequency = 0.5f;
   }
   
-  float feedback = (feedback_amount_ - 0.5f) * 2.0f;
-  // Linear response with a small dead band around the center. The amount used
-  // to be squared, which left a wide region around noon with no audible
-  // effect.
-  float feedback_magnitude = std::max(
-      fabsf(feedback) - kFeedbackDeadBand, 0.0f) / (1.0f - kFeedbackDeadBand);
-  feedback = feedback < 0.0f ? -feedback_magnitude : feedback_magnitude;
-
-  // Left of noon: DX7-style modulator self-feedback. Right of noon: the
-  // carrier modulates the modulator's phase (original Rings behaviour).
-  float modulator_self_feedback = 0.0f;
-  if (feedback < 0.0f) {
-    modulator_self_feedback = SelfFeedbackAmount(feedback_magnitude);
-    feedback = 0.0f;
-  }
-  // From here on, feedback is the classic (right side) amount, >= 0.
+  float modulator_self_feedback = SelfFeedbackAmount(self_feedback_magnitude);
   
   ParameterInterpolator carrier_increment(
       &previous_carrier_frequency_, carrier_frequency_, size);

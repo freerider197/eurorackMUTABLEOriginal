@@ -84,6 +84,8 @@ void CvScaler::Init(CalibrationData* calibration_data) {
   normalization_detector_v_oct_.Init(0.01f, 0.5f);
   
   fm_cv_ = 0.0f;
+  fill(&random_cv_[0], &random_cv_[kNumRandomCVs], 0.0f);
+  fill(&empty_jack_counter_[0], &empty_jack_counter_[kNumRandomCVs], 0);
   
   first_read_ = true;
   frequency_locked_ = false;
@@ -137,9 +139,21 @@ void CvScaler::DetectNormalization() {
   normalization_probe_.Write(new_state);
 }
 
+// Empty CV jacks can't be detected in hardware (only STRUM, V/OCT and IN
+// have a normalization probe), so a jack reading ~0V for this long is
+// considered empty. Read() runs once per 24-sample block.
+const uint16_t kEmptyJackTime = 48000 / 24;  // 1s
+const float kEmptyJackThreshold = 0.01f;
+// Hysteresis, so that ADC noise can't flip an empty jack back to "patched".
+const float kPatchedJackThreshold = 0.02f;
+// The attenuverter's range is +/-3.3: fully turned, the random offset covers
+// the whole parameter range.
+const float kRandomCVScale = 1.0f / 3.3f;
+
 #define ATTENUVERT(destination, NAME, min, max) \
   { \
     float value = adc_lp_[ADC_CHANNEL_CV_ ## NAME]; \
+    value += random_offset[ADC_CHANNEL_CV_ ## NAME - ADC_CHANNEL_CV_STRUCTURE]; \
     value *= adc_lp_[ADC_CHANNEL_ATTENUVERTER_ ## NAME]; \
     value += adc_lp_[ADC_CHANNEL_POT_ ## NAME]; \
     CONSTRAIN(value, min, max) \
@@ -184,6 +198,28 @@ void CvScaler::Read(Patch* patch, PerformanceState* performance_state, Settings*
     adc_lp_[i] += settings.lp_coefficient * (value - adc_lp_[i]);
   }
   
+  // Empty CV jack (except FM): each trigger on the STRUM jack picks a new
+  // random value, scaled by the attenuverter. Clockwise, values are picked
+  // above the knob; counter-clockwise, below it.
+  bool strum_jack_trigger = trigger_input_.rising_edge() && \
+      !normalization_detector_trigger_.normalized();
+  float random_offset[kNumRandomCVs];
+  for (int32_t i = 0; i < kNumRandomCVs; ++i) {
+    float cv = adc_lp_[ADC_CHANNEL_CV_STRUCTURE + i];
+    bool empty = empty_jack_counter_[i] >= kEmptyJackTime;
+    if (fabs(cv) > (empty ? kPatchedJackThreshold : kEmptyJackThreshold)) {
+      empty_jack_counter_[i] = 0;
+    } else if (!empty) {
+      ++empty_jack_counter_[i];
+    }
+    if (strum_jack_trigger) {
+      random_cv_[i] = Random::GetFloat();
+    }
+    random_offset[i] = empty_jack_counter_[i] >= kEmptyJackTime
+        ? random_cv_[i] * kRandomCVScale
+        : 0.0f;
+  }
+
   ATTENUVERT(patch->structure, STRUCTURE, 0.0f, 0.9995f);
   ATTENUVERT(patch->brightness, BRIGHTNESS, 0.0f, 1.0f);
   ATTENUVERT(patch->damping, DAMPING, 0.0f, 1.0f);

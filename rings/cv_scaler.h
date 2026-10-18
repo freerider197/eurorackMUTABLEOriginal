@@ -55,6 +55,8 @@ struct ChannelSettings {
 struct Patch;
 struct PerformanceState;
 
+const int32_t kNumRandomCVs = 4;
+
 class NormalizationDetector {
  public:
   NormalizationDetector() { }
@@ -214,6 +216,11 @@ class CvScaler {
   float fm_cv_;
   float cv_c1_;
   float cv_low_;
+  
+  // Random value per STRUM trigger for empty STRUCTURE, BRIGHTNESS, DAMPING
+  // and POSITION CV jacks (see CvScaler::Read).
+  float random_cv_[kNumRandomCVs];
+  uint16_t empty_jack_counter_[kNumRandomCVs];
   int32_t chord_;
   
   bool first_read_;

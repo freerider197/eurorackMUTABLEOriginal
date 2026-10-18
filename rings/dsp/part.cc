@@ -499,7 +499,6 @@ void Part::RenderFMVoice(
     } else {
       v.set_feedback_amount(patch.position);
     }
-    v.set_position(/*patch.position*/ 0.0f);
     v.set_damping(patch.damping);
   }
   v.Process(resonator_input_, out_buffer_, aux_buffer_, size);

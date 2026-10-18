@@ -18,3 +18,14 @@ BRIGHTNESS and POSITION (tables in `rings/dsp/fm_voice.cc`), no overall trim.
 
 If CPU gets tight, the Mini-Elements exciter (`Part::FillExciterBuffer` in
 `rings/dsp/part.cc`) is the agreed candidate to remove.
+
+v3 additions:
+- POSITION has a response curve on each side of noon (kFeedbackCurve,
+  kSelfFeedbackCurve in fm_voice.cc) for finer subtle amounts.
+- Random per trigger: when the STRUCTURE, BRIGHTNESS, DAMPING or POSITION CV
+  jack reads ~0V for 1s it's treated as empty; each trigger on the STRUM jack
+  (not V/OCT) then picks a random value, scaled by that attenuverter
+  (clockwise: above the knob, counter-clockwise: below). FM/frequency is
+  never affected. See CvScaler::Read.
+- RAM is full (0 bytes spare in main RAM with the 1KB stack): new state must
+  be paid for, e.g. by the Mini-Elements exciter.

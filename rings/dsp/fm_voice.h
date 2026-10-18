@@ -72,10 +72,6 @@ class FMVoice {
     damping_ = damping;
   }
   
-  inline void set_position(float position) {
-    position_ = position;
-  }
-  
   inline void set_feedback_amount(float feedback_amount) {
     feedback_amount_ = feedback_amount;
   }
@@ -100,13 +96,11 @@ class FMVoice {
   float ratio_;
   float brightness_;
   float damping_;
-  float position_;
   float feedback_amount_;
   
   float previous_carrier_frequency_;
   float previous_modulator_frequency_;
   float previous_brightness_;
-  float previous_damping_;
   float previous_feedback_amount_;
   float previous_modulator_self_feedback_;
   
