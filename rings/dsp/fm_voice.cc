@@ -57,20 +57,20 @@ static const float kLoudnessCompensationDb[18] = {
 const float kHoldRatio = 0.3f;
 const float kMaxHoldTime = 0.03f;
 
-// The tables below were fitted to A-weighted level measurements of the drone
-// (first 200ms, averaged over ratios 0.1 to 0.9 and 82/165/330Hz), see
-// rings/tools/sim. Positive values only use the headroom left by the DAMPING
-// compensation: the total gain never exceeds 0dB, so short plucks (already
-// at the limiter's threshold) only get the cuts.
-
 // Overall trim, to make room for the dark short plucks: they are at the
 // limiter's threshold and can't be boosted, so everything else comes down
 // towards them.
 const float kOutputTrimDb = -3.0f;
 
-// vs. BRIGHTNESS (9 points from 0 to 1, plus a guard). Below noon the voice tends towards
-// two pure sines, which sound ~5dB quieter than richer spectra at the same
-// level.
+// The tables below were fitted to A-weighted level measurements of the drone
+// (first 200ms, averaged over ratios 0.1 to 0.9 and 82/165/330Hz), see
+// rings/tools/sim. Positive values only use the headroom left by the DAMPING
+// compensation and the trim: the total gain never exceeds 0dB, so short
+// plucks (already at the limiter's threshold) only get the cuts.
+
+// vs. BRIGHTNESS (9 points from 0 to 1, plus a guard). Below noon the voice
+// tends towards two pure sines, which sound ~5dB quieter than richer spectra
+// at the same level.
 static const float kBrightnessCompensationDb[10] = {
   5.2f, 5.0f, 3.7f, 1.5f, 0.0f, -0.8f, -1.3f, -1.2f, -1.0f, -1.0f,
 };
