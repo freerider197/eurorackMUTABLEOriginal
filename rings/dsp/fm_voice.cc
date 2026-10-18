@@ -57,15 +57,15 @@ static const float kLoudnessCompensationDb[18] = {
 const float kHoldRatio = 0.3f;
 const float kMaxHoldTime = 0.03f;
 
-// Overall trim, to make room for the dark short plucks: they are at the
-// limiter's threshold and can't be boosted, so everything else comes down
-// towards them.
-const float kOutputTrimDb = -3.0f;
+// Overall trim. A negative value would make room for dark short plucks
+// (BRIGHTNESS near 0, at the limiter's threshold and so not boosted) at the
+// cost of everything else; not worth it since that corner isn't used.
+const float kOutputTrimDb = 0.0f;
 
 // The tables below were fitted to A-weighted level measurements of the drone
 // (first 200ms, averaged over ratios 0.1 to 0.9 and 82/165/330Hz), see
 // rings/tools/sim. Positive values only use the headroom left by the DAMPING
-// compensation and the trim: the total gain never exceeds 0dB, so short
+// compensation (and the trim): the total gain never exceeds 0dB, so short
 // plucks (already at the limiter's threshold) only get the cuts.
 
 // vs. BRIGHTNESS (9 points from 0 to 1, plus a guard). Below noon the voice
