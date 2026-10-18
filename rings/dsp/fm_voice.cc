@@ -56,6 +56,13 @@ static const float kLoudnessCompensationDb[17] = {
 const float kHoldRatio = 0.3f;
 const float kMaxHoldTime = 0.03f;
 
+// With BRIGHTNESS below noon the voice tends towards two pure sines, which
+// sound quieter than richer spectra at the same level (by 5 to 8dB A-weighted
+// at low pitches). Boost them, but only into the headroom left by the DAMPING
+// compensation: the total gain never exceeds 0dB, so short plucks (already at
+// the limiter's threshold) are unchanged.
+const float kLowBrightnessBoostDb = 4.0f;
+
 // Dead band around the center of the feedback control (POSITION).
 const float kFeedbackDeadBand = 0.03f;
 
@@ -103,8 +110,12 @@ void FMVoice::Process(const float* in, float* out, float* aux, size_t size) {
   hold_samples_ = static_cast<int32_t>(
       std::min(kHoldRatio * amplitude_rt60, kMaxHoldTime * kSampleRate));
   // dB to semitones: 12 * log2(10) / 20.
+  float compensation_db = Interpolate(kLoudnessCompensationDb, damping_, 16.0f);
+  if (brightness_ < 0.5f) {
+    compensation_db += kLowBrightnessBoostDb * (1.0f - 2.0f * brightness_);
+  }
   float loudness_compensation = SemitonesToRatio(
-      Interpolate(kLoudnessCompensationDb, damping_, 16.0f) * 1.993157f);
+      std::min(compensation_db, 0.0f) * 1.993157f);
   
   float ratio = Interpolate(lut_fm_frequency_quantizer, ratio_, 128.0f);
   float modulator_frequency = carrier_frequency_ * SemitonesToRatio(ratio);
