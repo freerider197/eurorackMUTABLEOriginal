@@ -108,6 +108,7 @@ class FMVoice {
   float previous_brightness_;
   float previous_damping_;
   float previous_feedback_amount_;
+  float previous_modulator_self_feedback_;
   
   float amplitude_envelope_;
   float brightness_envelope_;
@@ -119,6 +120,7 @@ class FMVoice {
   uint32_t carrier_phase_;
   uint32_t modulator_phase_;
   float previous_sample_;
+  float modulator_history_[2];
   
   Follower follower_;
   
