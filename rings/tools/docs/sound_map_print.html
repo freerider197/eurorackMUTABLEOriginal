@@ -1,0 +1,119 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Rings v4 Sound Map</title>
+<style>
+@page { size: A4 landscape; margin: 11mm; }
+:root { --ink:#1b1f1b; --muted:#5d645c; --rule:#c9cfc6; --well:#262b26; --g:#22c55e; --y:#f3c21b; --r:#ee3b2f; }
+* { box-sizing:border-box; }
+html, body { margin:0; background:#fff; color:var(--ink); font-family:"DejaVu Sans Condensed","Arial Narrow",Arial,sans-serif; font-size:10.5pt; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+.page { display:grid; grid-template-columns: 1fr 62mm; gap:8mm; }
+header { grid-column:1 / -1; display:flex; align-items:baseline; justify-content:space-between; border-bottom:2px solid var(--ink); padding-bottom:2mm; }
+h1 { margin:0; font-size:20pt; letter-spacing:.06em; text-transform:uppercase; }
+h1 span { color:var(--muted); font-weight:normal; }
+.sub { color:var(--muted); font-size:10pt; }
+h2 { font-size:9pt; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin:0 0 2mm; }
+table { border-collapse:collapse; width:100%; }
+th, td { border-bottom:1px solid var(--rule); padding:2.2mm 1mm; vertical-align:middle; }
+thead th { text-align:center; font-size:11pt; text-transform:uppercase; letter-spacing:.05em; }
+thead th small { display:block; font-weight:normal; text-transform:none; letter-spacing:0; color:var(--muted); font-size:8.5pt; }
+tbody th { text-align:left; width:30%; }
+tbody th b { display:block; font-size:12pt; text-transform:uppercase; letter-spacing:.03em; }
+tbody th small { color:var(--muted); font-weight:normal; font-size:8.5pt; }
+td { text-align:center; }
+.cell { display:inline-grid; justify-items:center; gap:1mm; }
+.num { font-size:8.5pt; color:var(--muted); }
+/* LED glyphs */
+.led { width:7mm; height:7mm; border-radius:50%; border:1.2px solid var(--well); display:inline-block; }
+.g { background:var(--g); } .y { background:var(--y); } .r { background:var(--r); }
+.gr { background:linear-gradient(90deg, var(--g) 50%, var(--r) 50%); }
+.yr { background:linear-gradient(90deg, var(--y) 50%, var(--r) 50%); }
+.yg { background:linear-gradient(90deg, var(--y) 50%, var(--g) 50%); }
+.br { background:radial-gradient(circle, var(--g) 0 30%, #bdf0cf 62%, #fff 100%); }
+.fl { outline:1.6px dashed var(--ink); outline-offset:1.2mm; }
+.dots { display:flex; gap:1.2mm; height:2mm; }
+.dots i { width:2mm; height:2mm; border-radius:50%; background:var(--ink); }
+.star { color:var(--g); }
+/* side column */
+.side { display:grid; gap:5mm; align-content:start; }
+.btn { display:grid; grid-template-columns: 24mm 1fr; gap:2mm; align-items:center; padding:1.4mm 0; border-bottom:1px solid var(--rule); font-size:9.5pt; }
+.cap { background:var(--well); color:#fff; border-radius:1.5mm; padding:.8mm 1.5mm; font-size:8pt; text-transform:uppercase; letter-spacing:.04em; text-align:center; }
+.key { display:grid; grid-template-columns: 9mm 1fr; gap:2mm; align-items:center; font-size:9pt; padding:.8mm 0; }
+.egg { display:grid; grid-template-columns: repeat(3, 1fr); gap:3mm 2mm; }
+.egg div { display:grid; justify-items:center; gap:1mm; font-size:8.5pt; color:var(--muted); }
+.note { font-size:8.8pt; color:var(--muted); line-height:1.45; margin:0; }
+.note b { color:var(--ink); }
+</style></head><body>
+<div class="page">
+  <header><h1>Rings <span>v4 · sound map</span></h1><div class="sub">Right LED = where you are · colour = resonator · black dots = number of blinks = exciter</div></header>
+
+  <main>
+    <table>
+      <thead><tr><th></th>
+        <th>Rings<small>pluck · steady</small></th>
+        <th>Bow<small>endless bow · 1 blink</small></th>
+        <th>Blow<small>breath, pipe · 2 blinks</small></th>
+        <th>Strike<small>mallet, rattle · 3 blinks</small></th></tr></thead>
+      <tbody>
+        <tr><th><b>Modal</b><small>bars, bells, glass · green</small></th>
+          <td><span class="cell"><span class="led g"></span><span class="dots"></span><span class="num">1</span></span></td>
+          <td><span class="cell"><span class="led g"></span><span class="dots"><i></i></span><span class="num">2</span></span></td>
+          <td><span class="cell"><span class="led g"></span><span class="dots"><i></i><i></i></span><span class="num">3</span></span></td>
+          <td><span class="cell"><span class="led g"></span><span class="dots"><i></i><i></i><i></i></span><span class="num">4</span></span></td></tr>
+        <tr><th><b>Sympathetic</b><small>sitar / harp strings · yellow</small></th>
+          <td><span class="cell"><span class="led y"></span><span class="dots"></span><span class="num">5</span></span></td>
+          <td><span class="cell"><span class="led y"></span><span class="dots"><i></i></span><span class="num">6</span></span></td>
+          <td><span class="cell"><span class="led y"></span><span class="dots"><i></i><i></i></span><span class="num">7</span></span></td>
+          <td><span class="cell"><span class="led y"></span><span class="dots"><i></i><i></i><i></i></span><span class="num">8</span></span></td></tr>
+        <tr><th><b>Inharmonic string</b><small>buzz ← clean → stiff · red</small></th>
+          <td><span class="cell"><span class="led r"></span><span class="dots"></span><span class="num">9</span></span></td>
+          <td><span class="cell"><span class="led r"></span><span class="dots"><i></i></span><span class="num">10</span></span></td>
+          <td><span class="cell"><span class="led r"></span><span class="dots"><i></i><i></i></span><span class="num">11</span></span></td>
+          <td><span class="cell"><span class="led r"></span><span class="dots"><i></i><i></i><i></i></span><span class="num">12</span></span></td></tr>
+        <tr><th><b>2-op FM <span class="star">★</span></b><small>green, breathing (only one)</small></th>
+          <td><span class="cell"><span class="led br"></span><span class="dots"></span><span class="num">13</span></span></td>
+          <td><span class="cell"><span class="led br"></span><span class="dots"><i></i></span><span class="num">14</span></span></td>
+          <td><span class="cell"><span class="led br"></span><span class="dots"><i></i><i></i></span><span class="num">15</span></span></td>
+          <td><span class="cell"><span class="led br"></span><span class="dots"><i></i><i></i><i></i></span><span class="num">16</span></span></td></tr>
+        <tr><th><b>Western chords</b><small>strings on chords · green/red alternating</small></th>
+          <td><span class="cell"><span class="led gr"></span><span class="dots"></span><span class="num">17</span></span></td>
+          <td><span class="cell"><span class="led gr"></span><span class="dots"><i></i></span><span class="num">18</span></span></td>
+          <td><span class="cell"><span class="led gr"></span><span class="dots"><i></i><i></i></span><span class="num">19</span></span></td>
+          <td><span class="cell"><span class="led gr"></span><span class="dots"><i></i><i></i><i></i></span><span class="num">20</span></span></td></tr>
+        <tr><th><b>String + reverb</b><small>string into stereo verb · yellow/red alternating</small></th>
+          <td><span class="cell"><span class="led yr"></span><span class="dots"></span><span class="num">21</span></span></td>
+          <td><span class="cell"><span class="led yr"></span><span class="dots"><i></i></span><span class="num">22</span></span></td>
+          <td><span class="cell"><span class="led yr"></span><span class="dots"><i></i><i></i></span><span class="num">23</span></span></td>
+          <td><span class="cell"><span class="led yr"></span><span class="dots"><i></i><i></i><i></i></span><span class="num">24</span></span></td></tr>
+      </tbody>
+    </table>
+  </main>
+
+  <aside class="side">
+    <section><h2>Buttons</h2>
+      <div class="btn"><span class="cap">Right</span>Next sound</div>
+      <div class="btn"><span class="cap">Left</span>Previous sound</div>
+      <div class="btn"><span class="cap">Hold L 2s</span>Polyphony 1·2·3·4</div>
+      <div class="btn"><span class="cap">Hold R 2s</span>Easter egg on/off</div>
+      <div class="btn"><span class="cap">Both tap</span>Frequency lock</div>
+      <div class="btn"><span class="cap">Both 2s, R 1st</span>Calibration</div>
+    </section>
+    <section><h2>How to read the LED</h2>
+      <div class="key"><span class="led g"></span>steady colour</div>
+      <div class="key"><span class="led gr"></span>split = two colours alternating</div>
+      <div class="key"><span class="led br"></span>soft = slow breathing (FM)</div>
+      <div class="key"><span class="dots"><i></i><i></i></span>short dark blinks per cycle</div>
+      <div class="key"><span class="led g fl"></span>dashed = fast flicker</div>
+    </section>
+    <section><h2>Easter egg · flicker</h2>
+      <div class="egg">
+        <div><span class="led g fl"></span>Formant</div>
+        <div><span class="led y fl"></span>Chorus</div>
+        <div><span class="led r fl"></span>Reverb</div>
+        <div><span class="led yg fl"></span>Formant 2</div>
+        <div><span class="led gr fl"></span>Ensemble</div>
+        <div><span class="led yr fl"></span>Reverb 2</div>
+      </div>
+    </section>
+    <p class="note"><b>Left LED</b> = polyphony. <b>Strike</b> needs STRUM. <b>Empty CV jack</b> + attenuverter = random per STRUM (not FM). <b>Timbre</b> = Frequency knob while locked.</p>
+  </aside>
+</div>
+</body></html>
