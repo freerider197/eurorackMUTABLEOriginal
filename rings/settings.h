@@ -58,12 +58,15 @@ struct State {
   uint8_t chord_table_option;
   uint8_t strum_hold_option;
   uint8_t fm_input_option;
+  // 0: Rings exciter, 1: Elements bow, 2: Elements blow, 3: Elements strike.
+  uint8_t exciter;
+  uint8_t easter_egg_fx;
 };
 
 struct SettingsData {
   CalibrationData calibration_data; // 40 bytes
-  State state;  // 14 bytes
-  uint8_t padding[10];
+  State state;  // 16 bytes
+  uint8_t padding[8];
 };
 
 class Settings {
@@ -83,27 +86,26 @@ class Settings {
     data_.state.frequency_locked = !data_.state.frequency_locked;
   }
 
-  void SwitchModeOption();
+  // Derives the mode and Elements exciter options from exciter and
+  // easter_egg (the options menu is gone, these are now set by the buttons).
+  void UpdateModeOptions();
+
   inline uint8_t ModeOption() {
     return data_.state.mode_option;
   }
 
-  void SwitchWaveformExciterOption();
   inline uint8_t WaveformExciterOption() {
     return data_.state.waveform_exciter_option;
   }
 
-  void SwitchChordTableOption();
   inline uint8_t ChordTableOption() {
     return data_.state.chord_table_option;
   }
 
-  void SwitchStrumHoldOption();
   inline uint8_t StrumHoldOption() {
     return data_.state.strum_hold_option;
   }
 
-  void SwitchFMInputOption();
   inline uint8_t FMInputOption() {
     return data_.state.fm_input_option;
   }

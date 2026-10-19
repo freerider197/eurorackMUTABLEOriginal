@@ -46,9 +46,6 @@ class StringSynthPart;
 enum UiMode {
   UI_MODE_NORMAL,
   UI_MODE_DISPLAY_FREQUENCY_LOCKING,
-  UI_MODE_OPTIONS_MENU,
-  UI_MODE_OPTIONS_MENU_INTRO,
-  UI_MODE_OPTIONS_MENU_OUTRO,
   UI_MODE_CALIBRATION_C1,
   UI_MODE_CALIBRATION_C3,
   UI_MODE_CALIBRATION_LOW,
@@ -103,6 +100,10 @@ class Ui {
   void CalibrateLow();
   void CalibrateHigh();
   void SaveState();
+  void StepSound(int32_t direction);
+  void StepPolyphony();
+  void ToggleEasterEgg();
+  void RenderSoundLed(uint32_t ms, uint8_t pwm_counter);
 
   stmlib::EventQueue<16> queue_;
   
@@ -112,7 +113,6 @@ class Ui {
   UiMode mode_;
   int32_t strumming_flag_counter_;
   int32_t strumming_flag_interval_;
-  uint8_t option_menu_item_;
   
   Settings* settings_;
   CvScaler* cv_scaler_;

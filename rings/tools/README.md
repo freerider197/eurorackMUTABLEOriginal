@@ -27,5 +27,17 @@ v3 additions:
   (not V/OCT) then picks a random value, scaled by that attenuverter
   (clockwise: above the knob, counter-clockwise: below). FM/frequency is
   never affected. See CvScaler::Read.
-- RAM is full (0 bytes spare in main RAM with the 1KB stack): new state must
-  be paid for, e.g. by the Mini-Elements exciter.
+
+v4 (no options menu):
+- Short RIGHT / LEFT: next / previous of 24 sounds = 6 resonators x 4 exciters
+  (Rings, Elements bow, blow, strike), resonator-major. Long LEFT (2s):
+  polyphony 1-2-3-4. Long RIGHT: easter egg on/off (short presses then pick
+  its FX). Both short: frequency lock. Both long, right first: calibration.
+- Right LED: color/motion = resonator (only the FM voice "breathes"), number
+  of short blinks per 1.6s = exciter. Easter egg: fast flicker.
+- Hold on Strum, alt chord tables, FM-input-to-timbre, Rings+Waveform and
+  raw exciter out modes are gone (fixed to classic behaviour).
+- bryanChords made const (moved 1.4KB from RAM to flash): the stack now has
+  ~2.4KB instead of exactly 1KB.
+- sim/run_v4_tests.sh: UI test with stubbed hardware, all-sounds stability
+  test, and bootloader decode of an update .wav.

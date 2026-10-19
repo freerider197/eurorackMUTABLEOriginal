@@ -30,13 +30,12 @@
 
 #include "stmlib/system/storage.h"
 
+#include "rings/dsp/performance_state.h"
+
 namespace rings {
 
-const uint8_t kNumModeOptions = 5;
-const uint8_t kNumWaveformExciterOptions = 3;
-const uint8_t kNumChordTableOptions = 3;
-const uint8_t kNumStrumHoldOptions = 2;
-const uint8_t kNumFMInputOptions = 2;
+const uint8_t kNumExciters = 4;
+const uint8_t kNumEasterEggFx = 6;
 
 stmlib::Storage<1> storage;
 
@@ -62,6 +61,19 @@ void Settings::Init() {
   }
   CONSTRAIN(data_.state.polyphony, 1, 4);
   CONSTRAIN(data_.state.model, 0, 5);
+  // exciter and easter_egg_fx were padding in earlier versions.
+  if (data_.state.exciter >= kNumExciters) {
+    data_.state.exciter = 0;
+  }
+  if (data_.state.easter_egg_fx >= kNumEasterEggFx) {
+    data_.state.easter_egg_fx = 0;
+  }
+  data_.state.easter_egg = data_.state.easter_egg ? 1 : 0;
+  // These used to be options in the menu: fixed to the classic behaviour.
+  data_.state.chord_table_option = 0;
+  data_.state.strum_hold_option = 0;
+  data_.state.fm_input_option = 0;
+  UpdateModeOptions();
 }
 
 void Settings::InitState() {
@@ -77,32 +89,20 @@ void Settings::InitState() {
   data_.state.chord_table_option = 0;
   data_.state.strum_hold_option = 0;
   data_.state.fm_input_option = 0;
+  data_.state.exciter = 0;
+  data_.state.easter_egg_fx = 0;
 }
 
-void Settings::SwitchModeOption() {
-  uint8_t new_option = (ModeOption() + 1) % kNumModeOptions;
-  mutable_state()->mode_option = new_option;
-  mutable_state()->easter_egg = new_option == 4;
-}
-
-void Settings::SwitchWaveformExciterOption() {
-  uint8_t new_option = (WaveformExciterOption() + 1) % kNumWaveformExciterOptions;
-  mutable_state()->waveform_exciter_option = new_option;
-}
-
-void Settings::SwitchChordTableOption() {
-  uint8_t new_option = (ChordTableOption() + 1) % kNumChordTableOptions;
-  mutable_state()->chord_table_option = new_option;
-}
-
-void Settings::SwitchStrumHoldOption() {
-  uint8_t new_option = (StrumHoldOption() + 1) % kNumStrumHoldOptions;
-  mutable_state()->strum_hold_option = new_option;
-}
-
-void Settings::SwitchFMInputOption() {
-  uint8_t new_option = (FMInputOption() + 1) % kNumFMInputOptions;
-  mutable_state()->fm_input_option = new_option;
+void Settings::UpdateModeOptions() {
+  State* state = mutable_state();
+  if (state->easter_egg) {
+    state->mode_option = MODE_EASTER_EGG;
+  } else if (state->exciter == 0) {
+    state->mode_option = MODE_RINGS_STEREO;
+  } else {
+    state->mode_option = MODE_MINI_ELEMENTS_STEREO;
+    state->waveform_exciter_option = state->exciter - 1;
+  }
 }
 
 void Settings::Save() {

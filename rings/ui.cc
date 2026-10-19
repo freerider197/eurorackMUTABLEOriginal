@@ -38,10 +38,14 @@
 
 namespace rings {
 
-const int32_t kAnimationDuration = 1200;
-const int32_t kLongPressDuration = 2800;
+const int32_t kLongPressDuration = 2000;
 const int32_t kMediumPressDuration = 200;
-const uint8_t kNumOptions = 5;
+
+// The sounds are the 6 resonators x 4 exciters, in this order: each
+// resonator with the Rings exciter, then Elements bow, blow and strike.
+const int32_t kNumExciters = 4;
+const int32_t kNumSounds = RESONATOR_MODEL_LAST * kNumExciters;
+const int32_t kNumEasterEggFx = FX_LAST;
 
 using namespace std;
 using namespace stmlib;
@@ -73,7 +77,8 @@ void Ui::Init(
   part_->set_polyphony(settings_->state().polyphony);
   part_->set_model(static_cast<ResonatorModel>(settings_->state().model));
   string_synth_->set_polyphony(settings_->state().polyphony);
-  string_synth_->set_fx(static_cast<FxType>(settings_->state().model));
+  string_synth_->set_fx(
+      static_cast<FxType>(settings_->state().easter_egg_fx));
   mode_ = UI_MODE_NORMAL;
 }
 
@@ -83,6 +88,93 @@ void Ui::SaveState() {
   settings_->Save();
 }
 
+void Ui::StepSound(int32_t direction) {
+  State* state = settings_->mutable_state();
+  if (state->easter_egg) {
+    state->easter_egg_fx = (state->easter_egg_fx + kNumEasterEggFx + \
+        direction) % kNumEasterEggFx;
+    string_synth_->set_fx(static_cast<FxType>(state->easter_egg_fx));
+  } else {
+    int32_t sound = part_->model() * kNumExciters + state->exciter;
+    sound = (sound + kNumSounds + direction) % kNumSounds;
+    part_->set_model(static_cast<ResonatorModel>(sound / kNumExciters));
+    state->exciter = sound % kNumExciters;
+    settings_->UpdateModeOptions();
+  }
+  SaveState();
+}
+
+void Ui::ToggleEasterEgg() {
+  State* state = settings_->mutable_state();
+  state->easter_egg = !state->easter_egg;
+  settings_->UpdateModeOptions();
+  SaveState();
+}
+
+void Ui::StepPolyphony() {
+  int32_t polyphony = part_->polyphony() % 4 + 1;
+  part_->set_polyphony(polyphony);
+  string_synth_->set_polyphony(polyphony);
+  SaveState();
+}
+
+// Right LED: where you are in the list of sounds.
+// - Color (and motion) = resonator. The 2-op FM is the only one that
+//   "breathes".
+// - Number of short blinks in each 1.6s cycle = exciter: none for Rings,
+//   1 for bow, 2 for blow, 3 for strike.
+// In the easter egg, the color is the FX and the LED flickers quickly.
+void Ui::RenderSoundLed(uint32_t ms, uint8_t pwm_counter) {
+  const State& state = settings_->state();
+  uint32_t t = ms % 1600;
+  bool phase = (t / 400) & 1;
+  uint8_t red = 0;
+  uint8_t green = 0;
+  int32_t color = state.easter_egg ? state.easter_egg_fx : part_->model();
+  if (state.easter_egg && color == RESONATOR_MODEL_FM_VOICE) {
+    color = RESONATOR_MODEL_LAST;  // Breathing is reserved for the FM voice.
+  }
+  switch (color) {
+    case RESONATOR_MODEL_MODAL:
+      green = 15;
+      break;
+    case RESONATOR_MODEL_SYMPATHETIC_STRING:
+      red = green = 15;
+      break;
+    case RESONATOR_MODEL_STRING:
+      red = 15;
+      break;
+    case RESONATOR_MODEL_FM_VOICE:
+      green = 15 - 15 * (t > 800 ? t - 800 : 800 - t) / 800;
+      break;
+    case RESONATOR_MODEL_SYMPATHETIC_STRING_QUANTIZED:
+      red = phase ? 15 : 0;
+      green = phase ? 0 : 15;
+      break;
+    case RESONATOR_MODEL_STRING_AND_REVERB:
+      red = 15;
+      green = phase ? 0 : 15;
+      break;
+    default:
+      green = 15;
+      red = phase ? 0 : 15;
+      break;
+  }
+  bool dark = false;
+  if (state.easter_egg) {
+    dark = (ms & 127) < 48;
+  } else {
+    for (int32_t i = 0; i < state.exciter; ++i) {
+      uint32_t start = 460 + 200 * i;
+      dark = dark || (t >= start && t < start + 80);
+    }
+  }
+  if (dark) {
+    red = green = 0;
+  }
+  leds_.set(1, pwm_counter < red, pwm_counter < green);
+}
+
 void Ui::Poll() {
   // 1kHz.
   system_clock.Tick();
@@ -90,14 +182,7 @@ void Ui::Poll() {
 
   for (uint8_t i = 0; i < kNumSwitches; ++i) {
     if (switches_.just_pressed(i)) {
-      if (mode_ == UI_MODE_OPTIONS_MENU && switches_.pressed(1 - i)) {
-        SaveState();
-        IgnoreSwitchReleases();
-        queue_.Touch();
-        mode_ = UI_MODE_OPTIONS_MENU_OUTRO;
-      } else {
-        press_time_[i] = system_clock.milliseconds();
-      }
+      press_time_[i] = system_clock.milliseconds();
     }
     if (switches_.pressed(i) && press_time_[i] != 0) {
       int32_t pressed_time = system_clock.milliseconds() - press_time_[i];
@@ -129,15 +214,6 @@ void Ui::Poll() {
         triangle = triangle < 16 ? triangle : 31 - triangle;
 
         if (settings_->state().color_blind == 1) {
-          uint8_t mode_red_brightness[] = {
-            0, 15, 1,
-            0, triangle, uint8_t(triangle >> 3)
-          };
-          uint8_t mode_green_brightness[] = {
-            4, 15, 0, 
-            uint8_t(triangle >> 1), triangle, 0,
-          };
-          
           uint8_t poly_counter = (system_clock.milliseconds() >> 7) % 12;
           uint8_t poly_brightness = (poly_counter >> 1) < part_->polyphony() &&
                 (poly_counter & 1);
@@ -155,23 +231,14 @@ void Ui::Poll() {
               0,
               pwm_counter < poly_red_brightness,
               pwm_counter < poly_green_brightness);
-          leds_.set(
-              1,
-              pwm_counter < mode_red_brightness[part_->model()],
-              pwm_counter < mode_green_brightness[part_->model()]);
         } else {
           leds_.set(0, part_->polyphony() >= 2, part_->polyphony() <= 2);
-          leds_.set(1, part_->model() >= 1, part_->model() <= 1);
           // Fancy modes!
           if (part_->polyphony() == 3) {
             leds_.set(0, true, pwm_counter < triangle);
           }
-          if (part_->model() >= 3) {
-            bool led_1 = part_->model() >= 4 && pwm_counter < triangle;
-            bool led_2 = part_->model() <= 4 && pwm_counter < triangle;
-            leds_.set(1, led_1, led_2);
-          }
         }
+        RenderSoundLed(system_clock.milliseconds(), pwm_counter);
         ++strumming_flag_interval_;
         if (strumming_flag_counter_) {
           --strumming_flag_counter_;
@@ -212,106 +279,6 @@ void Ui::Poll() {
       }
       break;
 
-    case UI_MODE_OPTIONS_MENU:
-      {
-        uint8_t option_value = 0;
-        if (option_menu_item_ == 0) {
-          leds_.set(0, 0, 1);
-          option_value = settings_->ModeOption();
-        } else if (option_menu_item_ == 1) {
-          leds_.set(0, 1, 0);
-          option_value = settings_->WaveformExciterOption();
-        } else if (option_menu_item_ == 2) {
-          leds_.set(0, 1, 1);
-          option_value = settings_->StrumHoldOption();
-        } else if (option_menu_item_ == 3) {
-          leds_.set(0, 0, slow_blink);
-          option_value = settings_->ChordTableOption();
-        } else if (option_menu_item_ == 4) {
-          leds_.set(0, slow_blink, 0);
-          option_value = settings_->FMInputOption();
-        }
-
-        bool menu_indicator = (system_clock.milliseconds() % 10000) > 9000;
-        if (menu_indicator) {
-          uint8_t pwm_counter = system_clock.milliseconds() & 15;
-          uint8_t triangle_1 = (system_clock.milliseconds() / 7) & 31;
-          uint8_t triangle_2 = (system_clock.milliseconds() / 17) & 31;
-          triangle_1 = triangle_1 < 16 ? triangle_1 : 31 - triangle_1;
-          triangle_2 = triangle_2 < 16 ? triangle_2 : 31 - triangle_2;
-          leds_.set(
-              0,
-              triangle_1 > pwm_counter,
-              triangle_2 > pwm_counter);
-        }
-
-        // Special casing mode options for color consistency.
-        if (option_menu_item_ == 0) {
-          if (option_value == 0) {
-            leds_.set(1, 0, 1);
-          } else if (option_value == 1) {
-            leds_.set(1, 0, slow_blink);
-          } else if (option_value == 2) {
-            leds_.set(1, 1, 0);
-          } else if (option_value == 3) {
-            leds_.set(1, slow_blink, 0);
-          } else if (option_value == 4) {
-            leds_.set(1, 1, 1);
-          }
-        } else {
-          if (option_value == 0) {
-            leds_.set(1, 0, 1);
-          } else if (option_value == 1) {
-            leds_.set(1, 1, 0);
-          } else if (option_value == 2) {
-            leds_.set(1, 1, 1);
-          } else if (option_value == 3) {
-            leds_.set(1, 0, slow_blink);
-          } else if (option_value == 4) {
-            leds_.set(1, slow_blink, 0);
-          } else if (option_value == 5) {
-            leds_.set(1, slow_blink, slow_blink);
-          } else if (option_value == 6) {
-            leds_.set(1, 0, blink);
-          } else if (option_value == 7) {
-            leds_.set(1, blink, 0);
-          } else if (option_value == 8) {
-            leds_.set(1, blink, blink);
-          }
-        }
-      }
-      break;
-    
-    case UI_MODE_OPTIONS_MENU_INTRO:
-      {
-        uint8_t pwm_counter = system_clock.milliseconds() & 15;
-        uint8_t triangle_1 = (system_clock.milliseconds() / 7) & 31;
-        uint8_t triangle_2 = (system_clock.milliseconds() / 17) & 31;
-        triangle_1 = triangle_1 < 16 ? triangle_1 : 31 - triangle_1;
-        triangle_2 = triangle_2 < 16 ? triangle_2 : 31 - triangle_2;
-        leds_.set(
-            0,
-            triangle_1 > pwm_counter,
-            triangle_2 > pwm_counter);
-        leds_.set(
-            1,
-            triangle_2 > pwm_counter,
-            triangle_1 > pwm_counter);
-      }
-      break;
-
-    case UI_MODE_OPTIONS_MENU_OUTRO:
-      {
-        uint8_t pwm_counter = 7;
-        uint8_t triangle_1 = (system_clock.milliseconds() / 9) & 31;
-        uint8_t triangle_2 = (system_clock.milliseconds() / 13) & 31;
-        triangle_1 = triangle_1 < 16 ? triangle_1 : 31 - triangle_1;
-        triangle_2 = triangle_2 < 16 ? triangle_2 : 31 - triangle_2;
-        leds_.set(0, triangle_1 < pwm_counter, triangle_1 > pwm_counter);
-        leds_.set(1, triangle_2 > pwm_counter, triangle_2 < pwm_counter);
-      }
-      break;
-    
     case UI_MODE_PANIC:
       leds_.set(0, blink, false);
       leds_.set(1, blink, false);
@@ -329,115 +296,60 @@ void Ui::IgnoreSwitchReleases() {
 }
 
 void Ui::OnSwitchLongHeld(const Event& e) {
-  // If both switches are held with a long press, enter/exit menu
-  // or go to calibration.
   if (switches_.pressed(1 - e.control_id)) {
-    if (e.control_id == 0) {
-      mode_ = UI_MODE_OPTIONS_MENU_INTRO;
-    } else if (mode_ == UI_MODE_CALIBRATION_C1) {
-      StartNormalizationCalibration();
+    // Both switches held, starting with the right one: calibration.
+    if (e.control_id == 1) {
+      if (mode_ == UI_MODE_CALIBRATION_C1) {
+        StartNormalizationCalibration();
+      } else {
+        StartCalibration();
+      }
     } else {
-      StartCalibration();
+      // Starting with the left one: used to open the options menu, now
+      // just cancels.
+      mode_ = UI_MODE_NORMAL;
     }
   } else if (e.control_id == 0) {
-    part_->set_polyphony(3);
-    string_synth_->set_polyphony(3);
-    SaveState();
+    StepPolyphony();
   } else {
-    int32_t model = part_->model();
-    if (model >= 3) {
-      model -= 3;
-    } else {
-      model += 3;
-    }
-    part_->set_model(static_cast<ResonatorModel>(model));
-    string_synth_->set_fx(static_cast<FxType>(model));
-    SaveState();
+    ToggleEasterEgg();
   }
   IgnoreSwitchReleases();
 }
 
 void Ui::OnSwitchReleased(const Event& e) {
-  if (e.control_id == 0) {
-    switch (mode_) {
-      case UI_MODE_CALIBRATION_C1:
+  switch (mode_) {
+    case UI_MODE_CALIBRATION_C1:
+      if (e.control_id == 0) {
         CalibrateC1();
-        break;
-      case UI_MODE_CALIBRATION_C3:
-        CalibrateC3();
-        break;
-      case UI_MODE_CALIBRATION_LOW:
-        CalibrateLow();
-        break;
-      case UI_MODE_CALIBRATION_HIGH:
-        CalibrateHigh();
-        break;
-      case UI_MODE_OPTIONS_MENU_INTRO:
-      case UI_MODE_OPTIONS_MENU_OUTRO:
-        break;
-      case UI_MODE_OPTIONS_MENU:
-        option_menu_item_ = (option_menu_item_ + 1) % kNumOptions;
-        break;
-      case UI_MODE_DISPLAY_FREQUENCY_LOCKING:
-        if (switches_.pressed(1)) {
-          settings_->ToggleFrequencyLocking();
-        }
-        IgnoreSwitchReleases();
-        mode_ = UI_MODE_NORMAL;
-        break;
-      default:
-        {
-          int32_t polyphony = part_->polyphony();
-          if (polyphony == 3) {
-            polyphony = 2;
-          }
-          polyphony <<= 1;
-          if (polyphony > 4) {
-            polyphony = 1;
-          }
-          part_->set_polyphony(polyphony);
-          string_synth_->set_polyphony(polyphony);
-          SaveState();
-        }
-        break;
       }
-  } else {
-    switch (mode_) {
-      case UI_MODE_DISPLAY_FREQUENCY_LOCKING:
-        if (switches_.pressed(0)) {
-          settings_->ToggleFrequencyLocking();
-        }
-        IgnoreSwitchReleases();
-        mode_ = UI_MODE_NORMAL;
-        break;
-      case UI_MODE_OPTIONS_MENU_INTRO:
-      case UI_MODE_OPTIONS_MENU_OUTRO:
-        break;
-      case UI_MODE_OPTIONS_MENU:
-        if (option_menu_item_ == 0) {
-          settings_->SwitchModeOption();
-        } else if (option_menu_item_ == 1) {
-          settings_->SwitchWaveformExciterOption();
-        } else if (option_menu_item_ == 2) {
-          settings_->SwitchStrumHoldOption();
-        } else if (option_menu_item_ == 3) {
-          settings_->SwitchChordTableOption();
-        } else if (option_menu_item_ == 4) {
-          settings_->SwitchFMInputOption();
-        }
-        break;
-      default:
-        int32_t model = part_->model();
-        if (model >= 3) {
-          model -= 3;
-        } else {
-          model = (model + 1) % 3;
-        }
-        part_->set_model(static_cast<ResonatorModel>(model));
-        string_synth_->set_fx(static_cast<FxType>(model));
-        SaveState();
-        break;
-    }
+      break;
+    case UI_MODE_CALIBRATION_C3:
+      if (e.control_id == 0) {
+        CalibrateC3();
+      }
+      break;
+    case UI_MODE_CALIBRATION_LOW:
+      if (e.control_id == 0) {
+        CalibrateLow();
+      }
+      break;
+    case UI_MODE_CALIBRATION_HIGH:
+      if (e.control_id == 0) {
+        CalibrateHigh();
+      }
+      break;
+    case UI_MODE_DISPLAY_FREQUENCY_LOCKING:
+      if (switches_.pressed(1 - e.control_id)) {
+        settings_->ToggleFrequencyLocking();
+      }
+      IgnoreSwitchReleases();
+      mode_ = UI_MODE_NORMAL;
+      break;
+    default:
+      // Plaits-style: left = previous sound, right = next sound.
+      StepSound(e.control_id == 0 ? -1 : 1);
+      break;
   }
 }
 
@@ -493,17 +405,7 @@ void Ui::DoEvents() {
   if (queue_.idle_time() > 800 && mode_ == UI_MODE_PANIC) {
     mode_ = UI_MODE_NORMAL;
   }
-  if (mode_ == UI_MODE_OPTIONS_MENU_INTRO) {
-    if (queue_.idle_time() > kAnimationDuration) {
-      mode_ = UI_MODE_OPTIONS_MENU;
-      queue_.Touch();
-    }
-  } else if (mode_ == UI_MODE_OPTIONS_MENU_OUTRO) {
-    if (queue_.idle_time() > kAnimationDuration) {
-      mode_ = UI_MODE_NORMAL;
-      queue_.Touch();
-    }
-  } else if (queue_.idle_time() > 1000) {
+  if (queue_.idle_time() > 1000) {
     queue_.Touch();
   }
 }

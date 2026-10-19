@@ -139,7 +139,7 @@ void Part::ConfigureResonators() {
 }
 
 // Chord table by Bryan Noll:
-float bryanChords[kMaxPolyphony][kNumBryanChords][8] = {
+const float bryanChords[kMaxPolyphony][kNumBryanChords][8] = {
   {
     { -12.0f, -0.01f, 0.0f,  0.01f, 0.02f, 11.98f, 11.99f, 12.0f },  // OCT
     { -12.0f, -5.0f,  0.0f,  6.99f, 7.0f,  11.99f, 12.0f,  19.0f },  // 5
