@@ -41,6 +41,10 @@ td { text-align:center; }
 .egg div { display:grid; justify-items:center; gap:1mm; font-size:8.5pt; color:var(--muted); }
 .note { font-size:8.8pt; color:var(--muted); line-height:1.45; margin:0; }
 .note b { color:var(--ink); }
+.update { margin-top:4mm; border:1.2px solid var(--ink); border-radius:2mm; padding:2.5mm 3.5mm; }
+.update ol { margin:0; padding-left:5mm; display:grid; grid-template-columns:1fr 1fr; gap:1mm 6mm; font-size:9pt; }
+.update li b { color:var(--ink); }
+.sw { display:inline-block; width:2.6mm; height:2.6mm; border-radius:50%; border:1px solid var(--well); vertical-align:-.3mm; }
 </style></head><body>
 <div class="page">
   <header><h1>Rings <span>v5 · sound map</span></h1><div class="sub">Right LED = where you are · colour = resonator · black dots = number of blinks = exciter</div></header>
@@ -85,6 +89,17 @@ td { text-align:center; }
           <td><span class="cell"><span class="led yr"></span><span class="dots"><i></i><i></i><i></i></span><span class="num">24</span></span></td></tr>
       </tbody>
     </table>
+    <section class="update">
+      <h2>Update firmware (audio)</h2>
+      <ol>
+        <li><b>Power off.</b> Computer/phone audio out → Rings <b>IN</b>. Unplug everything else.</li>
+        <li>Hold <b>LEFT</b> button while powering on. LEDs alternate <span class="sw y"></span> orange = waiting.</li>
+        <li>Play the <b>.wav</b> at <b>full volume</b>, no effects/EQ, notifications off.</li>
+        <li>Left LED fast <span class="sw g"></span> = receiving · both <span class="sw y"></span> solid = writing (long pauses are normal).</li>
+        <li>Both LEDs alternate <span class="sw r"></span> red = error: press <b>LEFT</b>, adjust volume, restart the file.</li>
+        <li>Done: it restarts by itself. Calibration and your sound are kept. Bad flash? Flash the previous .wav.</li>
+      </ol>
+    </section>
   </main>
 
   <aside class="side">

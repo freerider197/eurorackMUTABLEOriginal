@@ -42,3 +42,14 @@ v4 (no options menu):
   ~2.4KB instead of exactly 1KB.
 - sim/run_tests.sh: UI test with stubbed hardware, all-sounds stability
   test, and bootloader decode of an update .wav.
+
+## Flashing an update (.wav)
+1. Power off. Computer/phone audio out -> Rings IN. Unplug everything else.
+2. Hold the LEFT button while powering on: LEDs alternate orange (waiting).
+3. Play the .wav at full volume, no effects/EQ, notifications off.
+4. Left LED fast green = receiving; both LEDs solid orange = writing (the
+   long silent pauses in the file are flash erases, that's normal).
+5. Both LEDs alternating red = error: press LEFT, fix the volume, restart
+   the file from the beginning.
+6. When it ends the module restarts by itself. Calibration and the current
+   sound are kept. If a new build misbehaves, flash the previous .wav.
