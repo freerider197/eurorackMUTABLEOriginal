@@ -55,7 +55,10 @@ struct ChannelSettings {
 struct Patch;
 struct PerformanceState;
 
-const int32_t kNumRandomCVs = 4;
+// Random value per STRUM trigger on empty CV jacks: BRIGHTNESS, DAMPING and
+// POSITION (consecutive ADC channels). Not STRUCTURE, not FM.
+const int32_t kFirstRandomCV = ADC_CHANNEL_CV_BRIGHTNESS;
+const int32_t kNumRandomCVs = 3;
 
 class NormalizationDetector {
  public:
@@ -217,8 +220,8 @@ class CvScaler {
   float cv_c1_;
   float cv_low_;
   
-  // Random value per STRUM trigger for empty STRUCTURE, BRIGHTNESS, DAMPING
-  // and POSITION CV jacks (see CvScaler::Read).
+  // Random value per STRUM trigger for empty BRIGHTNESS, DAMPING and
+  // POSITION CV jacks (see CvScaler::Read).
   float random_cv_[kNumRandomCVs];
   uint16_t empty_jack_counter_[kNumRandomCVs];
   int32_t chord_;

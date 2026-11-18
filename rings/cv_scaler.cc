@@ -150,10 +150,10 @@ const float kPatchedJackThreshold = 0.02f;
 // the whole parameter range.
 const float kRandomCVScale = 1.0f / 3.3f;
 
-#define ATTENUVERT(destination, NAME, min, max) \
+#define ATTENUVERT(destination, NAME, random, min, max) \
   { \
     float value = adc_lp_[ADC_CHANNEL_CV_ ## NAME]; \
-    value += random_offset[ADC_CHANNEL_CV_ ## NAME - ADC_CHANNEL_CV_STRUCTURE]; \
+    value += random; \
     value *= adc_lp_[ADC_CHANNEL_ATTENUVERTER_ ## NAME]; \
     value += adc_lp_[ADC_CHANNEL_POT_ ## NAME]; \
     CONSTRAIN(value, min, max) \
@@ -198,14 +198,15 @@ void CvScaler::Read(Patch* patch, PerformanceState* performance_state, Settings*
     adc_lp_[i] += settings.lp_coefficient * (value - adc_lp_[i]);
   }
   
-  // Empty CV jack (except FM): each trigger on the STRUM jack picks a new
-  // random value, scaled by the attenuverter. Clockwise, values are picked
-  // above the knob; counter-clockwise, below it.
+  // Empty BRIGHTNESS, DAMPING or POSITION CV jack: each trigger on the STRUM
+  // jack picks a new random value, scaled by the attenuverter. Clockwise,
+  // values are picked above the knob; counter-clockwise, below it.
+  // STRUCTURE and FM never get one.
   bool strum_jack_trigger = trigger_input_.rising_edge() && \
       !normalization_detector_trigger_.normalized();
   float random_offset[kNumRandomCVs];
   for (int32_t i = 0; i < kNumRandomCVs; ++i) {
-    float cv = adc_lp_[ADC_CHANNEL_CV_STRUCTURE + i];
+    float cv = adc_lp_[kFirstRandomCV + i];
     bool empty = empty_jack_counter_[i] >= kEmptyJackTime;
     if (fabs(cv) > (empty ? kPatchedJackThreshold : kEmptyJackThreshold)) {
       empty_jack_counter_[i] = 0;
@@ -220,10 +221,13 @@ void CvScaler::Read(Patch* patch, PerformanceState* performance_state, Settings*
         : 0.0f;
   }
 
-  ATTENUVERT(patch->structure, STRUCTURE, 0.0f, 0.9995f);
-  ATTENUVERT(patch->brightness, BRIGHTNESS, 0.0f, 1.0f);
-  ATTENUVERT(patch->damping, DAMPING, 0.0f, 1.0f);
-  ATTENUVERT(patch->position, POSITION, 0.0f, 1.0f);
+  ATTENUVERT(patch->structure, STRUCTURE, 0.0f, 0.0f, 0.9995f);
+  ATTENUVERT(patch->brightness, BRIGHTNESS,
+      random_offset[ADC_CHANNEL_CV_BRIGHTNESS - kFirstRandomCV], 0.0f, 1.0f);
+  ATTENUVERT(patch->damping, DAMPING,
+      random_offset[ADC_CHANNEL_CV_DAMPING - kFirstRandomCV], 0.0f, 1.0f);
+  ATTENUVERT(patch->position, POSITION,
+      random_offset[ADC_CHANNEL_CV_POSITION - kFirstRandomCV], 0.0f, 1.0f);
   
   float fm = adc_lp_[ADC_CHANNEL_CV_FREQUENCY] * 48.0f;
   float error = fm - fm_cv_;

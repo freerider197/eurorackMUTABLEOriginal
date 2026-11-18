@@ -22,8 +22,9 @@ If CPU gets tight, the Mini-Elements exciter (`Part::FillExciterBuffer` in
 v3 additions:
 - POSITION has a response curve on each side of noon (kFeedbackCurve,
   kSelfFeedbackCurve in fm_voice.cc) for finer subtle amounts.
-- Random per trigger: when the STRUCTURE, BRIGHTNESS, DAMPING or POSITION CV
-  jack reads ~0V for 1s it's treated as empty; each trigger on the STRUM jack
+- Random per trigger (v5: BRIGHTNESS, DAMPING and POSITION only; STRUCTURE
+  was included in v3/v4): when one of those CV jacks reads ~0V for 1s it's
+  treated as empty; each trigger on the STRUM jack
   (not V/OCT) then picks a random value, scaled by that attenuverter
   (clockwise: above the knob, counter-clockwise: below). FM/frequency is
   never affected. See CvScaler::Read.
@@ -39,5 +40,5 @@ v4 (no options menu):
   raw exciter out modes are gone (fixed to classic behaviour).
 - bryanChords made const (moved 1.4KB from RAM to flash): the stack now has
   ~2.4KB instead of exactly 1KB.
-- sim/run_v4_tests.sh: UI test with stubbed hardware, all-sounds stability
+- sim/run_tests.sh: UI test with stubbed hardware, all-sounds stability
   test, and bootloader decode of an update .wav.
