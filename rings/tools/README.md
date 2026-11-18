@@ -52,4 +52,6 @@ v4 (no options menu):
 5. Both LEDs alternating red = error: press LEFT, fix the volume, restart
    the file from the beginning.
 6. When it ends the module restarts by itself. Calibration and the current
-   sound are kept. If a new build misbehaves, flash the previous .wav.
+   sound are kept. UNPLUG THE IN CABLE afterwards: any cable in IN turns
+   Rings' internal pluck off, so the output goes (almost) silent. If a new
+   build misbehaves, flash the previous .wav.
