@@ -32,7 +32,7 @@ const int32_t kDefaultVoctK = 12 * 65536 * 256 / kCountsPerVolt;
 const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
   9830,   // noise level 15 %
   16384,  // +1 octave level 25 %
-  22938,  // sweep time 35 %
+  22938,  // unused (was sweep time)
   0       // glide off
 };
 const uint16_t kLfoLayerDefaults[KNOB_LAST] = {

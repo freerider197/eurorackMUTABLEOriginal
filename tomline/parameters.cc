@@ -55,10 +55,9 @@ void ComputeVoiceParameters(
   bool bt = engine == ENGINE_BT;
   float decay = main_layer[KNOB_SHAPE_1] / 65535.0f;
   float tune = main_layer[KNOB_SHAPE_2] / 65535.0f;
-  float sweep = main_layer[KNOB_MOD_2] / 65535.0f;
+  float distortion = main_layer[KNOB_MOD_2] / 65535.0f;
   float noise = second_layer[KNOB_SHAPE_1] / 65535.0f;
   float octave = second_layer[KNOB_MOD_1] / 65535.0f;
-  float sweep_time = second_layer[KNOB_SHAPE_2] / 65535.0f;
   float glide = second_layer[KNOB_MOD_2] / 65535.0f;
   float lfo_speed = lfo_layer[KNOB_SHAPE_1] / 65535.0f;
   float lfo_depth = lfo_layer[KNOB_MOD_1] / 65535.0f;
@@ -67,7 +66,6 @@ void ComputeVoiceParameters(
   float tau = 0.015f * Exp2(decay * 7.38082f);  // 166.67 = 2^7.38082
   float noise_tau = tau * 0.35f;
   if (noise_tau > 0.25f) noise_tau = 0.25f;
-  float sweep_tau = (0.006f + sweep_time * sweep_time * 0.3f) * (bt ? 0.6f : 1.0f);
   const float snap_tau[4] = { 0.0004f, 0.0015f, 0.004f, 0.010f };
   float harmonic = bt ? 0.1f : 0.3f;
 
@@ -76,14 +74,12 @@ void ComputeVoiceParameters(
   n.amp_coefficient = DecayQ31(tau);
   n.partial_coefficient = DecayQ31(tau * 0.3f);
   n.noise_coefficient = DecayQ31(noise_tau);
-  n.sweep_coefficient = DecayQ31(sweep_tau);
   n.snap_coefficient = DecayQ31(snap_tau[snap]);
   n.glide_k = glide < 0.01f
       ? 0
       : OneMinusExpQ31(0.004f + glide * glide * 0.5f);
   // +/-12 semitones; at noon, 0 V on EXCITE 2 plays C2.
   n.tune = Q16(12.0f + (tune - 0.5f) * 24.0f);
-  n.sweep_depth = Q16(sweep * (bt ? 12.0f : 24.0f));
   n.snap_depth = Q16(bt ? 30.0f : 15.0f);
   n.octave_level = Q15(octave);
   n.harmonic_level = Q15(harmonic);
@@ -95,6 +91,13 @@ void ComputeVoiceParameters(
   n.noise_k1 = bt ? 7058 : 12996;
   n.noise_k2 = bt ? 1928 : 3889;
   n.drive = bt ? 4915 : 4300;  // Q12: 1.2 / 1.05
+  // Soft distortion: gain 1 to 4 (+12 dB) on a squared curve, divided by
+  // the soft clipper's slope of 1.5, so quiet sounds keep their level.
+  // Fully CCW = off, the clean sound.
+  n.distortion = distortion < 0.01f
+      ? 0
+      : static_cast<int32_t>((1.0f + 3.0f * distortion * distortion) *
+                             (4096.0f / 1.5f));
   ComputeAmountOffset(main_layer[KNOB_MOD_1], &n.tone_amount, &n.tone_offset);
 
   // Pitch LFO: 0.05 Hz .. 20 Hz (1 Hz at noon), depth up to +/-12 semitones

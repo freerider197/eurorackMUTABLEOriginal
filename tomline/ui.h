@@ -4,8 +4,8 @@
 //
 //   SHAPE 1   decay               | with METER: noise level  | FN 2 held: LFO speed
 //   MOD 1     tone (filter env)   | with METER: +1 octave    | FN 2 held: LFO depth
-//   SHAPE 2   tune, +/-12 st (C2) | with METER: sweep time   |
-//   MOD 2     sweep depth         | with METER: glide        |
+//   SHAPE 2   tune, +/-12 st (C2) | with METER: unused       |
+//   MOD 2     soft distortion     | with METER: glide        |
 //   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
 //             each trigger (default) / free running.
 //   FN 2      tap: snap 0..3. Hold: LFO layer (the pitch LFO).

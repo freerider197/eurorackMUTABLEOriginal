@@ -44,11 +44,9 @@ struct VoiceParameters {
   int32_t amp_coefficient;      // Q31 per-sample decay multiplier
   int32_t partial_coefficient;  // Q31
   int32_t noise_coefficient;    // Q31
-  int32_t sweep_coefficient;    // Q31
   int32_t snap_coefficient;     // Q31
   int32_t glide_k;              // Q31, 0 = no glide
   int32_t tune;                 // semitones, Q16
-  int32_t sweep_depth;          // semitones, Q16
   int32_t snap_depth;           // semitones, Q16
   int32_t octave_level;         // Q15
   int32_t harmonic_level;       // Q15 (2nd harmonic of BT, partial of LT)
@@ -58,6 +56,7 @@ struct VoiceParameters {
   int32_t noise_k1;             // Q15 one-pole coefficient
   int32_t noise_k2;             // Q15 one-pole coefficient
   int32_t drive;                // Q12 pre-gain into the soft clipper
+  int32_t distortion;           // Q12 gain into the output soft clipper, 0 = off
   int32_t tone_amount;          // 0..65535, as streams/meta_parameters.h
   int32_t tone_offset;          // 0..65535
   int32_t lfo_increment;        // pitch LFO phase increment per sample
@@ -101,9 +100,14 @@ class Voice {
     return static_cast<int32_t>(t >> 15) - 32768;
   }
 
-  // Pitch envelope offset above the root, semitones Q16 (for the tests).
-  int32_t sweep_offset(const VoiceParameters& p) const {
-    return static_cast<int32_t>(static_cast<int64_t>(p.sweep_depth) * sweep_ >> 30);
+  // Cubic soft clipper, (3x - x^3) / 2 on x clipped to +/-1 (Q15): slope
+  // 1.5 at zero, flat at full scale.
+  static inline int32_t SoftClip(int32_t x) {
+    CONSTRAIN(x, -32767, 32767);
+    int32_t cube = ((x * x) >> 15) * x >> 15;
+    x = (3 * x - cube) >> 1;
+    CONSTRAIN(x, -32767, 32767);
+    return x;
   }
 
   // 0.95 * v, clipped to +/-32767. 64-bit: with noise at 100 % on a hard hit,
@@ -125,8 +129,6 @@ class Voice {
 
   int32_t amp_;       // Q30
   int32_t attack_;    // Q30
-  int32_t sweep_;     // Q30
-  bool sweep_rising_;
   int32_t snap_;      // Q30
   int32_t noise_;     // Q30
   int32_t partial_;   // Q30
