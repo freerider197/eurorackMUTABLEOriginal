@@ -214,6 +214,13 @@ double GlideErrorCents() {
   return 1200.0 * log2(measured / (32.70319566 * 4.0));
 }
 
+// Overflow check: the output mix can reach about 82000 with noise at 100 %
+// on a hard hit. Scaling it must clip at the top, never wrap to the bottom.
+bool MixScalingOk() {
+  return Voice::ScaleMix(82000) == 32767 && Voice::ScaleMix(70000) == 32767 &&
+         Voice::ScaleMix(-82000) == -32767 && Voice::ScaleMix(1000) == 950;
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -258,5 +265,9 @@ int main() {
          glide_ok ? "OK" : "FAIL (glide stops short of the note)");
   failures += !glide_ok;
 
+  bool mix_ok = MixScalingOk();
+  printf("Loud output mix (noise 100 %%, hard hit): %s\n",
+         mix_ok ? "clips correctly  OK" : "wraps around  FAIL (32-bit overflow)");
+  failures += !mix_ok;
   return failures ? 1 : 0;
 }

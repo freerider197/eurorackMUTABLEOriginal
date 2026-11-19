@@ -163,8 +163,7 @@ void Voice::Process(
   int32_t v = x * env >> 15;
   v += (p.noise_level * noise_env >> 15) * band >> 15;
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
-  v = v * 31130 >> 15;  // 0.95
-  CLIP(v);
+  v = ScaleMix(v);
 
   int32_t g;
   if (external) {
