@@ -14,6 +14,8 @@ const int32_t kAttackStep = 86343000;
 const uint32_t kMaxIncrement = 1932735283UL;
 // 1.593: inharmonic partial of the low tom, Q16.
 const uint32_t kPartialRatio = 104399;
+// Pitch envelope attack: 32 samples = 1.03 ms linear rise from the root.
+const int32_t kSweepAttackStep = kUnity / 32;
 
 static inline int32_t Sine(uint32_t phase) {
   uint32_t index = phase >> 22;
@@ -61,6 +63,7 @@ void Voice::Init() {
   amp_ = 0;
   attack_ = kUnity;
   sweep_ = 0;
+  sweep_rising_ = false;
   snap_ = 0;
   noise_ = 0;
   partial_ = 0;
@@ -81,7 +84,8 @@ void Voice::Process(
     gliding_ = p.glide_k != 0 && amp_ > (kUnity >> 6);
     amp_ = kUnity;
     attack_ = 0;
-    sweep_ = kUnity;
+    sweep_ = 0;  // the pitch envelope starts from the root
+    sweep_rising_ = true;
     snap_ = kUnity;
     noise_ = kUnity;
     partial_ = kUnity;
@@ -107,7 +111,18 @@ void Voice::Process(
 
   // Envelopes.
   amp_ = Decay(amp_, p.amp_coefficient);
-  sweep_ = Decay(sweep_, p.sweep_coefficient);
+  // Pitch envelope, 808/909 style: a short fixed rise from the root to
+  // root + sweep depth (none on the hit sample itself), then a decay back to
+  // exactly the root.
+  if (!sweep_rising_) {
+    sweep_ = Decay(sweep_, p.sweep_coefficient);
+  } else if (!trigger) {
+    sweep_ += kSweepAttackStep;
+    if (sweep_ >= kUnity) {
+      sweep_ = kUnity;
+      sweep_rising_ = false;
+    }
+  }
   snap_ = Decay(snap_, p.snap_coefficient);
   noise_ = Decay(noise_, p.noise_coefficient);
   partial_ = Decay(partial_, p.partial_coefficient);
@@ -129,7 +144,7 @@ void Voice::Process(
   }
 
   // Oscillators.
-  s += static_cast<int32_t>(static_cast<int64_t>(p.sweep_depth) * sweep_ >> 30);
+  s += sweep_offset(p);
   s += static_cast<int32_t>(static_cast<int64_t>(p.snap_depth) * snap_ >> 30);
   uint32_t increment = SemitonesToIncrement(s);
   phase_ += increment;

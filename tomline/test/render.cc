@@ -293,6 +293,46 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
          Render(fast, steps, 122.0, 1).raw;
 }
 
+// Pitch envelope (MOD 2 amount, sweep time): on every hit the pitch starts on
+// the root, rises to root + amount in about 1 ms, then decays back onto the
+// root. A retrigger in the middle of the sweep starts again from the root.
+// Reads the voice's own sweep offset, sample by sample, with snap off.
+bool PitchEnvelopeOk(uint8_t engine) {
+  Patch patch = { engine, 0, { 29491, 40632, 32768, 65535 },
+                  { 9830, 16384, 22938, 0 } };
+  VoiceParameters p;
+  ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
+                         patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
+  double amount = p.sweep_depth / 65536.0;
+  Voice voice;
+  voice.Init();
+  uint16_t gain, frequency;
+  const int retrigger = static_cast<int>(0.010 * kFirmwareRate);  // 10 ms
+  const int length = static_cast<int>(3.0 * kFirmwareRate);
+  double at_hit = 0, peak = 0, peak_ms = 0, at_retrigger = 0, peak2 = 0;
+  double settled = 0, before_retrigger = 0;
+  for (int n = 0; n < retrigger + length; ++n) {
+    bool trigger = n == 0 || n == retrigger;
+    voice.Process(p, trigger, 12 << 16, &gain, &frequency);
+    double st = voice.sweep_offset(p) / 65536.0;
+    if (n == 0) at_hit = st;
+    if (n < retrigger && st > peak) { peak = st; peak_ms = n * 1000.0 / kFirmwareRate; }
+    if (n == retrigger - 1) before_retrigger = st;
+    if (n == retrigger) at_retrigger = st;
+    if (n > retrigger && st > peak2) peak2 = st;
+    settled = st;
+  }
+  bool ok = at_hit == 0 && fabs(peak - amount) < 1e-3 && peak_ms > 0.8 &&
+            peak_ms < 1.2 && at_retrigger == 0 && fabs(peak2 - amount) < 1e-3 &&
+            fabs(settled * 100) < 1.0;
+  printf("Pitch envelope %s (amount %.1f st): hit %+.2f st, peak %+.2f st at %.2f ms,"
+         " %.2f st before retrigger, retrigger %+.2f st, peak %+.2f st,"
+         " after 3 s %+.3f cents  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", amount, at_hit, peak, peak_ms,
+         before_retrigger, at_retrigger, peak2, settled * 100, ok ? "OK" : "FAIL");
+  return ok;
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -357,6 +397,10 @@ int main() {
   printf("LFO depth at zero, speed turned: sound unchanged  %s\n",
          lfo_off_ok ? "OK" : "FAIL");
   failures += !lfo_off_ok;
+
+  for (uint8_t engine = 0; engine < 2; ++engine) {
+    failures += !PitchEnvelopeOk(engine);
+  }
 
   bool mix_ok = MixScalingOk();
   printf("Loud output mix (noise 100 %%, hard hit): %s\n",

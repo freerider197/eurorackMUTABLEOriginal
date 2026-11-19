@@ -275,6 +275,7 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
 
 // --- voice.cc ---
 const K_UNITY = 1073741824, K_ATTACK_STEP = 86343000, K_MAX_INC = 1932735283, K_PARTIAL = 104399;
+const K_SWEEP_ATTACK_STEP = K_UNITY / 32;  // 32 samples = 1.03 ms
 // floor(a * c / 2^31), a >= 0, c in [0, 2^31): exact.
 function mul31(a, c) {
   const ch = Math.floor(c / 65536), cl = c - ch * 65536;
@@ -317,7 +318,7 @@ function lfoWave(phase, shape) {
 class TomlineVoice {
   constructor() {
     this.semitones = 0; this.gliding = false; this.phase = 0; this.pphase = 0; this.lfoPhase = 0;
-    this.amp = 0; this.attack = K_UNITY; this.sweep = 0; this.snap = 0; this.noise = 0; this.partial = 0;
+    this.amp = 0; this.attack = K_UNITY; this.sweep = 0; this.sweepRising = false; this.snap = 0; this.noise = 0; this.partial = 0;
     this.bias = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
@@ -326,7 +327,7 @@ class TomlineVoice {
   process(p, trigger, pitch) {
     if (trigger) {
       this.gliding = p.glideK !== 0 && this.amp > (K_UNITY >> 6);
-      this.amp = K_UNITY; this.attack = 0; this.sweep = K_UNITY; this.snap = K_UNITY;
+      this.amp = K_UNITY; this.attack = 0; this.sweep = 0; this.sweepRising = true; this.snap = K_UNITY;
       this.noise = K_UNITY; this.partial = K_UNITY; this.phase = 0; this.pphase = 0;
     }
     const target = (pitch + p.tune) | 0;
@@ -339,7 +340,13 @@ class TomlineVoice {
       this.semitones = target;
     }
     this.amp = mul31(this.amp, p.amp);
-    this.sweep = mul31(this.sweep, p.sweepC);
+    // Pitch envelope: 1.03 ms rise from the root, then decay back to the root.
+    if (!this.sweepRising) {
+      this.sweep = mul31(this.sweep, p.sweepC);
+    } else if (!trigger) {
+      this.sweep += K_SWEEP_ATTACK_STEP;
+      if (this.sweep >= K_UNITY) { this.sweep = K_UNITY; this.sweepRising = false; }
+    }
     this.snap = mul31(this.snap, p.snapC);
     this.noise = mul31(this.noise, p.noiseC);
     this.partial = mul31(this.partial, p.partialC);

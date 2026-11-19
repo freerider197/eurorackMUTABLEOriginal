@@ -50,8 +50,8 @@ blinks red.
 |---|---|---|
 | SHAPE 1 | Decay, 15 ms to 2.5 s | Noise level |
 | MOD 1 | Tone: filter envelope. Closed at 7 o'clock, most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
-| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time |
-| MOD 2 | Sweep depth: pitch drop on each hit (up to 12 st on BT, 24 st on LT) | Glide between notes (fully CCW = off) |
+| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time: how fast the pitch falls back to the note (decay time constant about 4 to 180 ms on BT, 6 to 300 ms on LT) |
+| MOD 2 | Sweep amount: 808/909-style pitch envelope. Each hit starts on the note, jumps up by this amount in 1 ms (up to 12 st on BT, 24 st on LT), then falls back to the note | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button), tap | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
 | FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones). SHAPE 2 and MOD 2 do nothing here | |
@@ -210,7 +210,10 @@ Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
 notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
 range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
 depth, 0.2-1.2 s: triangle -10.30 st, ramp up -11.14 st (0.02 st from the
-expected value). LFO at zero depth: unchanged. Loud mix: clips correctly.
+expected value). LFO at zero depth: unchanged. Pitch envelope, BT and LT: on
+the note at the hit, peak +12 st (BT) / +24 st (LT) at 1.03 ms, back on the
+note (0.000 cents) after 3 s, and a retrigger 10 ms in starts again from the
+note. Loud mix: clips correctly.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for six
 patches (BT, LT, glide, everything at maximum, LFO triangle, LFO ramp up), and
