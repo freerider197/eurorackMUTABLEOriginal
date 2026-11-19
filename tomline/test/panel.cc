@@ -77,7 +77,7 @@ void Up(int button) { sim_button[button] = false; Ms(10); }
 void Tap(int button) { Down(button); Ms(100); Up(button); }
 
 // Power-up with every knob at noon (second layer and LFO at their defaults:
-// noise 9830, LFO speed 32768).
+// crush 0, LFO speed 32768).
 void Start(int32_t shape_1 = 32768, int seed = 1) {
   delete ui;
   ui = new Ui();
@@ -97,12 +97,12 @@ bool Near(int32_t value, int32_t target, int32_t margin = 200) {
 }
 
 uint16_t Decay() { return ui->main_layer_[S1]; }
-uint16_t Noise() { return ui->settings_.second_layer[S1]; }
+uint16_t Crush() { return ui->settings_.second_layer[S1]; }
 
-// Hold METER, turn SHAPE 1 to `noise`, let go of METER.
-void SetNoise(int32_t noise) {
+// Hold METER, turn SHAPE 1 to `crush`, let go of METER.
+void SetCrush(int32_t crush) {
   Down(BUTTON_METER);
-  Turn(S1, noise, 800);
+  Turn(S1, crush, 800);
   Up(BUTTON_METER);
   Ms(300);
 }
@@ -110,8 +110,8 @@ void SetNoise(int32_t noise) {
 int main() {
   printf("Pick-up: a value waits for its knob to be turned, then goes to it\n");
   Start();
-  SetNoise(5000);
-  Check(Near(Noise(), 5000), "METER held, SHAPE 1 turned: noise goes to the knob");
+  SetCrush(5000);
+  Check(Near(Crush(), 5000), "METER held, SHAPE 1 turned: crush goes to the knob");
   Check(Decay() == 32768, "back on the main page, decay kept while SHAPE 1 is not turned");
   sim_noise = 64;
   Ms(5000);
@@ -120,7 +120,7 @@ int main() {
   Turn(S1, 3000, 300);
   Check(Near(Decay(), 3000), "SHAPE 1 turned the other way: decay jumps to the knob");
   Start();
-  SetNoise(5000);
+  SetCrush(5000);
   Turn(S1, 5000 + 400, 100);
   Check(Decay() == 32768, "a nudge under 1.6 % does not count as turning");
   Turn(S1, 20000, 300);
@@ -131,7 +131,7 @@ int main() {
   printf("LEDs that shift the knob readings (300 counts per lit colour)\n");
   sim_led_shift = 300;
   Start();
-  SetNoise(5000);
+  SetCrush(5000);
   Turn(M1, 50000, 400);  // decay at noon, tone at 50000, knobs elsewhere
   {
     uint16_t main_before[4], second_before[4];
@@ -165,7 +165,7 @@ int main() {
 
   printf("No click: the jump is a quick glide\n");
   Start();
-  SetNoise(5000);
+  SetCrush(5000);
   {
     // A fast flick from 5000 to 60000 in 5 ms.
     int32_t largest = 0, before = Decay(), last = before;
@@ -194,18 +194,18 @@ int main() {
   Check(ui->mode_ == UI_MODE_NORMAL && !sim_offset_captures,
         "held 1.5 s while turning SHAPE 1: no offset calibration");
   Check(!ui->second_layer_latched_ && ui->layer_ == 0, "  ... no latch, back to the main page");
-  Check(Near(Noise(), 16000), "  ... and the noise followed the knob");
+  Check(Near(Crush(), 16000), "  ... and the crush followed the knob");
   Start();
   Down(BUTTON_METER);
   Turn(S1, 16000, 400);
   Up(BUTTON_METER);
   Check(!ui->second_layer_latched_, "short hold while turning: no latch");
   Start();
-  SetNoise(5000);
+  SetCrush(5000);
   Turn(S1, 5400, 100);
   Tap(BUTTON_METER);
   Check(ui->second_layer_latched_ && ui->layer_ == 1, "tap after a small nudge of SHAPE 1: latches");
-  Check(Near(Noise(), 5000), "  ... and the noise did not move");
+  Check(Near(Crush(), 5000), "  ... and the crush did not move");
   Tap(BUTTON_METER);
   Check(!ui->second_layer_latched_ && ui->layer_ == 0, "second tap: unlatches");
   {
@@ -213,7 +213,7 @@ int main() {
     for (int seed = 0; seed < 20; ++seed) {
       Start(32768, seed);
       sim_noise = 64;
-      SetNoise(5000);
+      SetCrush(5000);
       Tap(BUTTON_METER);
       latched += ui->second_layer_latched_;
       sim_noise = 0;
@@ -231,7 +231,7 @@ int main() {
 
   printf("Offset calibration (METER held 3 s)\n");
   Start();
-  SetNoise(5000);  // SHAPE 1 is now away from the decay value
+  SetCrush(5000);  // SHAPE 1 is now away from the decay value
   Down(BUTTON_METER);
   Ms(3200);
   Up(BUTTON_METER);
@@ -330,7 +330,7 @@ int main() {
   sim_noise = 0;
   Check(stmlib::sim_settings_saves == 0, "second page open 60 s, knob noise, untouched: no save");
 
-  printf("Wave (METER + SHAPE 2) and older saved settings\n");
+  printf("Wave (METER + SHAPE 2), crush and older saved settings\n");
   Start();
   Down(BUTTON_METER);
   Turn(S2, 50000, 800);
@@ -353,13 +353,18 @@ int main() {
   Start();
   Check(ui->settings_.second_layer[S2] == 0 && ui->settings_.engine == ENGINE_LT &&
         ui->settings_.snap == 2 && (ui->settings_.flags & kFlagLfoFree) &&
-        ui->settings_.second_layer[S1] == 4000 && ui->settings_.voct_k == 12345,
-        "settings saved before the wave: wave off, everything else kept");
-  old_record.flags = kFlagWave;
+        ui->settings_.second_layer[S1] == 0 && ui->settings_.voct_k == 12345,
+        "settings saved before the wave: wave and crush off, everything else kept");
+  old_record.flags = kFlagWave;  // the first Wave test build: S1 was noise
   old_record.second_layer[S2] = 30000;
   Start();
-  Check(ui->settings_.second_layer[S2] == 30000 && !(ui->settings_.flags & kFlagLfoFree),
-        "settings saved with a wave: wave kept");
+  Check(ui->settings_.second_layer[S2] == 30000 && ui->settings_.second_layer[S1] == 0 &&
+        !(ui->settings_.flags & kFlagLfoFree),
+        "settings saved with a wave, before crush: wave kept, crush off");
+  old_record.flags = kFlagWave | kFlagCrush;
+  Start();
+  Check(ui->settings_.second_layer[S2] == 30000 && ui->settings_.second_layer[S1] == 4000,
+        "settings saved with wave and crush: both kept");
   stmlib::sim_settings_record = NULL;
 
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);

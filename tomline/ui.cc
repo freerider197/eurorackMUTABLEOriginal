@@ -30,16 +30,19 @@ const uint32_t kCalibrationHold = 3000;      // ms of METER for the offsets
 const int32_t kCountsPerVolt = 3972;
 const int32_t kDefaultVoctK = 12 * 65536 * 256 / kCountsPerVolt;
 const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
-  9830,   // noise level 15 %
+  0,      // crush off
   16384,  // +1 octave level 25 %
   0,      // wave: plain sine
   0       // glide off
 };
 // Settings flags. kFlagWave marks a record whose second-layer SHAPE 2 value
 // is the wave. Older records hold an unused leftover there (the old sweep
-// time), which would start the wave at a random place. An older Tomline reads
-// any flag value above 1 as "LFO restarts on trigger" and keeps the rest.
+// time), which would start the wave at a random place. kFlagCrush, the same
+// for second-layer SHAPE 1: crush, which was the noise level. An older
+// Tomline reads any flag value above 1 as "LFO restarts on trigger" and keeps
+// the rest.
 const uint8_t kFlagLfoFree = 0x01;
+const uint8_t kFlagCrush = 0x40;
 const uint8_t kFlagWave = 0x80;
 const uint16_t kLfoLayerDefaults[KNOB_LAST] = {
   32768,  // LFO speed 1 Hz
@@ -62,7 +65,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     settings_.engine = ENGINE_BT;
     settings_.snap = 1;
     settings_.lfo_shape = LFO_TRIANGLE;
-    settings_.flags = kFlagWave;
+    settings_.flags = kFlagWave | kFlagCrush;
     copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
          &settings_.second_layer[0]);
     settings_.voct_offset = 0;
@@ -89,7 +92,10 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   if (!(settings_.flags & kFlagWave)) {
     settings_.second_layer[KNOB_SHAPE_2] = 0;  // wave starts as a plain sine
   }
-  settings_.flags = (settings_.flags & kFlagLfoFree) | kFlagWave;
+  if (!(settings_.flags & kFlagCrush)) {
+    settings_.second_layer[KNOB_SHAPE_1] = 0;  // crush starts off
+  }
+  settings_.flags = (settings_.flags & kFlagLfoFree) | kFlagWave | kFlagCrush;
   if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
   if (settings_.snap > 3) settings_.snap = 1;
   if (settings_.lfo_shape >= LFO_SHAPE_LAST) settings_.lfo_shape = LFO_TRIANGLE;

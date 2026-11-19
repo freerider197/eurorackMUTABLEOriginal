@@ -63,7 +63,7 @@ void ComputeVoiceParameters(
   float decay = main_layer[KNOB_SHAPE_1] / 65535.0f;
   float tune = main_layer[KNOB_SHAPE_2] / 65535.0f;
   float distortion = main_layer[KNOB_MOD_2] / 65535.0f;
-  float noise = second_layer[KNOB_SHAPE_1] / 65535.0f;
+  float crush = second_layer[KNOB_SHAPE_1] / 65535.0f;
   float octave = second_layer[KNOB_MOD_1] / 65535.0f;
   float wave = second_layer[KNOB_SHAPE_2] / 65535.0f;
   float glide = second_layer[KNOB_MOD_2] / 65535.0f;
@@ -72,8 +72,6 @@ void ComputeVoiceParameters(
 
   // Decay time constant: 15 ms .. 2.5 s.
   float tau = 0.015f * Exp2(decay * 7.38082f);  // 166.67 = 2^7.38082
-  float noise_tau = tau * 0.35f;
-  if (noise_tau > 0.25f) noise_tau = 0.25f;
   const float snap_tau[4] = { 0.0004f, 0.0015f, 0.004f, 0.010f };
   float harmonic = bt ? 0.1f : 0.3f;
 
@@ -81,7 +79,6 @@ void ComputeVoiceParameters(
   n.engine = engine;
   n.amp_coefficient = DecayQ31(tau);
   n.partial_coefficient = DecayQ31(tau * 0.3f);
-  n.noise_coefficient = DecayQ31(noise_tau);
   n.snap_coefficient = DecayQ31(snap_tau[snap]);
   n.glide_k = glide < 0.01f
       ? 0
@@ -92,12 +89,7 @@ void ComputeVoiceParameters(
   n.octave_level = Q15(octave);
   n.harmonic_level = Q15(harmonic);
   n.normalization = Q15(1.0f / (1.0f + 0.6f * harmonic + 0.55f * octave));
-  n.noise_level = Q15(noise * (bt ? 0.6f : 1.0f));
   n.snap_noise = Q15(bt ? 0.5f : 0.3f);
-  // 1 - exp(-2 pi f / 31088) for the noise band: BT 300-1200 Hz,
-  // LT 625-2500 Hz.
-  n.noise_k1 = bt ? 7058 : 12996;
-  n.noise_k2 = bt ? 1928 : 3889;
   n.drive = bt ? 4915 : 4300;  // Q12: 1.2 / 1.05
   // Soft distortion: gain 1 to 4 (+12 dB) on a squared curve, divided by
   // the soft clipper's slope of 1.5, so quiet sounds keep their level.
@@ -129,6 +121,23 @@ void ComputeVoiceParameters(
   if (i > 15) i = 15;
   float level = kWaveLevelDb[i] + (kWaveLevelDb[i + 1] - kWaveLevelDb[i]) * (pos - i);
   n.wave_gain = static_cast<int32_t>(Exp2(-level * 0.1660964f) * 4096.0f);
+  // Crush. First half: the sample rate falls from 31 kHz to 300 Hz
+  // (2^-6.695); a bass note needs a rate this low for strong aliasing.
+  // Second half, at 300 Hz: the level step grows from 1 to 4096 (8 levels
+  // each side of zero). Fully CCW = off.
+  if (crush < 0.01f) {
+    n.crush_increment = 0;
+    n.crush_step = 1;
+  } else {
+    float rate = crush * 2.0f;
+    if (rate > 1.0f) rate = 1.0f;
+    float levels = crush * 2.0f - 1.0f;
+    if (levels < 0.0f) levels = 0.0f;
+    // 2147483520 = the largest float below 2^31.
+    n.crush_increment = static_cast<int32_t>(
+        Exp2(rate * -6.695f) * 2147483520.0f);
+    n.crush_step = static_cast<int32_t>(Exp2(levels * 12.0f));
+  }
   ComputeAmountOffset(main_layer[KNOB_MOD_1], &n.tone_amount, &n.tone_offset);
 
   // Pitch LFO: 0.05 Hz .. 20 Hz (1 Hz at noon), depth up to +/-12 semitones

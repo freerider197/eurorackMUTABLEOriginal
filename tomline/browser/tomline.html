@@ -165,7 +165,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
         <div class="tbl"><table>
           <thead><tr><th>Control</th><th>Job</th><th>With METER</th></tr></thead>
           <tbody>
-            <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Noise level</td></tr>
+            <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Crush: fully left = off, first half lowers the sample rate (ring tones), second half also the bit depth (grainy tail)</td></tr>
             <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
             <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Wave: fully left = sine, then triangle, folded sine, and square at fully right</td></tr>
             <tr><td>MOD 2</td><td>Soft distortion: fully left = clean, turning up drives the sound into a soft clipper (up to +12 dB). The loud start of each hit saturates, the quiet tail stays clean</td><td>Glide (fully left = off)</td></tr>
@@ -241,18 +241,24 @@ function waveGain(wave) {
   const level = F(WAVE_LEVEL_DB[i] + F(F(WAVE_LEVEL_DB[i + 1] - WAVE_LEVEL_DB[i]) * F(pos - i)));
   return Math.trunc(F(fExp2(F(-level * F(0.1660964))) * F(4096)));
 }
+// parameters.cc Crush: sample rate 31 kHz -> 300 Hz, then level step 1 -> 4096.
+function crushParams(crush) {
+  if (crush < F(0.01)) return { crushInc: 0, crushStep: 1 };
+  let rate = F(crush * F(2)); if (rate > F(1)) rate = F(1);
+  let levels = F(F(crush * F(2)) - F(1)); if (levels < F(0)) levels = F(0);
+  return { crushInc: Math.trunc(F(fExp2(F(rate * F(-6.695))) * F(2147483520))),
+           crushStep: Math.trunc(fExp2(F(levels * F(12)))) };
+}
 function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0, lfoFree = 0) {
   const bt = engine === 0;
   const decay = F(main[0] / F(65535)), tune = F(main[2] / F(65535)), distortion = F(main[3] / F(65535));
-  const noise = F(second[0] / F(65535)), octave = F(second[1] / F(65535));
+  const crush = F(second[0] / F(65535)), octave = F(second[1] / F(65535));
   const glide = F(second[3] / F(65535)), wave = F(second[2] / F(65535));
   const w3 = wave < F(0.01) ? F(0) : F(wave * F(3));
   let fold = F(w3 - F(1));
   if (fold < F(0)) fold = F(0);
   if (fold > F(1)) fold = F(1);
   const tau = F(F(0.015) * fExp2(F(decay * F(7.38082))));
-  let noiseTau = F(tau * F(0.35));
-  if (noiseTau > F(0.25)) noiseTau = F(0.25);
   const snapTau = [F(0.0004), F(0.0015), F(0.004), F(0.010)][snap];
   const harmonic = F(bt ? 0.1 : 0.3);
   const tone = amountOffset(main[1]);
@@ -262,7 +268,6 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
     engine,
     amp: decayQ31(tau),
     partialC: decayQ31(F(tau * F(0.3))),
-    noiseC: decayQ31(noiseTau),
     snapC: decayQ31(snapTau),
     glideK: glide < F(0.01) ? 0 : oneMinusExpQ31(F(F(0.004) + F(F(glide * glide) * F(0.5)))),
     tune: q16(F(F(12) + F(F(tune - F(0.5)) * F(24)))),
@@ -270,10 +275,7 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
     octave: q15(octave),
     harmonic: q15(harmonic),
     norm: q15(F(F(1) / F(F(F(1) + F(F(0.6) * harmonic)) + F(F(0.55) * octave)))),
-    noiseLevel: q15(F(noise * F(bt ? 0.6 : 1.0))),
     snapNoise: q15(F(bt ? 0.5 : 0.3)),
-    k1: bt ? 7058 : 12996,
-    k2: bt ? 1928 : 3889,
     drive: bt ? 4915 : 4300,
     distortion: distortion < F(0.01) ? 0 : Math.trunc(F(F(F(1) + F(F(F(3) * distortion) * distortion)) * F(F(4096) / F(1.5)))),
     waveTri: mix32768(w3),
@@ -281,6 +283,7 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
     foldGain: Math.trunc(F(F(F(1) + fold) * F(4096))),
     waveSquare: mix32768(F(w3 - F(2))),
     waveGain: waveGain(wave),
+    ...crushParams(crush),
     toneAmount: tone.amount,
     toneOffset: tone.offset,
     lfoInc: Math.trunc(F(lfoHz * F(F(4294967296) / K_SR_F))),
@@ -356,8 +359,9 @@ const lfoStart = shape => shape === 1 ? 0x80000000 : 0x40000000;
 class TomlineVoice {
   constructor() {
     this.semitones = 0; this.gliding = false; this.phase = 0; this.pphase = 0; this.lfoPhase = 0;
-    this.amp = 0; this.attack = K_UNITY; this.snap = 0; this.noise = 0; this.partial = 0;
-    this.lift = 0; this.hold = K_POWER_UP_HOLD; this.lastMix = 0; this.tail = 0; this.fade = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
+    this.amp = 0; this.attack = K_UNITY; this.snap = 0; this.partial = 0;
+    this.lift = 0; this.hold = K_POWER_UP_HOLD; this.lastMix = 0; this.tail = 0; this.fade = 0; this.rng = 0x21f3a5c1;
+    this.crushPhase = 0; this.crushHold = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
   // pitch: semitones above C1, Q16 (as Ui::Pitch). Outputs gainWord (0..65535)
@@ -366,7 +370,8 @@ class TomlineVoice {
     if (trigger) {
       this.gliding = p.glideK !== 0 && this.amp > (K_UNITY >> 6);
       this.amp = K_UNITY; this.attack = 0; this.snap = K_UNITY;
-      this.noise = K_UNITY; this.partial = K_UNITY; this.phase = 0; this.pphase = 0;
+      this.partial = K_UNITY; this.phase = 0; this.pphase = 0;
+      this.crushPhase = 0xffffffff;  // crush: take a sample right away
       this.tail = this.lastMix; this.fade = 32767;  // old note fades out over 1.5 ms
       if (!p.lfoFree) this.lfoPhase = lfoStart(p.lfoShape);
     }
@@ -381,7 +386,6 @@ class TomlineVoice {
     }
     this.amp = mul31(this.amp, p.amp);
     this.snap = mul31(this.snap, p.snapC);
-    this.noise = mul31(this.noise, p.noiseC);
     this.partial = mul31(this.partial, p.partialC);
     if (this.attack < K_UNITY) { this.attack += K_ATTACK_STEP; if (this.attack > K_UNITY) this.attack = K_UNITY; }
     const env = mul45(this.amp, this.attack);
@@ -407,15 +411,21 @@ class TomlineVoice {
     if (p.waveTri) x = clip15(Math.imul(x + Math.floor((wave(p, this.phase, fundamental) - fundamental) * p.norm / 32768), p.waveGain) >> 12);
     this.rng = (Math.imul(this.rng, 1664525) + 1013904223) >>> 0;
     const white = ((this.rng >>> 16) << 16) >> 16;
-    this.lp1 += Math.imul(white - this.lp1, p.k1) >> 15;
-    this.lp2 += Math.imul(this.lp1 - this.lp2, p.k2) >> 15;
-    const band = clip15((this.lp1 - this.lp2) << 1);
-    const noiseEnv = mul45(this.noise, this.attack), snapEnv = mul45(this.snap, this.attack);
+    const snapEnv = mul45(this.snap, this.attack);
     let v = Math.imul(x, env) >> 15;
-    v += Math.imul(Math.imul(p.noiseLevel, noiseEnv) >> 15, band) >> 15;
     v += Math.imul(Math.imul(p.snapNoise, snapEnv) >> 15, white) >> 15;
     if (p.distortion) v = softClip(Math.imul(v, p.distortion) >> 12);  // MOD 2 soft distortion
     v = clip15(Math.floor(v * 31130 / 32768));
+    if (p.crushInc) {  // Crush: sample and hold, then fewer levels
+      const before = this.crushPhase;
+      this.crushPhase = (this.crushPhase + p.crushInc * 2) >>> 0;
+      if (this.crushPhase < before) {
+        let m = Math.abs(v);
+        if (p.crushStep > 1) { m = Math.trunc((m + (p.crushStep >> 1)) / p.crushStep) * p.crushStep; if (m > 32767) m = 32767; }
+        this.crushHold = v < 0 ? -m : m;
+      }
+      v = this.crushHold;
+    }
     if (this.fade > 0) {
       this.fade -= 683; if (this.fade < 0) this.fade = 0;
       v = clip15(v + (Math.imul(this.tail, this.fade) >> 15));
@@ -439,7 +449,7 @@ class TomlineVoice {
 class Engine {
   constructor(sr) {
     this.sr = sr;
-    this.k = { engine: 0, snap: 1, main: [29491, 40632, 32768, 19661], second: [9830, 16384, 0, 0],
+    this.k = { engine: 0, snap: 1, main: [29491, 40632, 32768, 19661], second: [0, 16384, 0, 0],
       lfo: [32768, 0, 0, 0], lfoShape: 0, lfoFree: 0, level1: 0, curve1: 1, ideal: false, kick: false, master: 0.75, bpm: 122, playing: false };
     this.p = computeParams(0, 1, this.k.main, this.k.second);
     this.voice = new TomlineVoice();
@@ -553,7 +563,7 @@ class Engine {
 const NN = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const nname = n => NN[((n % 12) + 12) % 12] + (2 + Math.floor(n / 12));  // n = semitones of V/oct; TUNE at noon
 const ENG = ['BT · bass tom', 'LT · low tom'];
-const DEFV = { main: [29491, 40632, 32768, 19661], second: [9830, 16384, 0, 0], lfo: [32768, 0, 0, 0] };
+const DEFV = { main: [29491, 40632, 32768, 19661], second: [0, 16384, 0, 0], lfo: [32768, 0, 0, 0] };
 const mk = a => a.map(([n, on]) => ({ n, on: !!on }));
 const PATS = [
   mk([[12,1],[12,0],[12,1],[24,1],[12,0],[15,1],[12,1],[10,1],[12,1],[12,0],[12,1],[19,1],[17,1],[15,1],[12,0],[10,1]]),
@@ -563,10 +573,10 @@ const PATS = [
 const S = { k: { engine: 0, snap: 1, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
   ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
   warn: false };
-try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { if (!j.wave && j.k.second) j.k.second[2] = 0; /* saved before the wave: start at sine */ Object.assign(S.k, j.k); S.pat = j.pat; } } catch (e) {}
+try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { if (!j.wave && j.k.second) j.k.second[2] = 0; /* saved before the wave: start at sine */ if (!j.crush && j.k.second) j.k.second[0] = 0; /* was the noise level: crush starts off */ Object.assign(S.k, j.k); S.pat = j.pat; } } catch (e) {}
 S.k.ideal = false; delete S.k.in1;
 let saveT = 0;
-function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('tomline-fw-v1', JSON.stringify({ k: S.k, pat: S.pat, wave: 1 })); } catch (e) {} }, 300); }
+function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('tomline-fw-v1', JSON.stringify({ k: S.k, pat: S.pat, wave: 1, crush: 1 })); } catch (e) {} }, 300); }
 
 /* ===================== audio ===================== */
 let ctx = null, node = null, post = () => {}, starting = null, playing = false;
@@ -680,7 +690,7 @@ ${pbtn('b1',228,140,'FN 1: engine')}${pbtn('b2',333,140,'FN 2: snap')}
 ${t(30,156,'−','pl','style="font-size:26px;font-weight:500"')}${t(168,156,'+','pl','style="font-size:24px;font-weight:500"')}
 ${t(394,156,'−','pl','style="font-size:26px;font-weight:500"')}${t(532,156,'+','pl','style="font-size:24px;font-weight:500"')}
 ${KN.slice(0, 6).map(bigKnob).join('')}
-${t(98,302,'SHAPE','pl','style="font-size:25px"')}${sub(98,322,'DECAY','NOISE')}
+${t(98,302,'SHAPE','pl','style="font-size:25px"')}${sub(98,322,'DECAY','CRUSH')}
 ${t(462,302,'SHAPE','pl','style="font-size:25px"')}${sub(462,322,'TUNE','WAVE')}
 ${modIcons(98)}${modIcons(462)}
 ${t(98,519,'MOD','pl','style="font-size:25px"')}${sub(98,537,'TONE','+1 OCT')}
@@ -717,7 +727,7 @@ const META = {
   'main1': { n: 'TONE', f: v => pct(v) + (v < 0.5 ? ' · envelope' : ' · envelope + open') },
   'main2': { n: 'TUNE', f: v => { const s = (v - 0.5) * 24; return (s >= 0 ? '+' : '') + s.toFixed(1) + ' st'; } },
   'main3': { n: 'DRIVE', f: v => v < 0.01 ? 'off · clean' : '+' + (20 * Math.log10(1 + 3 * v * v)).toFixed(1) + ' dB soft distortion' },
-  'second0': { n: 'NOISE', f: v => pct(v) },
+  'second0': { n: 'CRUSH', f: v => v < 0.01 ? 'off' : v <= 0.5 ? Math.round(31088 * Math.pow(2, -6.695 * v * 2)) + ' Hz' : '300 Hz · ' + Math.round(Math.log2(32768 / Math.pow(2, (v * 2 - 1) * 12)) + 1) + ' bits' },
   'second1': { n: '+1 OCT', f: v => pct(v) },
   'second2': { n: 'WAVE', f: v => v < 0.01 ? 'sine' : v < 1 / 3 ? 'sine → triangle' : v < 2 / 3 ? 'triangle → folded' : v < 0.99 ? 'folded → square' : 'square' },
   'second3': { n: 'GLIDE', f: v => v < 0.01 ? 'off' : Math.round((0.004 + v * v * 0.5) * 1000) + ' ms' },
@@ -827,7 +837,7 @@ press('b2', () => {
 function setLayer() {
   const l = S.fn2 ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
   if (l === 2) lcd('LFO · FN 2 held', 'SHAPE 1 speed, MOD 1 depth · tap METER: ' + (S.k.lfoShape ? 'ramp up' : 'triangle') + ' · tap FN 1: ' + (S.k.lfoFree ? 'free running' : 'restart on trigger'));
-  else lcd('METER', l ? 'second row: noise, +1 oct, wave, glide' : 'main row: decay, tone, tune, drive');
+  else lcd('METER', l ? 'second row: crush, +1 oct, wave, glide' : 'main row: decay, tone, tune, drive');
 }
 function nextLfoShape() { setK('lfoShape', (S.k.lfoShape + 1) % 2); S.fn2Used = true; drawLeds(); lcd('LFO WAVE', S.k.lfoShape ? 'ramp up' : 'triangle'); }
 press('meter', () => { if (S.fn2) { nextLfoShape(); return; } S.latched = !S.latched; setLayer(); });

@@ -49,7 +49,7 @@ struct Patch {
   uint8_t engine;
   uint8_t snap;
   uint16_t main_layer[4];    // decay, tone, tune, distortion
-  uint16_t second_layer[4];  // noise, +1 oct, wave, glide
+  uint16_t second_layer[4];  // crush, +1 oct, wave, glide
   uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
   uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
   bool lfo_free;             // false = LFO restarts on each trigger
@@ -178,7 +178,7 @@ double MeasurePitch(const Patch& base, int note) {
   patch.main_layer[0] = 65535;  // longest decay
   patch.main_layer[1] = 65535;  // filter open
   patch.main_layer[3] = 0;      // no distortion
-  patch.second_layer[0] = 0;    // no noise
+  patch.second_layer[0] = 0;    // no crush
   patch.second_layer[1] = 0;    // no octave
   std::vector<Step> steps(1, Step{note});
   Result r = Render(patch, steps, 30.0, 1);
@@ -238,8 +238,8 @@ double GlideErrorCents() {
   return 1200.0 * log2(measured / (32.70319566 * 4.0));
 }
 
-// Overflow check: the output mix can reach about 82000 with noise at 100 %
-// on a hard hit. Scaling it must clip at the top, never wrap to the bottom.
+// Overflow check: the output mix (tone and snap) stays under 50000, but
+// scaling any mix must clip at the top, never wrap to the bottom.
 bool MixScalingOk() {
   // With MOD 2 at full (gain word 10923) the soft clipper gets about
   // 218000: it must stay at full scale too.
@@ -257,7 +257,7 @@ double TuneRangeError() {
   double worst = 0;
   for (int i = 0; i < 3; ++i) {
     Patch patch = { ENGINE_BT, 1, { 29491, 40632, knob[i], 19661 },
-                    { 9830, 16384, 0, 0 } };
+                    { 0, 16384, 0, 0 } };
     VoiceParameters p;
     ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
                            patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
@@ -291,7 +291,7 @@ bool LfoParametersOk() {
   for (int i = 0; i < 3; ++i) {
     uint16_t lfo[4] = { knob[i], knob[i], 0, 0 };
     uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-    uint16_t second[4] = { 9830, 16384, 0, 0 };
+    uint16_t second[4] = { 0, 16384, 0, 0 };
     VoiceParameters p;
     ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
     double f = p.lfo_increment * kFirmwareRate / 4294967296.0;
@@ -314,7 +314,7 @@ bool LfoParametersOk() {
 // its wave, wherever it was before. Free running: a trigger leaves it alone.
 bool LfoRestartOk() {
   uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-  uint16_t second[4] = { 9830, 16384, 0, 0 };
+  uint16_t second[4] = { 0, 16384, 0, 0 };
   uint16_t lfo[4] = { 50000, 40000, 0, 0 };
   bool ok = true;
   for (uint8_t shape = 0; shape < LFO_SHAPE_LAST; ++shape) {
@@ -344,7 +344,7 @@ bool LfoRestartOk() {
 // Depth at zero: the speed knob must not change the sound at all.
 bool LfoOffIsSilent(const std::vector<Step>& steps) {
   Patch slow = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
-                 { 9830, 16384, 0, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
+                 { 0, 16384, 0, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
   Patch fast = slow;
   fast.lfo_layer[0] = 65535;
   fast.lfo_shape = LFO_RAMP_UP;
@@ -526,6 +526,65 @@ bool WaveLevelOk(uint8_t engine) {
   return ok;
 }
 
+// Crush (METER + SHAPE 1), read from the voice's own VCA words with snap,
+// +1 octave and distortion off. One hit of C2, 0.1 to 0.6 s. Off: the words
+// change on most samples. Noon: a new value about every 100 samples
+// (300 Hz), every value still free. Full: also multiples of 4096 only, and
+// the quiet tail stops sooner. The output must stay within full scale.
+struct CrushResult { double changes, rms_db; bool on_grid; int32_t peak; double end_s; };
+
+CrushResult MeasureCrush(uint8_t engine, uint16_t knob) {
+  uint16_t main_layer[4] = { 40000, 65535, 32768, 0 };
+  uint16_t second[4] = { knob, 0, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, main_layer, second, lfo, LFO_TRIANGLE, &p);
+  Voice voice;
+  voice.Init();
+  uint16_t g, f;
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+  CrushResult r = { 0, 0, true, 0, 0 };
+  const int a = static_cast<int>(0.1 * kFirmwareRate), b = static_cast<int>(0.6 * kFirmwareRate);
+  int32_t last = 0;
+  double sum = 0;
+  int changes = 0;
+  for (int n = 0; n < 3 * kFirmwareRate; ++n) {
+    voice.Process(p, n == 0, 0, &g, &f);
+    int32_t v = static_cast<int32_t>(g) - 32767;
+    if (abs(v) > r.peak) r.peak = abs(v);
+    if (v != 0) r.end_s = static_cast<double>(n) / kFirmwareRate;
+    if (n >= a && n < b) {
+      if (v != last) ++changes;
+      if (v % 4096 != 0 && v != 32767 && v != -32767) r.on_grid = false;
+      sum += static_cast<double>(v) * v;
+    }
+    last = v;
+  }
+  r.changes = static_cast<double>(changes) / (b - a);
+  r.rms_db = 10 * log10(sum / (b - a));
+  return r;
+}
+
+bool CrushOk(uint8_t engine) {
+  CrushResult off = MeasureCrush(engine, 0);
+  CrushResult mid = MeasureCrush(engine, 32768);
+  CrushResult full = MeasureCrush(engine, 65535);
+  uint16_t main_layer[4] = { 40000, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, main_layer, zero, zero, LFO_TRIANGLE, &p);
+  double rate_mid = mid.changes * kFirmwareRate;
+  bool ok = p.crush_increment == 0 && off.changes > 0.9 && !off.on_grid &&
+            rate_mid > 250 && rate_mid < 310 && !mid.on_grid && full.on_grid &&
+            fabs(mid.rms_db - off.rms_db) < 1.5 && fabs(full.rms_db - off.rms_db) < 2.0 &&
+            full.end_s < off.end_s && full.peak <= 32767 && mid.peak <= 32767;
+  printf("Crush %s (off / noon / full): new value on %.0f %% / %.1f %% / %.1f %% of samples "
+         "(noon: %.0f Hz), level %+.1f / %+.1f dB, multiples of 4096 at full: %s, "
+         "sound ends after %.2f / %.2f / %.2f s  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", off.changes * 100, mid.changes * 100,
+         full.changes * 100, rate_mid, mid.rms_db - off.rms_db, full.rms_db - off.rms_db,
+         full.on_grid ? "yes" : "no", off.end_s, mid.end_s, full.end_s, ok ? "OK" : "FAIL");
+  return ok;
+}
+
 // Tone fully closed must not silence the note: RMS of OUT 1 (AC-coupled,
 // 3 Hz high-pass) over the first second of a note, Tone fully CCW against
 // fully CW. Returns the ratio in dB. A 1 s rest first lets the filter
@@ -590,7 +649,7 @@ double PeakToPeak(const std::vector<float>& v, size_t start, size_t length) {
 
 bool RetriggerOk(uint8_t engine, uint16_t decay) {
   Patch patch = { engine, 1, { decay, 32768, 32768, 19660 },
-                  { 9830, 16384, 0, 0 } };
+                  { 0, 16384, 0, 0 } };
   std::vector<Step> line = { {0}, {0}, {12}, {0}, {7}, {0}, {10}, {12} };
   const double bpm = 120.0;  // 125 ms per step
   Result r = Render(patch, line, bpm, 1);
@@ -676,7 +735,7 @@ double JumpLargest(const Patch& patch, Control control) {
 
 bool KnobJumpOk(uint8_t engine, int knob, const char* name, int32_t from, int32_t to) {
   Patch patch = { engine, 1, { 65535, 32768, 32768, 19661 },
-                  { 9830, 16384, 0, 0 }, { 49152, 0, 0, 0 } };
+                  { 0, 16384, 0, 0 }, { 49152, 0, 0, 0 } };
   jump_knob = knob;
   jump_from = from;
   jump_to = to;
@@ -726,7 +785,7 @@ double AttackJumpVolts(const Patch& patch) {
 // MOD 1 there), then a rise of one step per sample to 32767, never faster.
 bool PowerUpOk() {
   uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-  uint16_t second[4] = { 9830, 16384, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
+  uint16_t second[4] = { 0, 16384, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
   Voice voice;
@@ -745,7 +804,7 @@ bool PowerUpOk() {
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
-               { 9830, 16384, 0, 0 } };
+               { 0, 16384, 0, 0 } };
   Patch lt = bt;
   lt.engine = ENGINE_LT;
   Patch bt_oct = bt;
@@ -775,7 +834,7 @@ int main() {
   quiet.snap = 0;
   quiet.main_layer[1] = 0;      // tone fully closed
   quiet.main_layer[3] = 0;      // no distortion
-  quiet.second_layer[0] = 0;    // no noise
+  quiet.second_layer[0] = 0;    // no crush
   struct { const char* name; Patch patch; } hits[] = {
     { "BT default", bt }, { "LT default", lt }, { "BT tone closed, snap 0", quiet } };
   for (auto& h : hits) {
@@ -836,6 +895,7 @@ int main() {
   for (uint8_t engine = 0; engine < 2; ++engine) {
     failures += !WaveOk(engine);
     failures += !WaveLevelOk(engine);
+    failures += !CrushOk(engine);
   }
 
   printf("\nTone fully closed vs fully open, RMS over a note (must be >= -6 dB):\n");
@@ -861,7 +921,7 @@ int main() {
   printf("Knob jump click, largest one-sample jump in the 100 ms after it:\n");
   struct { int knob; const char* name; } jumps[] = {
     { 0, "decay" }, { 1, "tone" }, { 2, "tune" }, { 3, "distortion" },
-    { 4, "noise" }, { 5, "+1 octave" }, { 6, "wave" }, { 7, "glide" },
+    { 4, "crush" }, { 5, "+1 octave" }, { 6, "wave" }, { 7, "glide" },
     { 9, "LFO depth" } };
   for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
     for (auto& j : jumps) {
@@ -876,7 +936,7 @@ int main() {
   failures += !power_ok;
 
   bool mix_ok = MixScalingOk();
-  printf("Loud output mix (noise 100 %%, hard hit): %s\n",
+  printf("Loud output mix (82000, beyond the real 50000): %s\n",
          mix_ok ? "clips correctly  OK" : "wraps around  FAIL (32-bit overflow)");
   failures += !mix_ok;
   return failures ? 1 : 0;

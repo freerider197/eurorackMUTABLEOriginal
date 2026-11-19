@@ -21,21 +21,23 @@ int main() {
   struct Case { const char* path; uint8_t engine; uint8_t snap; uint16_t main[4]; uint16_t second[4];
                 uint16_t lfo[4]; uint8_t lfo_shape; bool lfo_free; };
   Case cases[] = {
-    { "build/tomline_words_bt.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 9830, 16384, 0, 0 } },
-    { "build/tomline_words_lt.bin", ENGINE_LT, 1, { 29491, 40632, 32768, 19661 }, { 9830, 16384, 0, 0 } },
+    { "build/tomline_words_bt.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 0, 16384, 0, 0 } },
+    { "build/tomline_words_lt.bin", ENGINE_LT, 1, { 29491, 40632, 32768, 19661 }, { 0, 16384, 0, 0 } },
     { "build/tomline_words_glide.bin", ENGINE_BT, 0, { 40000, 20000, 30000, 40000 }, { 30000, 50000, 40000, 30000 } },
     { "build/tomline_words_extreme.bin", ENGINE_LT, 3, { 10000, 60000, 50000, 65535 }, { 65535, 65535, 65535, 0 } },
-    { "build/tomline_words_lfo_tri.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 9830, 16384, 0, 30000 },
+    { "build/tomline_words_lfo_tri.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 0, 16384, 0, 30000 },
       { 50000, 40000, 0, 0 }, LFO_TRIANGLE },
     { "build/tomline_words_lfo_ramp.bin", ENGINE_LT, 2, { 40000, 30000, 20000, 0 }, { 0, 30000, 40000, 0 },
       { 20000, 65535, 0, 0 }, LFO_RAMP_UP },
-    { "build/tomline_words_lfo_tri_free.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 9830, 16384, 0, 30000 },
+    { "build/tomline_words_lfo_tri_free.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 0, 16384, 0, 30000 },
       { 50000, 40000, 0, 0 }, LFO_TRIANGLE, true },
     { "build/tomline_words_lfo_ramp_free.bin", ENGINE_LT, 2, { 40000, 30000, 20000, 0 }, { 0, 30000, 40000, 0 },
       { 20000, 65535, 0, 0 }, LFO_RAMP_UP, true },
-    { "build/tomline_words_wave_tri.bin", ENGINE_BT, 1, { 29491, 60000, 32768, 19661 }, { 9830, 16384, 12000, 0 } },
+    { "build/tomline_words_wave_tri.bin", ENGINE_BT, 1, { 29491, 60000, 32768, 19661 }, { 0, 16384, 12000, 0 } },
     { "build/tomline_words_wave_fold.bin", ENGINE_LT, 2, { 45000, 60000, 32768, 0 }, { 0, 20000, 50000, 0 } },
-    { "build/tomline_words_wave_square.bin", ENGINE_BT, 0, { 50000, 50000, 20000, 40000 }, { 9830, 0, 65535, 20000 } },
+    { "build/tomline_words_wave_square.bin", ENGINE_BT, 0, { 50000, 50000, 20000, 40000 }, { 0, 0, 65535, 20000 } },
+    { "build/tomline_words_crush_rate.bin", ENGINE_BT, 1, { 40000, 60000, 32768, 19661 }, { 20000, 16384, 0, 0 } },
+    { "build/tomline_words_crush_bits.bin", ENGINE_LT, 2, { 50000, 65535, 32768, 30000 }, { 55000, 16384, 30000, 0 } },
   };
   for (const Case& c : cases) {
     VoiceParameters p;

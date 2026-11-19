@@ -10,17 +10,19 @@ const { computeParams, TomlineVoice, FW_RATE } = new Function(code + '\nreturn {
 const roller = [12, -1, 12, 24, -1, 15, 12, 10, 12, -1, 12, 19, 17, 15, -1, 10];
 const VOCT_K = Math.floor(12 * 65536 * 256 / 3972);
 const cases = [
-  ['build/tomline_words_bt.bin', 0, 1, [29491, 40632, 32768, 19661], [9830, 16384, 0, 0]],
-  ['build/tomline_words_lt.bin', 1, 1, [29491, 40632, 32768, 19661], [9830, 16384, 0, 0]],
+  ['build/tomline_words_bt.bin', 0, 1, [29491, 40632, 32768, 19661], [0, 16384, 0, 0]],
+  ['build/tomline_words_lt.bin', 1, 1, [29491, 40632, 32768, 19661], [0, 16384, 0, 0]],
   ['build/tomline_words_glide.bin', 0, 0, [40000, 20000, 30000, 40000], [30000, 50000, 40000, 30000]],
   ['build/tomline_words_extreme.bin', 1, 3, [10000, 60000, 50000, 65535], [65535, 65535, 65535, 0]],
-  ['build/tomline_words_lfo_tri.bin', 0, 1, [29491, 40632, 32768, 19661], [9830, 16384, 0, 30000], [50000, 40000, 0, 0], 0],
+  ['build/tomline_words_lfo_tri.bin', 0, 1, [29491, 40632, 32768, 19661], [0, 16384, 0, 30000], [50000, 40000, 0, 0], 0],
   ['build/tomline_words_lfo_ramp.bin', 1, 2, [40000, 30000, 20000, 0], [0, 30000, 40000, 0], [20000, 65535, 0, 0], 1],
-  ['build/tomline_words_lfo_tri_free.bin', 0, 1, [29491, 40632, 32768, 19661], [9830, 16384, 0, 30000], [50000, 40000, 0, 0], 0, 1],
+  ['build/tomline_words_lfo_tri_free.bin', 0, 1, [29491, 40632, 32768, 19661], [0, 16384, 0, 30000], [50000, 40000, 0, 0], 0, 1],
   ['build/tomline_words_lfo_ramp_free.bin', 1, 2, [40000, 30000, 20000, 0], [0, 30000, 40000, 0], [20000, 65535, 0, 0], 1, 1],
-  ['build/tomline_words_wave_tri.bin', 0, 1, [29491, 60000, 32768, 19661], [9830, 16384, 12000, 0]],
+  ['build/tomline_words_wave_tri.bin', 0, 1, [29491, 60000, 32768, 19661], [0, 16384, 12000, 0]],
   ['build/tomline_words_wave_fold.bin', 1, 2, [45000, 60000, 32768, 0], [0, 20000, 50000, 0]],
-  ['build/tomline_words_wave_square.bin', 0, 0, [50000, 50000, 20000, 40000], [9830, 0, 65535, 20000]],
+  ['build/tomline_words_wave_square.bin', 0, 0, [50000, 50000, 20000, 40000], [0, 0, 65535, 20000]],
+  ['build/tomline_words_crush_rate.bin', 0, 1, [40000, 60000, 32768, 19661], [20000, 16384, 0, 0]],
+  ['build/tomline_words_crush_bits.bin', 1, 2, [50000, 65535, 32768, 30000], [55000, 16384, 30000, 0]],
 ];
 let failed = false;
 for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0, lfoFree = 0] of cases) {

@@ -97,7 +97,6 @@ void Voice::Init() {
   amp_ = 0;
   attack_ = kUnity;
   snap_ = 0;
-  noise_ = 0;
   partial_ = 0;
   lift_ = 0;
   hold_ = kPowerUpHold;
@@ -105,8 +104,8 @@ void Voice::Init() {
   tail_ = 0;
   fade_ = 0;
   rng_state_ = 0x21f3a5c1;
-  noise_lp1_ = 0;
-  noise_lp2_ = 0;
+  crush_phase_ = 0;
+  crush_hold_ = 0;
 }
 
 void Voice::Process(
@@ -121,7 +120,7 @@ void Voice::Process(
     amp_ = kUnity;
     attack_ = 0;
     snap_ = kUnity;
-    noise_ = kUnity;
+    crush_phase_ = 0xffffffffUL;  // crush: take a sample right away
     partial_ = kUnity;
     phase_ = 0;
     partial_phase_ = 0;
@@ -153,7 +152,6 @@ void Voice::Process(
   // Envelopes.
   amp_ = Decay(amp_, p.amp_coefficient);
   snap_ = Decay(snap_, p.snap_coefficient);
-  noise_ = Decay(noise_, p.noise_coefficient);
   partial_ = Decay(partial_, p.partial_coefficient);
   if (attack_ < kUnity) {
     attack_ += kAttackStep;
@@ -205,31 +203,39 @@ void Voice::Process(
     CONSTRAIN(x, -32767, 32767);
   }
 
-  // Noise: band-passed white noise with its own short decay, plus the snap
-  // click.
+  // Snap: a click of white noise. It shares the tone's 0.4 ms attack, so a
+  // retrigger through an already open Tone filter does not click.
   rng_state_ = rng_state_ * 1664525UL + 1013904223UL;
   int32_t white = static_cast<int16_t>(rng_state_ >> 16);
-  noise_lp1_ += (white - noise_lp1_) * p.noise_k1 >> 15;
-  noise_lp2_ += (noise_lp1_ - noise_lp2_) * p.noise_k2 >> 15;
-  int32_t band = (noise_lp1_ - noise_lp2_) << 1;
-  CLIP(band);
-  // Noise and snap share the tone's 0.4 ms attack, so a retrigger through an
-  // already open Tone filter does not click.
-  int32_t noise_env = static_cast<int32_t>(
-      static_cast<int64_t>(noise_) * attack_ >> 45);
   int32_t snap_env = static_cast<int32_t>(
       static_cast<int64_t>(snap_) * attack_ >> 45);
 
   int32_t v = x * env >> 15;
-  v += (p.noise_level * noise_env >> 15) * band >> 15;
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
   // Soft distortion (MOD 2) on the whole mix, after the envelope: the loud
-  // start of a hit saturates, the quiet tail stays clean. |v| < 82000 here,
+  // start of a hit saturates, the quiet tail stays clean. |v| < 50000 here,
   // so v * distortion (at most 10923) fits in 32 bits.
   if (p.distortion) {
     v = SoftClip(v * p.distortion >> 12);
   }
   v = ScaleMix(v);
+  // Crush (METER + SHAPE 1): the mix is sampled at a lower rate and held
+  // (aliasing: ring tones), and each held sample is rounded to the nearest
+  // multiple of crush_step (fewer levels: the quiet tail turns grainy, then
+  // stops).
+  if (p.crush_increment) {
+    uint32_t before = crush_phase_;
+    crush_phase_ += static_cast<uint32_t>(p.crush_increment) << 1;
+    if (crush_phase_ < before) {
+      int32_t m = v < 0 ? -v : v;
+      if (p.crush_step > 1) {
+        m = (m + (p.crush_step >> 1)) / p.crush_step * p.crush_step;
+        if (m > 32767) m = 32767;
+      }
+      crush_hold_ = v < 0 ? -m : m;
+    }
+    v = crush_hold_;
+  }
   if (fade_ > 0) {
     fade_ -= kFadeStep;
     if (fade_ < 0) {
