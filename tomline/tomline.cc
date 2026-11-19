@@ -33,6 +33,13 @@ Voice voice;
 
 bool gate = false;
 
+// Wait for the end of each DAC transfer (see claude/fix-dac-channel1).
+static inline void DacWrite(uint8_t channel, uint16_t value) {
+  dac.Write(channel, value);
+  while (!(SPI2->SR & SPI_I2S_FLAG_TXE)) { }
+  while (SPI2->SR & SPI_I2S_FLAG_BSY) { }
+}
+
 // DIAGNOSTIC BUILD (test tone): no voice. Channel 1 plays a steady 220 Hz
 // tone, channel 2 a steady 330 Hz tone, filters open. Increments at the
 // 31,088 Hz firmware rate: f / 31088.08 * 2^32.
@@ -83,14 +90,14 @@ void Process(uint16_t* cv) {
 
   if (ui.calibrating()) {
     // Stock calibration: VCAs closed, filters open.
-    dac.Write(0, cv_scaler.ScaleGain(0, 0));
+    DacWrite(0, cv_scaler.ScaleGain(0, 0));
     pwm.Write(0, 0);
-    dac.Write(1, cv_scaler.ScaleGain(1, 0));
+    DacWrite(1, cv_scaler.ScaleGain(1, 0));
     pwm.Write(1, 0);
   } else {
-    dac.Write(0, cv_scaler.ScaleGain(0, tone_gain[0]));
+    DacWrite(0, cv_scaler.ScaleGain(0, tone_gain[0]));
     pwm.Write(0, 0);  // filter open
-    dac.Write(1, cv_scaler.ScaleGain(1, tone_gain[1]));
+    DacWrite(1, cv_scaler.ScaleGain(1, tone_gain[1]));
     pwm.Write(1, 0);
   }
   ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0), voice.lfo_phase());
