@@ -74,6 +74,14 @@ class Voice {
 
   inline int32_t envelope() const { return amp_; }
 
+  // 0.95 * v, clipped to +/-32767. 64-bit: with noise at 100 % on a hard hit,
+  // the mix can reach about 82000, and 82000 * 31130 overflows 32 bits.
+  static inline int32_t ScaleMix(int32_t v) {
+    int32_t scaled = static_cast<int32_t>(static_cast<int64_t>(v) * 31130 >> 15);
+    CLIP(scaled);
+    return scaled;
+  }
+
  private:
 
   int32_t semitones_;

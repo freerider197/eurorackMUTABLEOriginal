@@ -92,8 +92,15 @@ void Voice::Process(
   // Pitch.
   int32_t target = pitch + p.tune;
   if (gliding_) {
-    semitones_ += static_cast<int32_t>(
-        static_cast<int64_t>(target - semitones_) * p.glide_k >> 31);
+    int32_t error = target - semitones_;
+    int32_t step = static_cast<int32_t>(
+        static_cast<int64_t>(error) * p.glide_k >> 31);
+    // Integer rounding would stop the glide a few cents short: always move
+    // by at least one step (1/65536 semitone) until the target is reached.
+    if (step == 0 || step == -1) {
+      step = error > 0 ? 1 : (error < 0 ? -1 : 0);
+    }
+    semitones_ += step;
   } else {
     semitones_ = target;
   }
@@ -156,8 +163,7 @@ void Voice::Process(
   int32_t v = x * env >> 15;
   v += (p.noise_level * noise_env >> 15) * band >> 15;
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
-  v = v * 31130 >> 15;  // 0.95
-  CLIP(v);
+  v = ScaleMix(v);
 
   int32_t g;
   if (external) {

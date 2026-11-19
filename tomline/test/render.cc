@@ -185,7 +185,44 @@ double MeasurePitch(const Patch& base, int note) {
   return crossings > 1 ? (crossings - 1) / (last - first) : 0.0;
 }
 
+// Glide check: C2 then C3 with glide at 50 % (time constant 129 ms). After
+// 1.5 s the second note must sit on C3.
+double GlideErrorCents() {
+  Patch patch = { ENGINE_BT, 0, { 65535, 65535, 32768, 0 }, { 0, 0, 0, 32768 } };
+  std::vector<Step> steps = { {12}, {24} };
+  Result r = Render(patch, steps, 10.0, 1, false);  // 1.5 s per step
+  // Zero crossings between 1.5 s and 2.5 s into the second note.
+  double start = 1.5 + 1.5, end = 1.5 + 2.5;
+  size_t a = static_cast<size_t>(start * kHostRate), b = static_cast<size_t>(end * kHostRate);
+  int crossings = 0;
+  double first = -1, last = -1, prev = 0;
+  const size_t w = 2000;
+  for (size_t i = a + w; i < b; ++i) {
+    double local = 0;
+    for (size_t k = i - w; k < i; k += 50) local += r.raw[k];
+    local /= (w / 50);
+    double x = r.raw[i] - local;
+    if (prev < 0 && x >= 0) {
+      double t = (i - 1 + (-prev) / (x - prev)) / kHostRate;
+      if (first < 0) first = t;
+      last = t;
+      ++crossings;
+    }
+    prev = x;
+  }
+  double measured = (crossings - 1) / (last - first);
+  return 1200.0 * log2(measured / (32.70319566 * 4.0));
+}
+
+// Overflow check: the output mix can reach about 82000 with noise at 100 %
+// on a hard hit. Scaling it must clip at the top, never wrap to the bottom.
+bool MixScalingOk() {
+  return Voice::ScaleMix(82000) == 32767 && Voice::ScaleMix(70000) == 32767 &&
+         Voice::ScaleMix(-82000) == -32767 && Voice::ScaleMix(1000) == 950;
+}
+
 int main() {
+  int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
                { 9830, 16384, 22938, 0 } };
   Patch lt = bt;
@@ -221,5 +258,16 @@ int main() {
     printf("  %d V  expected %7.2f Hz  measured %7.2f Hz  error %+.1f cents\n",
            note / 12, expected, measured, 1200.0 * log2(measured / expected));
   }
-  return 0;
+
+  double glide = GlideErrorCents();
+  bool glide_ok = fabs(glide) < 0.5;
+  printf("\nGlide C2 -> C3, 1.5 s later: %+.2f cents  %s\n", glide,
+         glide_ok ? "OK" : "FAIL (glide stops short of the note)");
+  failures += !glide_ok;
+
+  bool mix_ok = MixScalingOk();
+  printf("Loud output mix (noise 100 %%, hard hit): %s\n",
+         mix_ok ? "clips correctly  OK" : "wraps around  FAIL (32-bit overflow)");
+  failures += !mix_ok;
+  return failures ? 1 : 0;
 }
