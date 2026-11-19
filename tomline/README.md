@@ -35,7 +35,7 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 |---|---|
 | EXCITE 1 | Trigger (on above about 1.7 V, off below 0.85 V, stock thresholds) |
 | EXCITE 2 | V/oct. 0 V = C2 (65.4 Hz) with SHAPE 2 (Tune) at noon |
-| OUT 1 | The sound, 0 V to about +6.7 V (see "Offset") |
+| OUT 1 | The sound, swinging around +3.33 V (0 V to about +6.7 V, see "Offset"). Use an AC-coupled input (Erica Black Quad VCA2: IN 1–3, not IN 4) |
 | IN 1 | Not used, leave empty |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
 | LEVEL MOD 1 (big magenta knob) | **Fully counter-clockwise** |
@@ -88,7 +88,7 @@ before the free-run option read as "restart on trigger".
 |---|---|
 | Left column, top | BT engine |
 | Left column, 2nd | LT engine |
-| Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, or trimmer 1 not at LIN) |
+| Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, checked in the first second after power-up, or trimmer 1 not at LIN) |
 | Left column, bottom | Flashes green on each trigger |
 | Right column | Snap amount, from the bottom (1 LED = snap 0, 4 LEDs = snap 3) |
 | Engine and snap LEDs amber instead of green | Second layer active |
@@ -99,9 +99,16 @@ before the free-run option read as "restart on trigger".
 
 The VCA can only scale a fixed positive source (+3.33 V when IN 1 is empty),
 so OUT 1 can't go below 0 V while a note sounds. Firmware can't remove that.
-Tomline lifts the wave by its own peak level, so OUT 1 rests at 0 V between
-notes and the lift falls with the decay. What remains is a low bump that
-follows each hit: AC-coupled inputs remove it, DC-coupled ones pass it on.
+Tomline writes the wave on top of a fixed lift: OUT 1 sits at +3.33 V and
+the wave swings around it, so nothing jumps when a note starts. (Up to 0.4,
+the lift followed each note's peak and OUT 1's average level jumped by about
+2.4 V on every hit: a click that Tone, snap and sweep could not remove.)
+AC-coupled inputs remove the steady 3.33 V. A DC-coupled input passes it on,
+and a VCA after it turns every change of its gain (a sidechain duck) into a
+thump.
+
+At power-up OUT 1 stays at 0 V for 1 s (the LEVEL MOD 1 check needs the VCA
+at zero), then rises slowly to 3.33 V over about 1 s.
 
 ## Flashing (audio bootloader, unchanged)
 
@@ -189,8 +196,8 @@ Check the stack after every firmware change:
 python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
 ```
 
-Last run: worst case 588 bytes (main loop 316, SysTick 100, audio interrupt
-172), 4096 reserved, 3508 to spare. The
+Last run: worst case 580 bytes (main loop 316, SysTick 100, audio interrupt
+164), 4096 reserved, 3516 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -217,11 +224,15 @@ knob maths and wave shapes, the pitch of both LFO waves at full depth (restartin
 that a trigger restarts the LFO only when not free running, that the
 LFO at zero depth leaves the sound unchanged, and that a very loud mix (noise
 at 100 %, hard hit) clips instead of wrapping around, and that Tone fully
-closed keeps each note within 6 dB of Tone fully open (BT and LT, 0 to 4 V). It exits
+closed keeps each note within 6 dB of Tone fully open (BT and LT, 0 to 4 V).
+It also checks that OUT 1 rests at 3.33 V, that its average level doesn't jump
+on a hit, and the power-up (0 V for 1 s, then a slow rise). It exits
 with an error if a check fails.
 
-Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
-notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
+Last run: OUT 1 between 0.000 V and 6.66 V, back to 3.330 V after the
+notes. Attack jump (average over 100 ms after a hit minus before): BT -0.04 V,
+LT -0.02 V, BT with Tone closed and snap 0 +0.11 V (the moving lift of 0.4:
++2.3 to +2.4 V). Power-up: OK. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
 range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
 depth, 0.2-1.2 s, restart on trigger: triangle +1.71 st, ramp up +0.86 st; free
 running: triangle -10.30 st, ramp up -11.14 st (all within 0.03 st of the
@@ -229,8 +240,11 @@ expected value). LFO restart on every trigger / free run: OK. LFO at zero depth:
 unchanged. Pitch envelope, BT and LT: on
 the note at the hit, peak +12 st (BT) / +24 st (LT) at 1.03 ms, back on the
 note (0.000 cents) after 3 s, and a retrigger 10 ms in starts again from the
-note. Tone closed vs open: BT -2.6 dB, LT -2.3 to
--2.4 dB at every voltage (was -25 dB before the floor). Loud mix: clips
+note. Tone closed vs open: BT -4.5 to -4.6 dB, LT -4.4 to -4.6 dB at every
+voltage (-2.6 dB with the moving lift, whose bump passed the closed filter;
+-25 dB before the floor). Retrigger: worst one-sample jump BT 0.35 V, LT
+0.37 V, 1.1 x a note from silence (0.32 / 0.34 V); with the moving lift
+0.45 / 0.36 V against 0.51 / 0.42 V. Loud mix: clips
 correctly. Knob jump, end to end in the middle of a note (9 values, BT and
 LT): with the 40 ms glide no one-sample jump is bigger than the note's own;
 an instant jump of +1 octave would click at 0.80 V against the note's 0.10 V.

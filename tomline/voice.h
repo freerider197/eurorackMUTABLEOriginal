@@ -13,8 +13,10 @@
 //             65535 = filter open, 0 = filter closed.
 //
 // The VCA can only scale a positive source, so the wave is written on top of
-// a lift ("bias") that follows the sound's own peak level and returns to 0 V
-// when the note has died out.
+// a fixed lift: OUT 1 sits at mid scale (about 3.33 V) and the wave swings
+// around it. The lift never moves while notes play, so it adds no thump; an
+// AC-coupled input downstream removes it. At power-up OUT 1 stays at 0 V for
+// 1 s, then rises to mid scale over about 1 s.
 
 #ifndef TOMLINE_VOICE_H_
 #define TOMLINE_VOICE_H_
@@ -128,7 +130,8 @@ class Voice {
   int32_t snap_;      // Q30
   int32_t noise_;     // Q30
   int32_t partial_;   // Q30
-  int32_t bias_;      // Q15
+  int32_t lift_;      // VCA word the wave swings around
+  int32_t hold_;      // power-up samples left at 0 V
   int32_t last_mix_;  // Q15, previous output sample (before the lift)
   int32_t tail_;      // Q15, old note's last sample, faded out on retrigger
   int32_t fade_;      // Q15, tail level, 0 = no tail

@@ -20,6 +20,13 @@ const int32_t kSweepAttackStep = kUnity / 32;
 const int32_t kToneFloor = 25277;
 // On retrigger the old note fades out over 48 samples (1.5 ms).
 const int32_t kFadeStep = 683;
+// Mid scale of the VCA word: OUT 1 rests at about 3.33 V.
+const int32_t kLift = 32767;
+// Power-up: 1 s with the VCA word at zero, so Ui::CheckSetup can read LEVEL
+// MOD 1 (it needs > 4096 samples at zero in one 0.5 s window). The lift then
+// rises by one step per sample (about 1 s), slow enough that an AC-coupled
+// input downstream does not thump.
+const int32_t kPowerUpHold = 31088;
 
 static inline int32_t Sine(uint32_t phase) {
   uint32_t index = phase >> 22;
@@ -71,7 +78,8 @@ void Voice::Init() {
   snap_ = 0;
   noise_ = 0;
   partial_ = 0;
-  bias_ = 0;
+  lift_ = 0;
+  hold_ = kPowerUpHold;
   last_mix_ = 0;
   tail_ = 0;
   fade_ = 0;
@@ -214,13 +222,15 @@ void Voice::Process(
   }
   last_mix_ = v;
 
-  // Lift the wave by its own peak level so the VCA word never goes below
-  // zero. The lift decays with the amplitude envelope, so OUT 1 goes back to
-  // 0 V when the note dies out.
-  int32_t magnitude = v < 0 ? -v : v;
-  int32_t decayed = Decay(bias_, p.amp_coefficient);
-  bias_ = magnitude > decayed ? magnitude : decayed;
-  int32_t g = bias_ + v;
+  // Write the wave on top of a fixed lift, so the VCA word stays above zero.
+  // A lift that follows each note jumps at every hit: a low-frequency step
+  // that the Tone filter can't remove, heard as a click.
+  if (hold_ > 0) {
+    --hold_;
+  } else if (lift_ < kLift) {
+    ++lift_;
+  }
+  int32_t g = lift_ + v;
   CONSTRAIN(g, 0, 65535);
   *gain = g;
 
