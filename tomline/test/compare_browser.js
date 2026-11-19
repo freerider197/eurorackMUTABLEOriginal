@@ -16,12 +16,14 @@ const cases = [
   ['build/tomline_words_extreme.bin', 1, 3, [10000, 60000, 50000, 65535], [65535, 65535, 65535, 0]],
   ['build/tomline_words_lfo_tri.bin', 0, 1, [29491, 40632, 32768, 19661], [9830, 16384, 22938, 30000], [50000, 40000, 0, 0], 0],
   ['build/tomline_words_lfo_ramp.bin', 1, 2, [40000, 30000, 20000, 0], [0, 30000, 40000, 0], [20000, 65535, 0, 0], 1],
+  ['build/tomline_words_lfo_tri_free.bin', 0, 1, [29491, 40632, 32768, 19661], [9830, 16384, 22938, 30000], [50000, 40000, 0, 0], 0, 1],
+  ['build/tomline_words_lfo_ramp_free.bin', 1, 2, [40000, 30000, 20000, 0], [0, 30000, 40000, 0], [20000, 65535, 0, 0], 1, 1],
 ];
 let failed = false;
-for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0] of cases) {
+for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0, lfoFree = 0] of cases) {
   const buf = fs.readFileSync(path);
   const ref = new Uint16Array(buf.buffer, buf.byteOffset, buf.length / 2);
-  const p = computeParams(engine, snap, main, second, lfo, lfoShape);
+  const p = computeParams(engine, snap, main, second, lfo, lfoShape, lfoFree);
   const v = new TomlineVoice();
   const sps = FW_RATE * 60 / 122 / 4;
   let next = 0, step = -1, counts = 0, pitch = 0;

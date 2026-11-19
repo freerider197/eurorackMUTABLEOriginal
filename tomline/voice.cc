@@ -102,6 +102,9 @@ void Voice::Process(
     // dropping to zero in one sample (a click).
     tail_ = last_mix_;
     fade_ = 32767;
+    if (!p.lfo_free) {
+      lfo_phase_ = LfoStart(p.lfo_shape);
+    }
   }
 
   // Pitch.

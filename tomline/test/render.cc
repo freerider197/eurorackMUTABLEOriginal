@@ -51,6 +51,7 @@ struct Patch {
   uint16_t second_layer[4];  // noise, +1 oct, sweep time, glide
   uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
   uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
+  bool lfo_free;             // false = LFO restarts on each trigger
 };
 
 struct Result {
@@ -62,7 +63,8 @@ Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
               int repeats) {
   VoiceParameters p;
   ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
-                         patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
+                         patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p,
+                         patch.lfo_free);
   Voice voice;
   voice.Init();
   Result r;
@@ -240,15 +242,16 @@ double TuneRangeError() {
 }
 
 // Pitch LFO, depth fully up (+/-12 st), speed fully down (0.05 Hz, one cycle
-// in 20 s). Both waves start at their lowest point when the module starts,
-// so 0.2 to 1.2 s into the first note the pitch is about 12 st below C2,
-// rising by 1.2 st/s (ramp up) or 2.4 st/s (triangle). Returns the error of
-// the measured average pitch in semitones.
-double LfoPitchError(uint8_t shape, double* measured_st) {
+// in 20 s), rising by 1.2 st/s (ramp up) or 2.4 st/s (triangle).
+// Restart on trigger: the note starts at the middle of the wave, so 0.2 to
+// 1.2 s in, the pitch is just above C2. Free running: the LFO starts at its
+// lowest point when the module starts, about 12 st below C2. Returns the error
+// of the measured average pitch in semitones.
+double LfoPitchError(uint8_t shape, bool free_run, double* measured_st) {
   Patch patch = { ENGINE_BT, 1, { 0, 0, 32768, 0 }, { 0, 0, 0, 0 },
-                  { 0, 65535, 0, 0 }, shape };
+                  { 0, 65535, 0, 0 }, shape, free_run };
   double rate = shape == LFO_RAMP_UP ? 1.2 : 2.4;
-  double expected = -12.0 + rate * 0.7;
+  double expected = (free_run ? -12.0 : 0.0) + rate * 0.7;
   double hz = MeasurePitch(patch, 0);
   *measured_st = 12.0 * log2(hz / 65.40639133);
   return fabs(*measured_st - expected);
@@ -279,6 +282,37 @@ bool LfoParametersOk() {
        Voice::LfoWave(0, LFO_RAMP_UP) == -32768 &&
        Voice::LfoWave(0x80000000UL, LFO_RAMP_UP) == 0 &&
        Voice::LfoWave(0xffffffffUL, LFO_RAMP_UP) == 32767;
+  return ok;
+}
+
+// Restart on trigger: right after any trigger the LFO is at the middle of
+// its wave, wherever it was before. Free running: a trigger leaves it alone.
+bool LfoRestartOk() {
+  uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
+  uint16_t second[4] = { 9830, 16384, 22938, 0 };
+  uint16_t lfo[4] = { 50000, 40000, 0, 0 };
+  bool ok = true;
+  for (uint8_t shape = 0; shape < LFO_SHAPE_LAST; ++shape) {
+    for (int free_run = 0; free_run < 2; ++free_run) {
+      VoiceParameters p;
+      ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, shape, &p,
+                             free_run != 0);
+      Voice voice;
+      voice.Init();
+      uint16_t gain, frequency;
+      for (int hit = 0; hit < 3; ++hit) {
+        for (int n = 0; n < 10007 * (hit + 1); ++n) {
+          voice.Process(p, false, 0, &gain, &frequency);
+        }
+        uint32_t before = voice.lfo_phase();
+        voice.Process(p, true, 0, &gain, &frequency);
+        uint32_t expected = (free_run ? before : Voice::LfoStart(shape)) +
+                            static_cast<uint32_t>(p.lfo_increment);
+        ok = ok && voice.lfo_phase() == expected;
+      }
+      ok = ok && Voice::LfoWave(Voice::LfoStart(shape), shape) == 0;
+    }
+  }
   return ok;
 }
 
@@ -480,15 +514,21 @@ int main() {
   printf("LFO knobs (0.05 / 1 / 20 Hz, depth off / 12 st, wave shapes): %s\n",
          lfo_params_ok ? "OK" : "FAIL");
   failures += !lfo_params_ok;
-  for (uint8_t shape = 0; shape < LFO_SHAPE_LAST; ++shape) {
-    double measured;
-    double error = LfoPitchError(shape, &measured);
-    bool ok = error < 0.1;
-    printf("LFO %-8s at full depth, 0.2-1.2 s: %+.2f st from C2 (error %.3f st)  %s\n",
-           shape == LFO_RAMP_UP ? "ramp up" : "triangle", measured, error,
-           ok ? "OK" : "FAIL");
-    failures += !ok;
+  for (int free_run = 0; free_run < 2; ++free_run) {
+    for (uint8_t shape = 0; shape < LFO_SHAPE_LAST; ++shape) {
+      double measured;
+      double error = LfoPitchError(shape, free_run != 0, &measured);
+      bool ok = error < 0.1;
+      printf("LFO %-8s %-8s at full depth, 0.2-1.2 s: %+.2f st from C2 (error %.3f st)  %s\n",
+             shape == LFO_RAMP_UP ? "ramp up" : "triangle",
+             free_run ? "free" : "restart", measured, error, ok ? "OK" : "FAIL");
+      failures += !ok;
+    }
   }
+  bool lfo_restart_ok = LfoRestartOk();
+  printf("LFO restart: every trigger restarts it at mid-wave, free run leaves it: %s\n",
+         lfo_restart_ok ? "OK" : "FAIL");
+  failures += !lfo_restart_ok;
   bool lfo_off_ok = LfoOffIsSilent(roller);
   printf("LFO depth at zero, speed turned: sound unchanged  %s\n",
          lfo_off_ok ? "OK" : "FAIL");
