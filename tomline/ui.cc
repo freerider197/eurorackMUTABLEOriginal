@@ -32,9 +32,15 @@ const int32_t kDefaultVoctK = 12 * 65536 * 256 / kCountsPerVolt;
 const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
   9830,   // noise level 15 %
   16384,  // +1 octave level 25 %
-  22938,  // unused (was sweep time)
+  0,      // wave: plain sine
   0       // glide off
 };
+// Settings flags. kFlagWave marks a record whose second-layer SHAPE 2 value
+// is the wave. Older records hold an unused leftover there (the old sweep
+// time), which would start the wave at a random place. An older Tomline reads
+// any flag value above 1 as "LFO restarts on trigger" and keeps the rest.
+const uint8_t kFlagLfoFree = 0x01;
+const uint8_t kFlagWave = 0x80;
 const uint16_t kLfoLayerDefaults[KNOB_LAST] = {
   32768,  // LFO speed 1 Hz
   0,      // LFO depth off
@@ -56,7 +62,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     settings_.engine = ENGINE_BT;
     settings_.snap = 1;
     settings_.lfo_shape = LFO_TRIANGLE;
-    settings_.lfo_free = 0;
+    settings_.flags = kFlagWave;
     copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
          &settings_.second_layer[0]);
     settings_.voct_offset = 0;
@@ -77,12 +83,16 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
            &settings_.second_layer[0]);
       settings_.voct_offset = old.voct_offset;
       settings_.voct_k = old.voct_k;
+      settings_.flags = 0;
     }
   }
+  if (!(settings_.flags & kFlagWave)) {
+    settings_.second_layer[KNOB_SHAPE_2] = 0;  // wave starts as a plain sine
+  }
+  settings_.flags = (settings_.flags & kFlagLfoFree) | kFlagWave;
   if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
   if (settings_.snap > 3) settings_.snap = 1;
   if (settings_.lfo_shape >= LFO_SHAPE_LAST) settings_.lfo_shape = LFO_TRIANGLE;
-  if (settings_.lfo_free > 1) settings_.lfo_free = 0;
 
   // The ADC scans one pot per ms: read all four before starting.
   for (uint8_t i = 0; i < 8; ++i) {
@@ -303,7 +313,7 @@ void Ui::OnButtonReleased(uint8_t button, uint32_t duration) {
       if (fn1_with_fn2_) {
         // Tapped while FN 2 was held: LFO restart on trigger / free running.
         if (short_press) {
-          settings_.lfo_free = !settings_.lfo_free;
+          settings_.flags ^= kFlagLfoFree;
           SettingsChanged();
           parameters_dirty_ = true;
         }
@@ -421,7 +431,8 @@ void Ui::ComputeParameters() {
   VoiceParameters n;
   ComputeVoiceParameters(
       settings_.engine, settings_.snap, main_layer_, settings_.second_layer,
-      settings_.lfo_layer, settings_.lfo_shape, &n, settings_.lfo_free != 0);
+      settings_.lfo_layer, settings_.lfo_shape, &n,
+      (settings_.flags & kFlagLfoFree) != 0);
   // Copy field by field: each 32-bit store is atomic for the interrupt.
   volatile int32_t* dst = reinterpret_cast<volatile int32_t*>(&parameters_);
   const int32_t* src = reinterpret_cast<const int32_t*>(&n);
@@ -561,7 +572,7 @@ void Ui::PaintLeds() {
     int32_t wave = Voice::LfoWave(lfo_phase_, settings_.lfo_shape);
     uint8_t brightness = static_cast<uint8_t>((wave + 32768) >> 8);
     leds_.set(4 + settings_.lfo_shape, brightness, 0);
-    if (settings_.lfo_free) {
+    if (settings_.flags & kFlagLfoFree) {
       leds_.set(6, 255, 0);
     }
     return;

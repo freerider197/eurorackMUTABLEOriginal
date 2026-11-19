@@ -43,6 +43,13 @@ static int32_t DecayQ31(float tau) {
 static inline int32_t Q16(float x) { return static_cast<int32_t>(x * 65536.0f); }
 static inline int32_t Q15(float x) { return static_cast<int32_t>(x * 32767.0f); }
 
+// 0..1 (clamped) to a crossfade amount, 32768 = full.
+static inline int32_t Mix(float x) {
+  if (x < 0.0f) x = 0.0f;
+  if (x > 1.0f) x = 1.0f;
+  return static_cast<int32_t>(x * 32768.0f);
+}
+
 void ComputeVoiceParameters(
     uint8_t engine,
     uint8_t snap,
@@ -58,6 +65,7 @@ void ComputeVoiceParameters(
   float distortion = main_layer[KNOB_MOD_2] / 65535.0f;
   float noise = second_layer[KNOB_SHAPE_1] / 65535.0f;
   float octave = second_layer[KNOB_MOD_1] / 65535.0f;
+  float wave = second_layer[KNOB_SHAPE_2] / 65535.0f;
   float glide = second_layer[KNOB_MOD_2] / 65535.0f;
   float lfo_speed = lfo_layer[KNOB_SHAPE_1] / 65535.0f;
   float lfo_depth = lfo_layer[KNOB_MOD_1] / 65535.0f;
@@ -98,6 +106,17 @@ void ComputeVoiceParameters(
       ? 0
       : static_cast<int32_t>((1.0f + 3.0f * distortion * distortion) *
                              (4096.0f / 1.5f));
+  // Wave: a third of the knob each for sine -> triangle, triangle -> folded
+  // sine (fold gain 1 to 2: the top folds back down, the fundamental stays
+  // within about 4 dB), folded -> square. Fully CCW = the plain sine.
+  float w3 = wave < 0.01f ? 0.0f : wave * 3.0f;
+  float fold = w3 - 1.0f;
+  if (fold < 0.0f) fold = 0.0f;
+  if (fold > 1.0f) fold = 1.0f;
+  n.wave_tri = Mix(w3);
+  n.wave_fold = Mix(fold);
+  n.fold_gain = static_cast<int32_t>((1.0f + fold) * 4096.0f);
+  n.wave_square = Mix(w3 - 2.0f);
   ComputeAmountOffset(main_layer[KNOB_MOD_1], &n.tone_amount, &n.tone_offset);
 
   // Pitch LFO: 0.05 Hz .. 20 Hz (1 Hz at noon), depth up to +/-12 semitones

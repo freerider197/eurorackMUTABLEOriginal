@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "stmlib/stmlib.h"
 #include "stmlib/system/system_clock.h"
@@ -21,6 +22,8 @@
 namespace stmlib {
 SystemClock system_clock;
 int sim_settings_saves = 0;
+const void* sim_settings_record = NULL;
+size_t sim_settings_record_size = 0;
 }  // namespace stmlib
 
 namespace streams {
@@ -270,19 +273,19 @@ int main() {
   Down(BUTTON_FN_2);
   Tap(BUTTON_FN_1);
   Up(BUTTON_FN_2);
-  Check(ui->settings_.lfo_free == 1 && ui->settings_.engine == ENGINE_BT &&
+  Check((ui->settings_.flags & kFlagLfoFree) && ui->settings_.engine == ENGINE_BT &&
         ui->settings_.snap == 1, "FN 2 held + FN 1 tap: LFO free run only");
   Down(BUTTON_FN_2);
   Tap(BUTTON_FN_1);
   Up(BUTTON_FN_2);
-  Check(ui->settings_.lfo_free == 0, "  ... again: restart on trigger");
+  Check(!(ui->settings_.flags & kFlagLfoFree), "  ... again: restart on trigger");
   Start();
   Down(BUTTON_FN_2);
   Down(BUTTON_FN_1);
   Ms(1100);
   Up(BUTTON_FN_1);
   Up(BUTTON_FN_2);
-  Check(ui->settings_.lfo_free == 0, "FN 2 then FN 1 held 1 s (V/oct calibration): free run unchanged");
+  Check(!(ui->settings_.flags & kFlagLfoFree), "FN 2 then FN 1 held 1 s (V/oct calibration): free run unchanged");
   Tap(BUTTON_FN_1);
   Start();
   Down(BUTTON_METER);
@@ -326,6 +329,38 @@ int main() {
   Ms(60000);
   sim_noise = 0;
   Check(stmlib::sim_settings_saves == 0, "second page open 60 s, knob noise, untouched: no save");
+
+  printf("Wave (METER + SHAPE 2) and older saved settings\n");
+  Start();
+  Down(BUTTON_METER);
+  Turn(S2, 50000, 800);
+  Up(BUTTON_METER);
+  Ms(2500);
+  Check(Near(ui->settings_.second_layer[S2], 50000) && stmlib::sim_settings_saves == 1,
+        "METER held, SHAPE 2 turned: wave follows the knob, saved");
+  Check(ui->main_layer_[S2] == 32768, "  ... tune unchanged");
+  Settings old_record;
+  memset(&old_record, 0, sizeof(old_record));
+  old_record.engine = ENGINE_LT;
+  old_record.snap = 2;
+  old_record.flags = 1;  // LFO free running, saved before the wave
+  old_record.second_layer[S2] = 22938;  // the old sweep time leftover
+  old_record.second_layer[S1] = 4000;
+  old_record.voct_k = 12345;
+  old_record.magic = kSettingsMagic;
+  stmlib::sim_settings_record = &old_record;
+  stmlib::sim_settings_record_size = sizeof(old_record);
+  Start();
+  Check(ui->settings_.second_layer[S2] == 0 && ui->settings_.engine == ENGINE_LT &&
+        ui->settings_.snap == 2 && (ui->settings_.flags & kFlagLfoFree) &&
+        ui->settings_.second_layer[S1] == 4000 && ui->settings_.voct_k == 12345,
+        "settings saved before the wave: wave off, everything else kept");
+  old_record.flags = kFlagWave;
+  old_record.second_layer[S2] = 30000;
+  Start();
+  Check(ui->settings_.second_layer[S2] == 30000 && !(ui->settings_.flags & kFlagLfoFree),
+        "settings saved with a wave: wave kept");
+  stmlib::sim_settings_record = NULL;
 
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);
   return failures ? 1 : 0;

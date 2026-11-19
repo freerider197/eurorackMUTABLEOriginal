@@ -57,6 +57,10 @@ struct VoiceParameters {
   int32_t noise_k2;             // Q15 one-pole coefficient
   int32_t drive;                // Q12 pre-gain into the soft clipper
   int32_t distortion;           // Q12 gain into the output soft clipper, 0 = off
+  int32_t wave_tri;             // Q15 (32768 = full), sine -> triangle, 0 = plain sine
+  int32_t wave_fold;            // Q15, triangle -> folded sine
+  int32_t fold_gain;            // Q12, 1 to 2: how far the top folds back
+  int32_t wave_square;          // Q15, folded -> square
   int32_t tone_amount;          // 0..65535, as streams/meta_parameters.h
   int32_t tone_offset;          // 0..65535
   int32_t lfo_increment;        // pitch LFO phase increment per sample

@@ -34,6 +34,31 @@ static inline int32_t Sine(uint32_t phase) {
   return a + ((b - a) * fractional >> 16);
 }
 
+// Wave (METER + SHAPE 2) on the main tone: sine -> triangle -> folded sine
+// -> square. Each stage crossfades from the one before.
+static inline int32_t Wave(
+    const VoiceParameters& p, uint32_t phase, int32_t sine) {
+  // Triangle in phase with the sine: 0 at phase 0, top at a quarter.
+  uint32_t shifted = phase + 0x40000000U;  // wraps, also on 64-bit hosts
+  int32_t u = static_cast<int32_t>(shifted >> 16);
+  int32_t tri = 32768 - (u < 32768 ? 32768 - u : u - 32768) * 2;
+  CONSTRAIN(tri, -32767, 32767);
+  int32_t y = sine + ((tri - sine) * p.wave_tri >> 15);
+  if (p.wave_fold) {
+    // sin(pi / 2 * gain * sine): at gain 1 a rounder sine, turning up
+    // folds the top of the wave back down.
+    int32_t v = sine * p.fold_gain >> 12;
+    int32_t folded = Sine(static_cast<uint32_t>(v) << 15);
+    y += (folded - y) * p.wave_fold >> 15;
+  }
+  if (p.wave_square) {
+    // The sine driven 4x into the soft clipper: a square with soft edges.
+    int32_t square = Voice::SoftClip(sine << 2);
+    y += (square - y) * p.wave_square >> 15;
+  }
+  return y;
+}
+
 // Semitones above C1 (Q16) to a phase increment at the firmware rate.
 static inline uint32_t SemitonesToIncrement(int32_t semitones) {
   // Divide by 12 to get octaves, Q16. 5592405 / 2^26 = 1 / 12.
@@ -169,6 +194,15 @@ void Voice::Process(
 
   // Drive into a cubic soft clipper.
   x = SoftClip(x * p.drive >> 12);
+  // Wave, added after the clipper: the clipper would round a triangle back
+  // into a sine. Only the change from the sine is added, so the +1 octave
+  // and the partial stay as they are.
+  if (p.wave_tri) {
+    int32_t shaped = Wave(p, phase_, fundamental) - fundamental;
+    x += static_cast<int32_t>(
+        static_cast<int64_t>(shaped) * p.normalization >> 15);
+    CONSTRAIN(x, -32767, 32767);
+  }
 
   // Noise: band-passed white noise with its own short decay, plus the snap
   // click.

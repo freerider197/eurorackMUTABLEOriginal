@@ -49,7 +49,7 @@ struct Patch {
   uint8_t engine;
   uint8_t snap;
   uint16_t main_layer[4];    // decay, tone, tune, distortion
-  uint16_t second_layer[4];  // noise, +1 oct, unused, glide
+  uint16_t second_layer[4];  // noise, +1 oct, wave, glide
   uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
   uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
   bool lfo_free;             // false = LFO restarts on each trigger
@@ -257,7 +257,7 @@ double TuneRangeError() {
   double worst = 0;
   for (int i = 0; i < 3; ++i) {
     Patch patch = { ENGINE_BT, 1, { 29491, 40632, knob[i], 19661 },
-                    { 9830, 16384, 22938, 0 } };
+                    { 9830, 16384, 0, 0 } };
     VoiceParameters p;
     ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
                            patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
@@ -291,7 +291,7 @@ bool LfoParametersOk() {
   for (int i = 0; i < 3; ++i) {
     uint16_t lfo[4] = { knob[i], knob[i], 0, 0 };
     uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-    uint16_t second[4] = { 9830, 16384, 22938, 0 };
+    uint16_t second[4] = { 9830, 16384, 0, 0 };
     VoiceParameters p;
     ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
     double f = p.lfo_increment * kFirmwareRate / 4294967296.0;
@@ -314,7 +314,7 @@ bool LfoParametersOk() {
 // its wave, wherever it was before. Free running: a trigger leaves it alone.
 bool LfoRestartOk() {
   uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-  uint16_t second[4] = { 9830, 16384, 22938, 0 };
+  uint16_t second[4] = { 9830, 16384, 0, 0 };
   uint16_t lfo[4] = { 50000, 40000, 0, 0 };
   bool ok = true;
   for (uint8_t shape = 0; shape < LFO_SHAPE_LAST; ++shape) {
@@ -344,7 +344,7 @@ bool LfoRestartOk() {
 // Depth at zero: the speed knob must not change the sound at all.
 bool LfoOffIsSilent(const std::vector<Step>& steps) {
   Patch slow = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
-                 { 9830, 16384, 22938, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
+                 { 9830, 16384, 0, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
   Patch fast = slow;
   fast.lfo_layer[0] = 65535;
   fast.lfo_shape = LFO_RAMP_UP;
@@ -416,6 +416,77 @@ bool DistortionOk(uint8_t engine) {
   return ok;
 }
 
+// Wave (METER + SHAPE 2), read from the voice's own VCA words with snap,
+// noise, +1 octave and distortion off. One hit of C2, the first 8 cycles:
+// harmonics 1 to 16 against the plain sine. Fully CCW must leave the voice
+// untouched; each stage must sound like its name while the fundamental
+// stays within 6 dB (the bass must not disappear): the triangle's 5th
+// harmonic near 1/25, the folded wave far brighter, and fully CW square-like:
+// odd harmonics, 3rd near 1/3 (-9.5 dB), even ones low.
+struct WaveResult { double h[17]; int32_t peak; };
+
+WaveResult MeasureWave(uint8_t engine, uint16_t knob) {
+  uint16_t main_layer[4] = { 29491, 65535, 32768, 0 };
+  uint16_t second[4] = { 0, 0, knob, 0 }, lfo[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, main_layer, second, lfo, LFO_TRIANGLE, &p);
+  Voice voice;
+  voice.Init();
+  uint16_t g, f;
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+  const double f0 = 65.40639133;
+  const int cycles = static_cast<int>(8 * kFirmwareRate / f0 + 0.5);
+  double re[17] = { 0 }, im[17] = { 0 };
+  WaveResult r;
+  r.peak = 0;
+  for (int n = 0; n < cycles; ++n) {
+    voice.Process(p, n == 0, 0, &g, &f);  // 0 V: C2
+    int32_t v = static_cast<int32_t>(g) - 32767;
+    if (abs(v) > r.peak) r.peak = abs(v);
+    double w = 2 * M_PI * f0 * n / kFirmwareRate;
+    for (int k = 1; k <= 16; ++k) {
+      re[k] += v * cos(k * w);
+      im[k] += v * sin(k * w);
+    }
+  }
+  for (int k = 1; k <= 16; ++k) r.h[k] = re[k] * re[k] + im[k] * im[k];
+  return r;
+}
+
+bool WaveOk(uint8_t engine) {
+  const uint16_t knobs[4] = { 0, 21845, 43690, 65535 };  // off, triangle, folded, square
+  const char* names[4] = { "sine", "triangle", "folded", "square" };
+  WaveResult r[4];
+  for (int i = 0; i < 4; ++i) r[i] = MeasureWave(engine, knobs[i]);
+  uint16_t main_layer[4] = { 29491, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, main_layer, zero, zero, LFO_TRIANGLE, &p);
+  bool ok = p.wave_tri == 0 && p.wave_fold == 0 && p.wave_square == 0;
+  double upper[4], fund[4];
+  printf("Wave %s: fundamental / harmonics 2-16 (dB against the sine's fundamental):\n",
+         engine == ENGINE_BT ? "BT" : "LT");
+  for (int i = 0; i < 4; ++i) {
+    double sum = 0;
+    for (int k = 2; k <= 16; ++k) sum += r[i].h[k];
+    fund[i] = 10 * log10(r[i].h[1] / r[0].h[1]);
+    upper[i] = 10 * log10(sum / r[0].h[1]);
+    printf("  %-8s %+5.1f / %+6.1f dB, peak word %d\n", names[i], fund[i], upper[i], r[i].peak);
+    ok = ok && fund[i] > -6.0 && r[i].peak <= 32767;
+  }
+  // The triangle is no brighter than the sine, which the drive already
+  // clips a little; it is told apart by its 5th harmonic (1/25, -28 dB).
+  double h5 = 10 * log10(r[1].h[5] / r[1].h[1]);
+  double h3 = 10 * log10(r[3].h[3] / r[3].h[1]);
+  double even = 10 * log10((r[3].h[2] + r[3].h[4] + r[3].h[6]) / r[3].h[1]);
+  ok = ok && h5 > -32.0 && h5 < -24.0 && upper[2] > upper[0] + 6 &&
+       upper[2] > upper[1] + 6 && upper[3] > upper[1] + 6 &&
+       h3 > -13.0 && h3 < -7.0 && even < -30.0;
+  printf("  triangle: 5th harmonic %.1f dB (expected about -28); square: 3rd harmonic "
+         "%.1f dB (expected about -9.5), even harmonics %.1f dB  %s\n",
+         h5, h3, even, ok ? "OK" : "FAIL");
+  return ok;
+}
+
 // Tone fully closed must not silence the note: RMS of OUT 1 (AC-coupled,
 // 3 Hz high-pass) over the first second of a note, Tone fully CCW against
 // fully CW. Returns the ratio in dB. A 1 s rest first lets the filter
@@ -480,7 +551,7 @@ double PeakToPeak(const std::vector<float>& v, size_t start, size_t length) {
 
 bool RetriggerOk(uint8_t engine, uint16_t decay) {
   Patch patch = { engine, 1, { decay, 32768, 32768, 19660 },
-                  { 9830, 16384, 22938, 0 } };
+                  { 9830, 16384, 0, 0 } };
   std::vector<Step> line = { {0}, {0}, {12}, {0}, {7}, {0}, {10}, {12} };
   const double bpm = 120.0;  // 125 ms per step
   Result r = Render(patch, line, bpm, 1);
@@ -566,7 +637,7 @@ double JumpLargest(const Patch& patch, Control control) {
 
 bool KnobJumpOk(uint8_t engine, int knob, const char* name, int32_t from, int32_t to) {
   Patch patch = { engine, 1, { 65535, 32768, 32768, 19661 },
-                  { 9830, 16384, 22938, 0 }, { 49152, 0, 0, 0 } };
+                  { 9830, 16384, 0, 0 }, { 49152, 0, 0, 0 } };
   jump_knob = knob;
   jump_from = from;
   jump_to = to;
@@ -576,6 +647,13 @@ bool KnobJumpOk(uint8_t engine, int knob, const char* name, int32_t from, int32_
   *JumpValue(&end) = to;
   double after = JumpLargest(end, NULL);
   double reference = fmax(before, after);
+  // The settings the glide passes through count too: the folded wave, half
+  // way along the wave knob, is spikier than both ends.
+  for (int i = 1; i < 12; ++i) {
+    Patch mid = patch;
+    *JumpValue(&mid) = from + (to - from) * i / 12;
+    reference = fmax(reference, JumpLargest(mid, NULL));
+  }
   jump_glide = false;
   double instant = JumpLargest(patch, JumpControl);
   jump_glide = true;
@@ -609,7 +687,7 @@ double AttackJumpVolts(const Patch& patch) {
 // MOD 1 there), then a rise of one step per sample to 32767, never faster.
 bool PowerUpOk() {
   uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-  uint16_t second[4] = { 9830, 16384, 22938, 0 }, lfo[4] = { 0, 0, 0, 0 };
+  uint16_t second[4] = { 9830, 16384, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
   Voice voice;
@@ -628,7 +706,7 @@ bool PowerUpOk() {
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
-               { 9830, 16384, 22938, 0 } };
+               { 9830, 16384, 0, 0 } };
   Patch lt = bt;
   lt.engine = ENGINE_LT;
   Patch bt_oct = bt;
@@ -716,6 +794,9 @@ int main() {
   for (uint8_t engine = 0; engine < 2; ++engine) {
     failures += !DistortionOk(engine);
   }
+  for (uint8_t engine = 0; engine < 2; ++engine) {
+    failures += !WaveOk(engine);
+  }
 
   printf("\nTone fully closed vs fully open, RMS over a note (must be >= -6 dB):\n");
   for (int e = 0; e < 2; ++e) {
@@ -740,7 +821,7 @@ int main() {
   printf("Knob jump click, largest one-sample jump in the 100 ms after it:\n");
   struct { int knob; const char* name; } jumps[] = {
     { 0, "decay" }, { 1, "tone" }, { 2, "tune" }, { 3, "distortion" },
-    { 4, "noise" }, { 5, "+1 octave" }, { 7, "glide" },
+    { 4, "noise" }, { 5, "+1 octave" }, { 6, "wave" }, { 7, "glide" },
     { 9, "LFO depth" } };
   for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
     for (auto& j : jumps) {
