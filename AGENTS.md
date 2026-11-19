@@ -89,7 +89,8 @@ node tomline/test/compare_browser.js
 - Commits: one change each. Subject ≤ 72 chars, imperative, no semicolon lists ("Fix LT pitch drift at high V/oct").
   Add a body only for the why.
 - Add or update a check in `tomline/test/render.cc` for every voice or parameter change.
-- Don't push to `tomline-firmware` or `master`. Open a PR and let the owner merge. `.github/pull_request_template.md`
+- **Every finished task ends with a PR against `tomline-firmware`. Open it yourself, never ask whether to; this is the owner's
+  standing permission.** Don't push to `tomline-firmware` or `master`; let the owner merge. `.github/pull_request_template.md`
   has the sections below.
 
 ## PR description
