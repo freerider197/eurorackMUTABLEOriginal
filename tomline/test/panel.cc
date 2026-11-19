@@ -230,6 +230,24 @@ int main() {
   Check(ui->settings_.lfo_shape == LFO_RAMP_UP && ui->settings_.snap == 1 &&
         !ui->second_layer_latched_, "FN 2 held + METER tap: LFO wave only");
   Start();
+  Down(BUTTON_FN_2);
+  Tap(BUTTON_FN_1);
+  Up(BUTTON_FN_2);
+  Check(ui->settings_.lfo_free == 1 && ui->settings_.engine == ENGINE_BT &&
+        ui->settings_.snap == 1, "FN 2 held + FN 1 tap: LFO free run only");
+  Down(BUTTON_FN_2);
+  Tap(BUTTON_FN_1);
+  Up(BUTTON_FN_2);
+  Check(ui->settings_.lfo_free == 0, "  ... again: restart on trigger");
+  Start();
+  Down(BUTTON_FN_2);
+  Down(BUTTON_FN_1);
+  Ms(1100);
+  Up(BUTTON_FN_1);
+  Up(BUTTON_FN_2);
+  Check(ui->settings_.lfo_free == 0, "FN 2 then FN 1 held 1 s (V/oct calibration): free run unchanged");
+  Tap(BUTTON_FN_1);
+  Start();
   Down(BUTTON_METER);
   Tap(BUTTON_FN_2);
   Up(BUTTON_METER);
