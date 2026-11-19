@@ -201,6 +201,7 @@ void Voice::Process(
     int32_t shaped = Wave(p, phase_, fundamental) - fundamental;
     x += static_cast<int32_t>(
         static_cast<int64_t>(shaped) * p.normalization >> 15);
+    x = x * p.wave_gain >> 12;
     CONSTRAIN(x, -32767, 32767);
   }
 

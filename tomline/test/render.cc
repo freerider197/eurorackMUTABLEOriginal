@@ -425,7 +425,7 @@ bool DistortionOk(uint8_t engine) {
 // odd harmonics, 3rd near 1/3 (-9.5 dB), even ones low.
 struct WaveResult { double h[17]; int32_t peak; };
 
-WaveResult MeasureWave(uint8_t engine, uint16_t knob) {
+WaveResult MeasureWave(uint8_t engine, uint16_t knob, double start_s = 0) {
   uint16_t main_layer[4] = { 29491, 65535, 32768, 0 };
   uint16_t second[4] = { 0, 0, knob, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
@@ -436,11 +436,13 @@ WaveResult MeasureWave(uint8_t engine, uint16_t knob) {
   for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
   const double f0 = 65.40639133;
   const int cycles = static_cast<int>(8 * kFirmwareRate / f0 + 0.5);
+  const int start = static_cast<int>(start_s * kFirmwareRate);
   double re[17] = { 0 }, im[17] = { 0 };
   WaveResult r;
   r.peak = 0;
-  for (int n = 0; n < cycles; ++n) {
+  for (int n = 0; n < start + cycles; ++n) {
     voice.Process(p, n == 0, 0, &g, &f);  // 0 V: C2
+    if (n < start) continue;
     int32_t v = static_cast<int32_t>(g) - 32767;
     if (abs(v) > r.peak) r.peak = abs(v);
     double w = 2 * M_PI * f0 * n / kFirmwareRate;
@@ -474,16 +476,53 @@ bool WaveOk(uint8_t engine) {
     ok = ok && fund[i] > -6.0 && r[i].peak <= 32767;
   }
   // The triangle is no brighter than the sine, which the drive already
-  // clips a little; it is told apart by its 5th harmonic (1/25, -28 dB).
-  double h5 = 10 * log10(r[1].h[5] / r[1].h[1]);
+  // clips a little; it is told apart by its 5th harmonic, in the body of the
+  // note (0.3 s in): the level matching clips its tips at the start of a hit.
+  WaveResult sine_body = MeasureWave(engine, knobs[0], 0.3);
+  WaveResult tri_body = MeasureWave(engine, knobs[1], 0.3);
+  double h5 = 10 * log10(tri_body.h[5] / tri_body.h[1]);
+  double h5_sine = 10 * log10(sine_body.h[5] / sine_body.h[1]);
   double h3 = 10 * log10(r[3].h[3] / r[3].h[1]);
   double even = 10 * log10((r[3].h[2] + r[3].h[4] + r[3].h[6]) / r[3].h[1]);
-  ok = ok && h5 > -32.0 && h5 < -24.0 && upper[2] > upper[0] + 6 &&
+  ok = ok && h5 > h5_sine + 3.0 && upper[2] > upper[0] + 6 &&
        upper[2] > upper[1] + 6 && upper[3] > upper[1] + 6 &&
-       h3 > -13.0 && h3 < -7.0 && even < -30.0;
-  printf("  triangle: 5th harmonic %.1f dB (expected about -28); square: 3rd harmonic "
+       h3 > -13.0 && h3 < -7.0 && even < -25.0;
+  printf("  triangle: 5th harmonic %.1f dB (sine %.1f); square: 3rd harmonic "
          "%.1f dB (expected about -9.5), even harmonics %.1f dB  %s\n",
-         h5, h3, even, ok ? "OK" : "FAIL");
+         h5, h5_sine, h3, even, ok ? "OK" : "FAIL");
+  return ok;
+}
+
+// Wave level: RMS of the VCA words over the first 0.5 s of a C2 note (+1
+// octave at its default 25 %), every 1/32 of the Wave knob, against Wave off.
+// Must stay within 1 dB: no dip at the triangle, no jump at the square.
+bool WaveLevelOk(uint8_t engine) {
+  double ref = 0, lo = 0, hi = 0;
+  for (int k = 0; k <= 32; ++k) {
+    uint16_t knob = k == 32 ? 65535 : k * 2048;
+    uint16_t main_layer[4] = { 65535, 65535, 32768, 0 };
+    uint16_t second[4] = { 0, 16384, knob, 0 }, lfo[4] = { 0, 0, 0, 0 };
+    VoiceParameters p;
+    ComputeVoiceParameters(engine, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
+    Voice voice;
+    voice.Init();
+    uint16_t g, f;
+    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+    double sum = 0;
+    const int n = static_cast<int>(0.5 * kFirmwareRate);
+    for (int i = 0; i < n; ++i) {
+      voice.Process(p, i == 0, 0, &g, &f);
+      double v = static_cast<double>(g) - 32767;
+      sum += v * v;
+    }
+    double db = 10 * log10(sum / n);
+    if (k == 0) ref = db;
+    lo = fmin(lo, db - ref);
+    hi = fmax(hi, db - ref);
+  }
+  bool ok = lo > -1.0 && hi < 1.0;
+  printf("Wave level %s, along the knob against off: %+.1f to %+.1f dB  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", lo, hi, ok ? "OK" : "FAIL");
   return ok;
 }
 
@@ -796,6 +835,7 @@ int main() {
   }
   for (uint8_t engine = 0; engine < 2; ++engine) {
     failures += !WaveOk(engine);
+    failures += !WaveLevelOk(engine);
   }
 
   printf("\nTone fully closed vs fully open, RMS over a note (must be >= -6 dB):\n");

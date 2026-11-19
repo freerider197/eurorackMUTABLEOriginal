@@ -239,6 +239,15 @@ function amountOffset(value) {  // streams/meta_parameters.h
   }
   return { amount: 65535 - ((value - 32768) << 1), offset: (value - 32768) << 1 };
 }
+// parameters.cc: level along the Wave knob (dB), evened out by wave_gain.
+const WAVE_LEVEL_DB = [0.00, -0.25, -0.55, -0.80, -1.15, -1.45, -1.15, -0.55, -0.45,
+  -0.85, -1.90, -2.60, -1.50, -0.45, 0.45, 1.25, 2.00].map(F);
+function waveGain(wave) {
+  const pos = F(wave * F(16));
+  let i = Math.trunc(pos); if (i > 15) i = 15;
+  const level = F(WAVE_LEVEL_DB[i] + F(F(WAVE_LEVEL_DB[i + 1] - WAVE_LEVEL_DB[i]) * F(pos - i)));
+  return Math.trunc(F(fExp2(F(-level * F(0.1660964))) * F(4096)));
+}
 function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0, lfoFree = 0) {
   const bt = engine === 0;
   const decay = F(main[0] / F(65535)), tune = F(main[2] / F(65535)), distortion = F(main[3] / F(65535));
@@ -278,6 +287,7 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
     waveFold: mix32768(fold),
     foldGain: Math.trunc(F(F(F(1) + fold) * F(4096))),
     waveSquare: mix32768(F(w3 - F(2))),
+    waveGain: waveGain(wave),
     toneAmount: tone.amount,
     toneOffset: tone.offset,
     lfoInc: Math.trunc(F(lfoHz * F(F(4294967296) / K_SR_F))),
@@ -401,7 +411,7 @@ class TomlineVoice {
     x += Math.imul(octave, p.octave) >> 15;
     x = Math.floor(x * p.norm / 32768);
     x = softClip(Math.imul(x, p.drive) >> 12);
-    if (p.waveTri) x = clip15(x + Math.floor((wave(p, this.phase, fundamental) - fundamental) * p.norm / 32768));
+    if (p.waveTri) x = clip15(Math.imul(x + Math.floor((wave(p, this.phase, fundamental) - fundamental) * p.norm / 32768), p.waveGain) >> 12);
     this.rng = (Math.imul(this.rng, 1664525) + 1013904223) >>> 0;
     const white = ((this.rng >>> 16) << 16) >> 16;
     this.lp1 += Math.imul(white - this.lp1, p.k1) >> 15;

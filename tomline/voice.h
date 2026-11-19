@@ -61,6 +61,7 @@ struct VoiceParameters {
   int32_t wave_fold;            // Q15, triangle -> folded sine
   int32_t fold_gain;            // Q12, 1 to 2: how far the top folds back
   int32_t wave_square;          // Q15, folded -> square
+  int32_t wave_gain;            // Q12, evens out the level along the Wave knob
   int32_t tone_amount;          // 0..65535, as streams/meta_parameters.h
   int32_t tone_offset;          // 0..65535
   int32_t lfo_increment;        // pitch LFO phase increment per sample

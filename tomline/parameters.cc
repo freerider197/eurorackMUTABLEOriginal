@@ -117,6 +117,18 @@ void ComputeVoiceParameters(
   n.wave_fold = Mix(fold);
   n.fold_gain = static_cast<int32_t>((1.0f + fold) * 4096.0f);
   n.wave_square = Mix(w3 - 2.0f);
+  // Level along the Wave knob (17 points, dB): the triangle and the end of
+  // the fold are quieter than the sine at the same peak, the square louder.
+  // Measured with render.cc's level check, BT and LT averaged.
+  static const float kWaveLevelDb[17] = {
+    0.00f, -0.25f, -0.55f, -0.80f, -1.15f, -1.45f, -1.15f, -0.55f, -0.45f,
+    -0.85f, -1.90f, -2.60f, -1.50f, -0.45f, 0.45f, 1.25f, 2.00f
+  };
+  float pos = wave * 16.0f;
+  int32_t i = static_cast<int32_t>(pos);
+  if (i > 15) i = 15;
+  float level = kWaveLevelDb[i] + (kWaveLevelDb[i + 1] - kWaveLevelDb[i]) * (pos - i);
+  n.wave_gain = static_cast<int32_t>(Exp2(-level * 0.1660964f) * 4096.0f);
   ComputeAmountOffset(main_layer[KNOB_MOD_1], &n.tone_amount, &n.tone_offset);
 
   // Pitch LFO: 0.05 Hz .. 20 Hz (1 Hz at noon), depth up to +/-12 semitones
