@@ -17,8 +17,8 @@ enum Knob {
   KNOB_LAST
 };
 
-// main_layer: SHAPE 1 decay, MOD 1 tone, SHAPE 2 tune, MOD 2 sweep depth.
-// second_layer: noise level, +1 octave level, sweep time, glide.
+// main_layer: SHAPE 1 decay, MOD 1 tone, SHAPE 2 tune, MOD 2 soft distortion.
+// second_layer: noise level, +1 octave level, unused, glide.
 // lfo_layer: SHAPE 1 LFO speed, MOD 1 LFO depth (SHAPE 2 / MOD 2 unused).
 // lfo_free: false = the LFO restarts on each trigger, true = free running.
 // All values 0..65535 (knob fully counter-clockwise .. fully clockwise).

@@ -48,8 +48,8 @@ struct Step {
 struct Patch {
   uint8_t engine;
   uint8_t snap;
-  uint16_t main_layer[4];    // decay, tone, tune, sweep
-  uint16_t second_layer[4];  // noise, +1 oct, sweep time, glide
+  uint16_t main_layer[4];    // decay, tone, tune, distortion
+  uint16_t second_layer[4];  // noise, +1 oct, unused, glide
   uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
   uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
   bool lfo_free;             // false = LFO restarts on each trigger
@@ -177,7 +177,7 @@ double MeasurePitch(const Patch& base, int note) {
   Patch patch = base;
   patch.main_layer[0] = 65535;  // longest decay
   patch.main_layer[1] = 65535;  // filter open
-  patch.main_layer[3] = 0;      // no sweep
+  patch.main_layer[3] = 0;      // no distortion
   patch.second_layer[0] = 0;    // no noise
   patch.second_layer[1] = 0;    // no octave
   std::vector<Step> steps(1, Step{note});
@@ -241,8 +241,12 @@ double GlideErrorCents() {
 // Overflow check: the output mix can reach about 82000 with noise at 100 %
 // on a hard hit. Scaling it must clip at the top, never wrap to the bottom.
 bool MixScalingOk() {
+  // With MOD 2 at full (gain word 10923) the soft clipper gets about
+  // 218000: it must stay at full scale too.
   return Voice::ScaleMix(82000) == 32767 && Voice::ScaleMix(70000) == 32767 &&
-         Voice::ScaleMix(-82000) == -32767 && Voice::ScaleMix(1000) == 950;
+         Voice::ScaleMix(-82000) == -32767 && Voice::ScaleMix(1000) == 950 &&
+         Voice::SoftClip(82000 * 10923 >> 12) == 32767 &&
+         Voice::SoftClip(-82000 * 10923 >> 12) == -32767;
 }
 
 // Tune range: SHAPE 2 fully left = -12 st (C1 at 0 V), noon = C2, fully
@@ -348,43 +352,67 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
          Render(fast, steps, 122.0, 1).raw;
 }
 
-// Pitch envelope (MOD 2 amount, sweep time): on every hit the pitch starts on
-// the root, rises to root + amount in about 1 ms, then decays back onto the
-// root. A retrigger in the middle of the sweep starts again from the root.
-// Reads the voice's own sweep offset, sample by sample, with snap off.
-bool PitchEnvelopeOk(uint8_t engine) {
-  Patch patch = { engine, 0, { 29491, 40632, 32768, 65535 },
-                  { 9830, 16384, 22938, 0 } };
+// Soft distortion (MOD 2), read from the voice's own VCA words with snap,
+// noise and +1 octave off. One hit of C2; over the first 8 cycles, the 3rd
+// harmonic against the fundamental; in the tail (0.45 to 0.55 s, where the
+// note is about 25 dB down), the level against MOD 2 fully CCW. The tail must
+// get the small-signal gain of the drive (1 + 3 x knob^2), the start of the
+// hit must get more 3rd harmonic as the knob goes up.
+struct DistortionResult { double h3_db, tail_db; int32_t peak; };
+
+DistortionResult MeasureDistortion(uint8_t engine, uint16_t knob) {
+  uint16_t main_layer[4] = { 29491, 65535, 32768, knob };
+  uint16_t second[4] = { 0, 0, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
-  ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
-                         patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
-  double amount = p.sweep_depth / 65536.0;
+  ComputeVoiceParameters(engine, 0, main_layer, second, lfo, LFO_TRIANGLE, &p);
   Voice voice;
   voice.Init();
-  uint16_t gain, frequency;
-  const int retrigger = static_cast<int>(0.010 * kFirmwareRate);  // 10 ms
-  const int length = static_cast<int>(3.0 * kFirmwareRate);
-  double at_hit = 0, peak = 0, peak_ms = 0, at_retrigger = 0, peak2 = 0;
-  double settled = 0, before_retrigger = 0;
-  for (int n = 0; n < retrigger + length; ++n) {
-    bool trigger = n == 0 || n == retrigger;
-    voice.Process(p, trigger, 12 << 16, &gain, &frequency);
-    double st = voice.sweep_offset(p) / 65536.0;
-    if (n == 0) at_hit = st;
-    if (n < retrigger && st > peak) { peak = st; peak_ms = n * 1000.0 / kFirmwareRate; }
-    if (n == retrigger - 1) before_retrigger = st;
-    if (n == retrigger) at_retrigger = st;
-    if (n > retrigger && st > peak2) peak2 = st;
-    settled = st;
+  uint16_t g, f;
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+  const double f0 = 65.40639133;
+  const int cycles = static_cast<int>(8 * kFirmwareRate / f0 + 0.5);
+  const int tail_a = static_cast<int>(0.45 * kFirmwareRate);
+  const int tail_b = static_cast<int>(0.55 * kFirmwareRate);
+  double re1 = 0, im1 = 0, re3 = 0, im3 = 0, tail = 0;
+  DistortionResult r = { 0, 0, 0 };
+  for (int n = 0; n < tail_b; ++n) {
+    voice.Process(p, n == 0, 0, &g, &f);  // 0 V: C2
+    int32_t v = static_cast<int32_t>(g) - 32767;
+    if (abs(v) > r.peak) r.peak = abs(v);
+    if (n < cycles) {
+      double w = 2 * M_PI * f0 * n / kFirmwareRate;
+      re1 += v * cos(w); im1 += v * sin(w);
+      re3 += v * cos(3 * w); im3 += v * sin(3 * w);
+    }
+    if (n >= tail_a) tail += static_cast<double>(v) * v;
   }
-  bool ok = at_hit == 0 && fabs(peak - amount) < 1e-3 && peak_ms > 0.8 &&
-            peak_ms < 1.2 && at_retrigger == 0 && fabs(peak2 - amount) < 1e-3 &&
-            fabs(settled * 100) < 1.0;
-  printf("Pitch envelope %s (amount %.1f st): hit %+.2f st, peak %+.2f st at %.2f ms,"
-         " %.2f st before retrigger, retrigger %+.2f st, peak %+.2f st,"
-         " after 3 s %+.3f cents  %s\n",
-         engine == ENGINE_BT ? "BT" : "LT", amount, at_hit, peak, peak_ms,
-         before_retrigger, at_retrigger, peak2, settled * 100, ok ? "OK" : "FAIL");
+  r.h3_db = 10 * log10((re3 * re3 + im3 * im3) / (re1 * re1 + im1 * im1));
+  r.tail_db = 10 * log10(tail / (tail_b - tail_a));
+  return r;
+}
+
+bool DistortionOk(uint8_t engine) {
+  const uint16_t knobs[3] = { 0, 32768, 65535 };
+  const double expected_tail[3] = { 0.0, 20 * log10(1.75), 20 * log10(4.0) };
+  DistortionResult r[3];
+  for (int i = 0; i < 3; ++i) r[i] = MeasureDistortion(engine, knobs[i]);
+  uint16_t off_layer[4] = { 29491, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, off_layer, zero, zero, LFO_TRIANGLE, &p);
+  bool ok = p.distortion == 0 && r[1].h3_db > r[0].h3_db + 1 &&
+            r[2].h3_db > r[1].h3_db + 1 && r[2].h3_db > r[0].h3_db + 5;
+  printf("Distortion %s (MOD 2 off / noon / full): 3rd harmonic", engine == ENGINE_BT ? "BT" : "LT");
+  for (int i = 0; i < 3; ++i) printf(" %.1f", r[i].h3_db);
+  printf(" dB, tail");
+  for (int i = 0; i < 3; ++i) {
+    double gain = r[i].tail_db - r[0].tail_db;
+    bool tail_ok = fabs(gain - expected_tail[i]) < 0.5;
+    ok = ok && tail_ok && r[i].peak <= 32767;
+    printf(" %+.1f", gain);
+  }
+  printf(" dB (expected +0.0 %+.1f %+.1f), peak word %d %d %d  %s\n",
+         expected_tail[1], expected_tail[2], r[0].peak, r[1].peak, r[2].peak,
+         ok ? "OK" : "FAIL");
   return ok;
 }
 
@@ -629,7 +657,7 @@ int main() {
   Patch quiet = bt;
   quiet.snap = 0;
   quiet.main_layer[1] = 0;      // tone fully closed
-  quiet.main_layer[3] = 0;      // no sweep
+  quiet.main_layer[3] = 0;      // no distortion
   quiet.second_layer[0] = 0;    // no noise
   struct { const char* name; Patch patch; } hits[] = {
     { "BT default", bt }, { "LT default", lt }, { "BT tone closed, snap 0", quiet } };
@@ -686,7 +714,7 @@ int main() {
   failures += !lfo_off_ok;
 
   for (uint8_t engine = 0; engine < 2; ++engine) {
-    failures += !PitchEnvelopeOk(engine);
+    failures += !DistortionOk(engine);
   }
 
   printf("\nTone fully closed vs fully open, RMS over a note (must be >= -6 dB):\n");
@@ -711,8 +739,8 @@ int main() {
 
   printf("Knob jump click, largest one-sample jump in the 100 ms after it:\n");
   struct { int knob; const char* name; } jumps[] = {
-    { 0, "decay" }, { 1, "tone" }, { 2, "tune" }, { 3, "sweep" },
-    { 4, "noise" }, { 5, "+1 octave" }, { 6, "sweep time" }, { 7, "glide" },
+    { 0, "decay" }, { 1, "tone" }, { 2, "tune" }, { 3, "distortion" },
+    { 4, "noise" }, { 5, "+1 octave" }, { 7, "glide" },
     { 9, "LFO depth" } };
   for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
     for (auto& j : jumps) {

@@ -14,8 +14,6 @@ const int32_t kAttackStep = 86343000;
 const uint32_t kMaxIncrement = 1932735283UL;
 // 1.593: inharmonic partial of the low tom, Q16.
 const uint32_t kPartialRatio = 104399;
-// Pitch envelope attack: 32 samples = 1.03 ms linear rise from the root.
-const int32_t kSweepAttackStep = kUnity / 32;
 // Lowest filter word at C1: a cutoff of 1.25 x 32.7 Hz, a third above.
 const int32_t kToneFloor = 25277;
 // On retrigger the old note fades out over 48 samples (1.5 ms).
@@ -73,8 +71,6 @@ void Voice::Init() {
   lfo_phase_ = 0;
   amp_ = 0;
   attack_ = kUnity;
-  sweep_ = 0;
-  sweep_rising_ = false;
   snap_ = 0;
   noise_ = 0;
   partial_ = 0;
@@ -99,8 +95,6 @@ void Voice::Process(
     gliding_ = p.glide_k != 0 && amp_ > (kUnity >> 6);
     amp_ = kUnity;
     attack_ = 0;
-    sweep_ = 0;  // the pitch envelope starts from the root
-    sweep_rising_ = true;
     snap_ = kUnity;
     noise_ = kUnity;
     partial_ = kUnity;
@@ -133,18 +127,6 @@ void Voice::Process(
 
   // Envelopes.
   amp_ = Decay(amp_, p.amp_coefficient);
-  // Pitch envelope, 808/909 style: a short fixed rise from the root to
-  // root + sweep depth (none on the hit sample itself), then a decay back to
-  // exactly the root.
-  if (!sweep_rising_) {
-    sweep_ = Decay(sweep_, p.sweep_coefficient);
-  } else if (!trigger) {
-    sweep_ += kSweepAttackStep;
-    if (sweep_ >= kUnity) {
-      sweep_ = kUnity;
-      sweep_rising_ = false;
-    }
-  }
   snap_ = Decay(snap_, p.snap_coefficient);
   noise_ = Decay(noise_, p.noise_coefficient);
   partial_ = Decay(partial_, p.partial_coefficient);
@@ -166,7 +148,6 @@ void Voice::Process(
   }
 
   // Oscillators.
-  s += sweep_offset(p);
   s += static_cast<int32_t>(static_cast<int64_t>(p.snap_depth) * snap_ >> 30);
   uint32_t increment = SemitonesToIncrement(s);
   phase_ += increment;
@@ -187,11 +168,7 @@ void Voice::Process(
   x = static_cast<int32_t>(static_cast<int64_t>(x) * p.normalization >> 15);
 
   // Drive into a cubic soft clipper.
-  x = x * p.drive >> 12;
-  CONSTRAIN(x, -32767, 32767);
-  int32_t cube = ((x * x) >> 15) * x >> 15;
-  x = (3 * x - cube) >> 1;
-  CONSTRAIN(x, -32767, 32767);
+  x = SoftClip(x * p.drive >> 12);
 
   // Noise: band-passed white noise with its own short decay, plus the snap
   // click.
@@ -211,6 +188,12 @@ void Voice::Process(
   int32_t v = x * env >> 15;
   v += (p.noise_level * noise_env >> 15) * band >> 15;
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
+  // Soft distortion (MOD 2) on the whole mix, after the envelope: the loud
+  // start of a hit saturates, the quiet tail stays clean. |v| < 82000 here,
+  // so v * distortion (at most 10923) fits in 32 bits.
+  if (p.distortion) {
+    v = SoftClip(v * p.distortion >> 12);
+  }
   v = ScaleMix(v);
   if (fade_ > 0) {
     fade_ -= kFadeStep;
@@ -237,7 +220,7 @@ void Voice::Process(
   // Filter: same amount/offset scheme as the stock envelope mode.
   int32_t f = p.tone_offset + (env * p.tone_amount >> 15);
   // Never close below a cutoff just above the pitch the oscillator plays
-  // (note, sweep, snap and LFO), so Tone fully left darkens the note but
+  // (note, snap and LFO), so Tone fully left darkens the note but
   // does not silence it. With cutoff = 48 kHz * 2^(-16.6 * (1 - f / 65535))
   // the word is linear in semitones: 329 per semitone (Q16 pitch >> 4,
   // then >> 12), up from kToneFloor at C1.

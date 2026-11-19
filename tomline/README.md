@@ -50,8 +50,8 @@ blinks red.
 |---|---|---|
 | SHAPE 1 | Decay, 15 ms to 2.5 s | Noise level |
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
-| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time: how fast the pitch falls back to the note (decay time constant about 4 to 180 ms on BT, 6 to 300 ms on LT) |
-| MOD 2 | Sweep amount: 808/909-style pitch envelope. Each hit starts on the note, jumps up by this amount in 1 ms (up to 12 st on BT, 24 st on LT), then falls back to the note | Glide between notes (fully CCW = off) |
+| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Not used |
+| MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone, noise, snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button), tap | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
 | FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones). SHAPE 2 and MOD 2 do nothing here | |
@@ -102,7 +102,7 @@ so OUT 1 can't go below 0 V while a note sounds. Firmware can't remove that.
 Tomline writes the wave on top of a fixed lift: OUT 1 sits at +3.33 V and
 the wave swings around it, so nothing jumps when a note starts. (Up to 0.4,
 the lift followed each note's peak and OUT 1's average level jumped by about
-2.4 V on every hit: a click that Tone, snap and sweep could not remove.)
+2.4 V on every hit: a click that Tone and snap could not remove.)
 AC-coupled inputs remove the steady 3.33 V. A DC-coupled input passes it on,
 and a VCA after it turns every change of its gain (a sidechain duck) into a
 thump.
@@ -196,8 +196,8 @@ Check the stack after every firmware change:
 python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
 ```
 
-Last run: worst case 580 bytes (main loop 316, SysTick 100, audio interrupt
-164), 4096 reserved, 3516 to spare. The
+Last run: worst case 572 bytes (main loop 308, SysTick 100, audio interrupt
+164), 4096 reserved, 3524 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -229,23 +229,23 @@ It also checks that OUT 1 rests at 3.33 V, that its average level doesn't jump
 on a hit, and the power-up (0 V for 1 s, then a slow rise). It exits
 with an error if a check fails.
 
-Last run: OUT 1 between 0.000 V and 6.66 V, back to 3.330 V after the
+Last run: OUT 1 between 0.04 V and 6.62 V, back to 3.330 V after the
 notes. Attack jump (average over 100 ms after a hit minus before): BT -0.04 V,
-LT -0.02 V, BT with Tone closed and snap 0 +0.11 V (the moving lift of 0.4:
+LT +0.05 V, BT with Tone closed and snap 0 +0.11 V (the moving lift of 0.4:
 +2.3 to +2.4 V). Power-up: OK. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
 range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
 depth, 0.2-1.2 s, restart on trigger: triangle +1.71 st, ramp up +0.86 st; free
 running: triangle -10.30 st, ramp up -11.14 st (all within 0.03 st of the
 expected value). LFO restart on every trigger / free run: OK. LFO at zero depth:
-unchanged. Pitch envelope, BT and LT: on
-the note at the hit, peak +12 st (BT) / +24 st (LT) at 1.03 ms, back on the
-note (0.000 cents) after 3 s, and a retrigger 10 ms in starts again from the
-note. Tone closed vs open: BT -4.5 to -4.6 dB, LT -4.4 to -4.6 dB at every
+unchanged. Distortion (MOD 2 off / noon / full), 3rd harmonic at the start
+of a hit: BT -17.3 / -14.4 / -10.7 dB, LT -21.8 / -17.2 / -11.5 dB; the quiet
+tail +0.0 / +4.9 / +12.0 dB, as designed. Tone closed vs open: BT -4.5 to
+-4.7 dB, LT -4.3 to -4.6 dB at every
 voltage (-2.6 dB with the moving lift, whose bump passed the closed filter;
--25 dB before the floor). Retrigger: worst one-sample jump BT 0.35 V, LT
-0.37 V, 1.1 x a note from silence (0.32 / 0.34 V); with the moving lift
+-25 dB before the floor). Retrigger: worst one-sample jump BT 0.41 V, LT
+0.26 V, 1.1 / 1.0 x a note from silence (0.36 / 0.28 V); with the moving lift
 0.45 / 0.36 V against 0.51 / 0.42 V. Loud mix: clips
-correctly. Knob jump, end to end in the middle of a note (9 values, BT and
+correctly. Knob jump, end to end in the middle of a note (8 values, BT and
 LT): with the 40 ms glide no one-sample jump is bigger than the note's own;
 an instant jump of +1 octave would click at 0.80 V against the note's 0.10 V.
 
