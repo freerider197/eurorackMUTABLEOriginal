@@ -36,7 +36,7 @@ for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0] 
     }
     const semis = (counts * VOCT_K) >> 8;
     pitch += (semis - pitch) >> 5;
-    v.process(p, trig, pitch, false);
+    v.process(p, trig, pitch);
     const dg = v.gainWord - ref[2 * i], df = v.freqWord - ref[2 * i + 1];
     maxG = Math.max(maxG, Math.abs(dg)); sumG += dg * dg; sumRef += (ref[2 * i] - 16384) ** 2;
     maxF = Math.max(maxF, Math.abs(df));

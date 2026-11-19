@@ -59,7 +59,7 @@ struct Result {
 };
 
 Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
-              int repeats, bool external) {
+              int repeats) {
   VoiceParameters p;
   ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
                          patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
@@ -96,7 +96,7 @@ Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
     if (gate && n > next_step - samples_per_step / 2) gate = false;
     int32_t semitones = counts * kVoctK >> 8;
     pitch += (semitones - pitch) >> 5;
-    voice.Process(p, trigger, pitch, external, &gain, &frequency);
+    voice.Process(p, trigger, pitch, &gain, &frequency);
     pwm_filtered += ((65535 - frequency) - pwm_filtered) >> 4;
     int32_t pwm_word = pwm_filtered >> 6;  // 10-bit PWM
     ++n;
@@ -106,8 +106,7 @@ Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
       tick -= 1.0;
       double dac = gain / 32767.0;
       dac = dac2.Process(dac1.Process(dac, 15915.0, kHostRate), 15915.0, kHostRate);
-      double vin = external ? 5.0 * sin(2 * M_PI * 65.4 * n / kFirmwareRate) : 3.33;
-      double v = vin * dac;
+      double v = 3.33 * dac;  // IN 1 unpatched: the VCA scales +3.33 V
       double pwm_v = pwm_rc.Process(3.3 * pwm_word / 1023.0, 195.0, kHostRate);
       double fc = 48000.0 * pow(2.0, -16.6 * pwm_v / 3.3);
       if (fc > 0.45 * kHostRate) fc = 0.45 * kHostRate;
@@ -159,7 +158,7 @@ double MeasurePitch(const Patch& base, int note) {
   patch.second_layer[0] = 0;    // no noise
   patch.second_layer[1] = 0;    // no octave
   std::vector<Step> steps(1, Step{note});
-  Result r = Render(patch, steps, 30.0, 1, false);
+  Result r = Render(patch, steps, 30.0, 1);
   // Zero crossings of the AC part between 0.2 s and 1.2 s.
   size_t a = static_cast<size_t>(0.2 * kHostRate), b = static_cast<size_t>(1.2 * kHostRate);
   double mean = 0;
@@ -192,7 +191,7 @@ double MeasurePitch(const Patch& base, int note) {
 double GlideErrorCents() {
   Patch patch = { ENGINE_BT, 0, { 65535, 65535, 32768, 0 }, { 0, 0, 0, 32768 } };
   std::vector<Step> steps = { {0}, {12} };
-  Result r = Render(patch, steps, 10.0, 1, false);  // 1.5 s per step
+  Result r = Render(patch, steps, 10.0, 1);  // 1.5 s per step
   // Zero crossings between 1.5 s and 2.5 s into the second note.
   double start = 1.5 + 1.5, end = 1.5 + 2.5;
   size_t a = static_cast<size_t>(start * kHostRate), b = static_cast<size_t>(end * kHostRate);
@@ -290,8 +289,8 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
   Patch fast = slow;
   fast.lfo_layer[0] = 65535;
   fast.lfo_shape = LFO_RAMP_UP;
-  return Render(slow, steps, 122.0, 1, false).raw ==
-         Render(fast, steps, 122.0, 1, false).raw;
+  return Render(slow, steps, 122.0, 1).raw ==
+         Render(fast, steps, 122.0, 1).raw;
 }
 
 int main() {
@@ -314,14 +313,11 @@ int main() {
     { "build/tomline_bt_oct.wav", bt_oct },
   };
   for (auto& c : cases) {
-    Result r = Render(c.patch, roller, 122.0, 4, false);
+    Result r = Render(c.patch, roller, 122.0, 4);
     WriteWav(c.name, r.raw, true);
     printf("%-28s OUT 1 min %.3f V  max %.2f V  after the tail %.4f V\n",
            c.name, r.min_v, r.max_v, r.rest_v);
   }
-  Result ext = Render(bt, roller, 122.0, 1, true);
-  printf("%-28s OUT 1 min %.2f V  max %.2f V (external VCO into IN 1)\n",
-         "external mode", ext.min_v, ext.max_v);
 
   printf("\nPitch at the default V/oct scale (0 V = C2), BT, tune centered:\n");
   int notes[] = { 0, 12, 24, 36 };

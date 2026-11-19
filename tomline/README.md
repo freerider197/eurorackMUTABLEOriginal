@@ -23,7 +23,7 @@ The sound comes from a bit-exact JavaScript port of `voice.cc` and
 filter words as the firmware, sample for sample (`test/compare_browser.js`
 checks this). The analog part after the DAC is modeled from the schematic,
 so levels and cutoff frequencies are estimates. The panel shows the
-firmware's LEDs and setup warnings, and IN 1 can take a virtual VCO.
+firmware's LEDs and setup warnings.
 
 When `voice.cc` or `parameters.cc` changes, update the block between
 `BEGIN FIRMWARE PORT` and `END FIRMWARE PORT` in `browser/tomline.html`, run
@@ -36,7 +36,7 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 | EXCITE 1 | Trigger (on above about 1.7 V, off below 0.85 V, stock thresholds) |
 | EXCITE 2 | V/oct. 0 V = C2 (65.4 Hz) with SHAPE 2 (Tune) at noon |
 | OUT 1 | The sound, 0 V to about +6.7 V (see "Offset") |
-| IN 1 | Leave empty. If you patch a VCO here, Tomline shapes the VCO instead |
+| IN 1 | Not used, leave empty |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
 | LEVEL MOD 1 (big magenta knob) | **Fully counter-clockwise** |
 | LEVEL 1, IN 2, LEVEL 2, OUT 2, LEVEL MOD 2, trimmer 2 | Not used |
@@ -77,7 +77,7 @@ values and V/oct calibration carry over, and the LFO starts off.
 |---|---|
 | Left column, top | BT engine |
 | Left column, 2nd | LT engine |
-| Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, or trimmer 1 not at LIN). Steady orange: IN 1 is patched, external mode |
+| Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, or trimmer 1 not at LIN) |
 | Left column, bottom | Flashes green on each trigger |
 | Right column | Snap amount, from the bottom (1 LED = snap 0, 4 LEDs = snap 3) |
 | Engine and snap LEDs amber instead of green | Second layer active |

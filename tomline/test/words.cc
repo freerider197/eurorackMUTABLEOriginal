@@ -54,7 +54,7 @@ int main() {
       int32_t semitones = counts * kVoctK >> 8;
       pitch += (semitones - pitch) >> 5;
       uint16_t gain, frequency;
-      voice.Process(p, trigger, pitch, false, &gain, &frequency);
+      voice.Process(p, trigger, pitch, &gain, &frequency);
       out.push_back(gain);
       out.push_back(frequency);
     }

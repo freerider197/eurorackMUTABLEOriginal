@@ -112,8 +112,6 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   settings_dirty_ = false;
   settings_change_time_ = 0;
   pitch_ = 0;
-  in_deviation_ = 0;
-  external_ = false;
   voct_accumulator_ = 0;
   voct_samples_ = 0;
   trigger_flash_ = 0;
@@ -521,10 +519,8 @@ void Ui::PaintLeds() {
   uint8_t red = layer_ ? 255 : 0;
   uint8_t green = layer_ == 1 ? 120 : (layer_ == 2 ? 0 : 255);
   leds_.set(settings_.engine, red, green);
-  if (warning_ || curve_warning_) {
-    if (blink) leds_.set(2, 255, 0);
-  } else if (external_) {
-    leds_.set(2, 255, 90);
+  if ((warning_ || curve_warning_) && blink) {
+    leds_.set(2, 255, 0);
   }
   if (trigger_flash_) {
     leds_.set(3, 0, 255);

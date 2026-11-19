@@ -98,20 +98,6 @@ class Ui {
     return pitch_;
   }
 
-  inline bool External(int16_t audio_1) {
-    // Unpatched, IN 1 sits at +3.33 V (R59 100k from +10 V, loaded by R42
-    // and R12) = about 13230 counts.
-    int32_t deviation = audio_1 - 13230;
-    if (deviation < 0) deviation = -deviation;
-    in_deviation_ += (deviation - in_deviation_) >> 10;
-    if (external_ && in_deviation_ < 1500) {
-      external_ = false;
-    } else if (!external_ && in_deviation_ > 2500) {
-      external_ = true;
-    }
-    return external_;
-  }
-
   inline void OnSample(bool trigger, uint16_t gain, uint16_t sense,
                        uint32_t lfo_phase) {
     lfo_phase_ = lfo_phase;
@@ -177,8 +163,6 @@ class Ui {
 
   // Shared with the audio interrupt.
   volatile int32_t pitch_;
-  volatile int32_t in_deviation_;
-  volatile bool external_;
   volatile int32_t voct_accumulator_;
   volatile int32_t voct_samples_;
   volatile uint16_t trigger_flash_;
