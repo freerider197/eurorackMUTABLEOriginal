@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "tomline/parameters.h"
+#include "tomline/pickup.h"
 #include "tomline/tables.h"
 #include "tomline/voice.h"
 
@@ -58,8 +59,13 @@ struct Result {
   double min_v, max_v, rest_v;
 };
 
-Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
-              int repeats) {
+// Turns knobs while the patch plays: called before each firmware sample,
+// returns true when it changed the patch.
+typedef bool (*Control)(int64_t n, Patch* patch);
+
+Result Render(const Patch& start, const std::vector<Step>& steps, double bpm,
+              int repeats, Control control = NULL) {
+  Patch patch = start;
   VoiceParameters p;
   ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
                          patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
@@ -94,6 +100,10 @@ Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
       }
     }
     if (gate && n > next_step - samples_per_step / 2) gate = false;
+    if (control && control(n, &patch)) {
+      ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
+                             patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
+    }
     int32_t semitones = counts * kVoctK >> 8;
     pitch += (semitones - pitch) >> 5;
     voice.Process(p, trigger, pitch, &gain, &frequency);
@@ -429,6 +439,74 @@ bool RetriggerOk(uint8_t engine, uint16_t decay) {
   return ok;
 }
 
+// Knob jump click. When a knob takes over a value (tomline/pickup.h), the
+// value goes from the stored one to the knob's at most kPickupSlew per ms
+// (main loop rate). A long note plays; 300 ms in, one value goes from one
+// end to the other, worst case: the knob is already at the far end. Measures
+// the largest one-sample jump in the 100 ms after it against the same note
+// played at the start value and at the end value (the sound's own steps).
+uint16_t* JumpValue(Patch* patch);
+int jump_knob = 0;
+bool jump_glide = false;
+int32_t jump_from = 0, jump_to = 0;
+Pickup jump_pickup;
+const int64_t kJumpAt = static_cast<int64_t>(0.3 * kFirmwareRate);
+
+uint16_t* JumpValue(Patch* patch) {
+  if (jump_knob < 4) return &patch->main_layer[jump_knob];
+  if (jump_knob < 8) return &patch->second_layer[jump_knob - 4];
+  return &patch->lfo_layer[jump_knob - 8];
+}
+
+bool JumpControl(int64_t n, Patch* patch) {
+  uint16_t* value = JumpValue(patch);
+  if (n == kJumpAt) {
+    if (!jump_glide) {
+      *value = jump_to;
+      return true;
+    }
+    jump_pickup.Hold(jump_from, *value);
+  }
+  // Main loop: once per ms.
+  if (jump_glide && n >= kJumpAt && n % 31 == 0) {
+    return jump_pickup.Follow(jump_to, 1, value);
+  }
+  return false;
+}
+
+double JumpLargest(const Patch& patch, Control control) {
+  std::vector<Step> note(1, Step{12});
+  Result r = Render(patch, note, 30.0, 1);
+  if (control) r = Render(patch, note, 30.0, 1, control);
+  std::vector<double> y = HighPass(r.raw);
+  size_t start = static_cast<size_t>(kJumpAt * kHostRate / kFirmwareRate);
+  return LargestJump(y, start, static_cast<size_t>(0.1 * kHostRate));
+}
+
+bool KnobJumpOk(uint8_t engine, int knob, const char* name, int32_t from, int32_t to) {
+  Patch patch = { engine, 1, { 65535, 32768, 32768, 19661 },
+                  { 9830, 16384, 22938, 0 }, { 49152, 0, 0, 0 } };
+  jump_knob = knob;
+  jump_from = from;
+  jump_to = to;
+  *JumpValue(&patch) = from;
+  double before = JumpLargest(patch, NULL);
+  Patch end = patch;
+  *JumpValue(&end) = to;
+  double after = JumpLargest(end, NULL);
+  double reference = fmax(before, after);
+  jump_glide = false;
+  double instant = JumpLargest(patch, JumpControl);
+  jump_glide = true;
+  double glide = JumpLargest(patch, JumpControl);
+  bool ok = glide <= reference * 1.1;
+  printf("  %s %-10s %3d -> %3d %%: sound alone %.3f V, instant jump %.3f V, "
+         "glide %.3f V  %s\n", engine == ENGINE_BT ? "BT" : "LT", name,
+         (from * 100 + 32767) / 65535, (to * 100 + 32767) / 65535, reference,
+         instant, glide, ok ? "OK" : "FAIL");
+  return ok;
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -515,6 +593,18 @@ int main() {
   for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
     for (uint16_t decay : decays) {
       failures += !RetriggerOk(engine, decay);
+    }
+  }
+
+  printf("Knob jump click, largest one-sample jump in the 100 ms after it:\n");
+  struct { int knob; const char* name; } jumps[] = {
+    { 0, "decay" }, { 1, "tone" }, { 2, "tune" }, { 3, "sweep" },
+    { 4, "noise" }, { 5, "+1 octave" }, { 6, "sweep time" }, { 7, "glide" },
+    { 9, "LFO depth" } };
+  for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
+    for (auto& j : jumps) {
+      failures += !KnobJumpOk(engine, j.knob, j.name, 0, 65535);
+      failures += !KnobJumpOk(engine, j.knob, j.name, 65535, 0);
     }
   }
 
