@@ -34,7 +34,7 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 | Jack / control | Setting |
 |---|---|
 | EXCITE 1 | Trigger (on above about 1.7 V, off below 0.85 V, stock thresholds) |
-| EXCITE 2 | V/oct. 0 V = C1 (32.7 Hz) |
+| EXCITE 2 | V/oct. 0 V = C2 (65.4 Hz) with SHAPE 2 (Tune) at noon |
 | OUT 1 | The sound, 0 V to about +6.7 V (see "Offset") |
 | IN 1 | Leave empty. If you patch a VCO here, Tomline shapes the VCO instead |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
@@ -50,7 +50,7 @@ blinks red.
 |---|---|---|
 | SHAPE 1 | Decay, 15 ms to 2.5 s | Noise level |
 | MOD 1 | Tone: filter envelope. Closed at 7 o'clock, most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
-| SHAPE 2 | Tune, ±24 semitones | Sweep time |
+| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time |
 | MOD 2 | Sweep depth: pitch drop on each hit (up to 12 st on BT, 24 st on LT) | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button) | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
@@ -184,8 +184,8 @@ mix (noise at 100 %, hard hit) clips instead of wrapping around. It exits
 with an error if a check fails.
 
 Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
-notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C1, C2, C3, C4. Glide
-C2 to C3: -0.06 cents. Loud mix: clips correctly.
+notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
+range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. Loud mix: clips correctly.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for four
 patches (BT, LT, glide, everything at maximum), and

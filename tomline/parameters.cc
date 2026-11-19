@@ -76,7 +76,8 @@ void ComputeVoiceParameters(
   n.glide_k = glide < 0.01f
       ? 0
       : OneMinusExpQ31(0.004f + glide * glide * 0.5f);
-  n.tune = Q16((tune - 0.5f) * 48.0f);
+  // +/-12 semitones; at noon, 0 V on EXCITE 2 plays C2.
+  n.tune = Q16(12.0f + (tune - 0.5f) * 24.0f);
   n.sweep_depth = Q16(sweep * (bt ? 12.0f : 24.0f));
   n.snap_depth = Q16(bt ? 30.0f : 15.0f);
   n.octave_level = Q15(octave);

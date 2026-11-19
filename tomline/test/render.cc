@@ -41,7 +41,7 @@ struct OnePole {
 };
 
 struct Step {
-  int note;  // semitones above C1, -1 = rest
+  int note;  // V/oct in semitones (0 = 0 V), -1 = rest
 };
 
 struct Patch {
@@ -185,11 +185,11 @@ double MeasurePitch(const Patch& base, int note) {
   return crossings > 1 ? (crossings - 1) / (last - first) : 0.0;
 }
 
-// Glide check: C2 then C3 with glide at 50 % (time constant 129 ms). After
-// 1.5 s the second note must sit on C3.
+// Glide check: C2 then C3 (0 V, 1 V, tune at noon) with glide at 50 % (time
+// constant 129 ms). After 1.5 s the second note must sit on C3.
 double GlideErrorCents() {
   Patch patch = { ENGINE_BT, 0, { 65535, 65535, 32768, 0 }, { 0, 0, 0, 32768 } };
-  std::vector<Step> steps = { {12}, {24} };
+  std::vector<Step> steps = { {0}, {12} };
   Result r = Render(patch, steps, 10.0, 1, false);  // 1.5 s per step
   // Zero crossings between 1.5 s and 2.5 s into the second note.
   double start = 1.5 + 1.5, end = 1.5 + 2.5;
@@ -221,6 +221,23 @@ bool MixScalingOk() {
          Voice::ScaleMix(-82000) == -32767 && Voice::ScaleMix(1000) == 950;
 }
 
+// Tune range: SHAPE 2 fully left = -12 st (C1 at 0 V), noon = C2, fully
+// right = +12 st (C3). Returns the worst error in semitones.
+double TuneRangeError() {
+  const uint16_t knob[3] = { 0, 32768, 65535 };
+  const double expected[3] = { 0.0, 12.0, 24.0 };  // semitones above C1
+  double worst = 0;
+  for (int i = 0; i < 3; ++i) {
+    Patch patch = { ENGINE_BT, 1, { 29491, 40632, knob[i], 19661 },
+                    { 9830, 16384, 22938, 0 } };
+    VoiceParameters p;
+    ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
+                           patch.second_layer, &p);
+    worst = fmax(worst, fabs(p.tune / 65536.0 - expected[i]));
+  }
+  return worst;
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -230,7 +247,7 @@ int main() {
   Patch bt_oct = bt;
   bt_oct.second_layer[1] = 39321;  // +1 octave at 60 %
 
-  // "Roller" pattern from the browser page, notes above C1.
+  // "Roller" pattern from the browser page (V/oct in semitones).
   std::vector<Step> roller = {
     {12}, {-1}, {12}, {24}, {-1}, {15}, {12}, {10},
     {12}, {-1}, {12}, {19}, {17}, {15}, {-1}, {10}};
@@ -250,18 +267,24 @@ int main() {
   printf("%-28s OUT 1 min %.2f V  max %.2f V (external VCO into IN 1)\n",
          "external mode", ext.min_v, ext.max_v);
 
-  printf("\nPitch at the default V/oct scale (0 V = C1), BT, tune centered:\n");
+  printf("\nPitch at the default V/oct scale (0 V = C2), BT, tune centered:\n");
   int notes[] = { 0, 12, 24, 36 };
   for (int note : notes) {
-    double expected = 32.70319566 * pow(2.0, note / 12.0);
+    double expected = 65.40639133 * pow(2.0, note / 12.0);
     double measured = MeasurePitch(bt, note);
     printf("  %d V  expected %7.2f Hz  measured %7.2f Hz  error %+.1f cents\n",
            note / 12, expected, measured, 1200.0 * log2(measured / expected));
   }
 
+  double tune_error = TuneRangeError();
+  bool tune_ok = tune_error < 0.01;
+  printf("\nTune: fully left C1, noon C2, fully right C3: worst error %.4f st  %s\n",
+         tune_error, tune_ok ? "OK" : "FAIL");
+  failures += !tune_ok;
+
   double glide = GlideErrorCents();
   bool glide_ok = fabs(glide) < 0.5;
-  printf("\nGlide C2 -> C3, 1.5 s later: %+.2f cents  %s\n", glide,
+  printf("Glide C2 -> C3, 1.5 s later: %+.2f cents  %s\n", glide,
          glide_ok ? "OK" : "FAIL (glide stops short of the note)");
   failures += !glide_ok;
 
