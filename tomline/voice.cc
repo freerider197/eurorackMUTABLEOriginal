@@ -18,6 +18,8 @@ const uint32_t kPartialRatio = 104399;
 const int32_t kSweepAttackStep = kUnity / 32;
 // Lowest filter word at C1: a cutoff of 1.25 x 32.7 Hz, a third above.
 const int32_t kToneFloor = 25277;
+// On retrigger the old note fades out over 48 samples (1.5 ms).
+const int32_t kFadeStep = 683;
 
 static inline int32_t Sine(uint32_t phase) {
   uint32_t index = phase >> 22;
@@ -70,6 +72,9 @@ void Voice::Init() {
   noise_ = 0;
   partial_ = 0;
   bias_ = 0;
+  last_mix_ = 0;
+  tail_ = 0;
+  fade_ = 0;
   rng_state_ = 0x21f3a5c1;
   noise_lp1_ = 0;
   noise_lp2_ = 0;
@@ -93,6 +98,10 @@ void Voice::Process(
     partial_ = kUnity;
     phase_ = 0;
     partial_phase_ = 0;
+    // The new note starts at once; the old one fades out instead of
+    // dropping to zero in one sample (a click).
+    tail_ = last_mix_;
+    fade_ = 32767;
   }
 
   // Pitch.
@@ -181,13 +190,26 @@ void Voice::Process(
   noise_lp2_ += (noise_lp1_ - noise_lp2_) * p.noise_k2 >> 15;
   int32_t band = (noise_lp1_ - noise_lp2_) << 1;
   CLIP(band);
-  int32_t noise_env = noise_ >> 15;
-  int32_t snap_env = snap_ >> 15;
+  // Noise and snap share the tone's 0.4 ms attack, so a retrigger through an
+  // already open Tone filter does not click.
+  int32_t noise_env = static_cast<int32_t>(
+      static_cast<int64_t>(noise_) * attack_ >> 45);
+  int32_t snap_env = static_cast<int32_t>(
+      static_cast<int64_t>(snap_) * attack_ >> 45);
 
   int32_t v = x * env >> 15;
   v += (p.noise_level * noise_env >> 15) * band >> 15;
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
   v = ScaleMix(v);
+  if (fade_ > 0) {
+    fade_ -= kFadeStep;
+    if (fade_ < 0) {
+      fade_ = 0;
+    }
+    v += tail_ * fade_ >> 15;
+    CLIP(v);
+  }
+  last_mix_ = v;
 
   // Lift the wave by its own peak level so the VCA word never goes below
   // zero. The lift decays with the amplitude envelope, so OUT 1 goes back to

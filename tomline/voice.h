@@ -122,6 +122,9 @@ class Voice {
   int32_t noise_;     // Q30
   int32_t partial_;   // Q30
   int32_t bias_;      // Q15
+  int32_t last_mix_;  // Q15, previous output sample (before the lift)
+  int32_t tail_;      // Q15, old note's last sample, faded out on retrigger
+  int32_t fade_;      // Q15, tail level, 0 = no tail
 
   uint32_t rng_state_;
   int32_t noise_lp1_;

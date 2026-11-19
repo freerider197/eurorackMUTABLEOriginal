@@ -358,6 +358,77 @@ double ToneClosedDb(Patch patch, int note) {
   return 20.0 * log10(closed / open);
 }
 
+
+// Retrigger click. A line of 8 notes, 125 ms apart, with SHAPE 1 (decay) at
+// 50 / 75 / 100 %, so each note is still loud when the next one starts.
+// OUT 1 goes through a 3 Hz high-pass, like an audio input. Measures the
+// largest one-sample jump in the 1 ms after each trigger: the first note
+// (from silence) against the worst retrigger. Also checks that from 5 ms on,
+// each note's peak-to-peak swing is within 5 % of the same note played alone (no stacking).
+std::vector<double> HighPass(const std::vector<float>& volts) {
+  std::vector<double> out(volts.size());
+  double x1 = 0, y1 = 0, r = 1.0 - 2 * M_PI * 3.0 / kHostRate;
+  for (size_t i = 0; i < volts.size(); ++i) {
+    double y = volts[i] - x1 + r * y1;
+    x1 = volts[i]; y1 = y;
+    out[i] = y;
+  }
+  return out;
+}
+
+double LargestJump(const std::vector<double>& y, size_t start, size_t length) {
+  double worst = 0;
+  for (size_t i = start + 1; i < start + length && i < y.size(); ++i) {
+    worst = fmax(worst, fabs(y[i] - y[i - 1]));
+  }
+  return worst;
+}
+
+double PeakToPeak(const std::vector<float>& v, size_t start, size_t length) {
+  double lo = 1e9, hi = -1e9;
+  for (size_t i = start; i < start + length && i < v.size(); ++i) {
+    lo = fmin(lo, v[i]);
+    hi = fmax(hi, v[i]);
+  }
+  return hi - lo;
+}
+
+bool RetriggerOk(uint8_t engine, uint16_t decay) {
+  Patch patch = { engine, 1, { decay, 32768, 32768, 19660 },
+                  { 9830, 16384, 22938, 0 } };
+  std::vector<Step> line = { {0}, {0}, {12}, {0}, {7}, {0}, {10}, {12} };
+  const double bpm = 120.0;  // 125 ms per step
+  Result r = Render(patch, line, bpm, 1);
+  std::vector<double> y = HighPass(r.raw);
+  double samples_per_step = kFirmwareRate * 60.0 / bpm / 4.0;
+  size_t ms = static_cast<size_t>(kHostRate / 1000.0);
+  double from_silence = 0, worst = 0, worst_level = 0;
+  bool level_ok = true;
+  for (size_t k = 0; k < line.size(); ++k) {
+    // Host sample of the first output of the trigger sample.
+    int64_t n = static_cast<int64_t>(ceil(k * samples_per_step));
+    size_t start = static_cast<size_t>(floor(n * kHostRate / kFirmwareRate));
+    double jump = LargestJump(y, start, ms);
+    if (k == 0) from_silence = jump; else worst = fmax(worst, jump);
+    // Same note alone.
+    std::vector<Step> alone(1, line[k]);
+    Result ra = Render(patch, alone, bpm, 1);
+    size_t length = static_cast<size_t>(samples_per_step * kHostRate / kFirmwareRate) - 6 * ms;
+    double a = PeakToPeak(ra.raw, 5 * ms, length);
+    double b = PeakToPeak(r.raw, start + 5 * ms, length);
+    double level = fabs(b / a - 1.0);
+    worst_level = fmax(worst_level, level);
+    level_ok = level_ok && level < 0.05;
+  }
+  bool ok = worst <= from_silence && level_ok;
+  printf("  %s decay %3d %%: from silence %.3f V, worst retrigger %.3f V (x%.1f), "
+         "level after 5 ms within %.1f %%  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", (decay * 100 + 32767) / 65535,
+         from_silence, worst, worst / from_silence, worst_level * 100,
+         ok ? "OK" : "FAIL");
+  return ok;
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -437,6 +508,14 @@ int main() {
       failures += !ok;
     }
     printf("\n");
+  }
+
+  printf("Retrigger click, largest one-sample jump in the 1 ms after a note:\n");
+  const uint16_t decays[3] = { 32768, 49152, 65535 };
+  for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
+    for (uint16_t decay : decays) {
+      failures += !RetriggerOk(engine, decay);
+    }
   }
 
   bool mix_ok = MixScalingOk();

@@ -319,7 +319,7 @@ class TomlineVoice {
   constructor() {
     this.semitones = 0; this.gliding = false; this.phase = 0; this.pphase = 0; this.lfoPhase = 0;
     this.amp = 0; this.attack = K_UNITY; this.sweep = 0; this.sweepRising = false; this.snap = 0; this.noise = 0; this.partial = 0;
-    this.bias = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
+    this.bias = 0; this.lastMix = 0; this.tail = 0; this.fade = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
   // pitch: semitones above C1, Q16 (as Ui::Pitch). Outputs gainWord (0..65535)
@@ -329,6 +329,7 @@ class TomlineVoice {
       this.gliding = p.glideK !== 0 && this.amp > (K_UNITY >> 6);
       this.amp = K_UNITY; this.attack = 0; this.sweep = 0; this.sweepRising = true; this.snap = K_UNITY;
       this.noise = K_UNITY; this.partial = K_UNITY; this.phase = 0; this.pphase = 0;
+      this.tail = this.lastMix; this.fade = 32767;  // old note fades out over 1.5 ms
     }
     const target = (pitch + p.tune) | 0;
     if (this.gliding) {
@@ -380,11 +381,16 @@ class TomlineVoice {
     this.lp1 += Math.imul(white - this.lp1, p.k1) >> 15;
     this.lp2 += Math.imul(this.lp1 - this.lp2, p.k2) >> 15;
     const band = clip15((this.lp1 - this.lp2) << 1);
-    const noiseEnv = this.noise >> 15, snapEnv = this.snap >> 15;
+    const noiseEnv = mul45(this.noise, this.attack), snapEnv = mul45(this.snap, this.attack);
     let v = Math.imul(x, env) >> 15;
     v += Math.imul(Math.imul(p.noiseLevel, noiseEnv) >> 15, band) >> 15;
     v += Math.imul(Math.imul(p.snapNoise, snapEnv) >> 15, white) >> 15;
     v = clip15(Math.floor(v * 31130 / 32768));
+    if (this.fade > 0) {
+      this.fade -= 683; if (this.fade < 0) this.fade = 0;
+      v = clip15(v + (Math.imul(this.tail, this.fade) >> 15));
+    }
+    this.lastMix = v;
     const magnitude = v < 0 ? -v : v, decayed = mul31(this.bias, p.amp);
     this.bias = magnitude > decayed ? magnitude : decayed;
     let g = this.bias + v;
