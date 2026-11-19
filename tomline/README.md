@@ -49,7 +49,7 @@ blinks red.
 | Control | Job | Hold METER (or tap METER to latch) |
 |---|---|---|
 | SHAPE 1 | Decay, 15 ms to 2.5 s | Noise level |
-| MOD 1 | Tone: filter envelope. Closed at 7 o'clock, most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
+| MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
 | SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time |
 | MOD 2 | Sweep depth: pitch drop on each hit (up to 12 st on BT, 24 st on LT) | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
@@ -203,7 +203,8 @@ g++ -O2 -I. -o build/tomline_render tomline/test/render.cc tomline/voice.cc toml
 It also checks the tune range, that glide lands on the target note, the LFO
 knob maths and wave shapes, the pitch of both LFO waves at full depth, that the
 LFO at zero depth leaves the sound unchanged, and that a very loud mix (noise
-at 100 %, hard hit) clips instead of wrapping around. It exits
+at 100 %, hard hit) clips instead of wrapping around, and that Tone fully
+closed keeps each note within 6 dB of Tone fully open (BT and LT, 0 to 4 V). It exits
 with an error if a check fails.
 
 Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
@@ -211,6 +212,8 @@ notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
 range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
 depth, 0.2-1.2 s: triangle -10.30 st, ramp up -11.14 st (0.02 st from the
 expected value). LFO at zero depth: unchanged. Loud mix: clips correctly.
+Tone closed vs open: BT -2.6 dB, LT -2.3 to -2.4 dB at every voltage (was
+-25 dB before the floor).
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for six
 patches (BT, LT, glide, everything at maximum, LFO triangle, LFO ramp up), and

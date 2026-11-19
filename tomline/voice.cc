@@ -14,6 +14,8 @@ const int32_t kAttackStep = 86343000;
 const uint32_t kMaxIncrement = 1932735283UL;
 // 1.593: inharmonic partial of the low tom, Q16.
 const uint32_t kPartialRatio = 104399;
+// Lowest filter word at C1: a cutoff of 1.25 x 32.7 Hz, a third above.
+const int32_t kToneFloor = 25277;
 
 static inline int32_t Sine(uint32_t phase) {
   uint32_t index = phase >> 22;
@@ -184,6 +186,15 @@ void Voice::Process(
 
   // Filter: same amount/offset scheme as the stock envelope mode.
   int32_t f = p.tone_offset + (env * p.tone_amount >> 15);
+  // Never close below a cutoff just above the pitch the oscillator plays
+  // (note, sweep, snap and LFO), so Tone fully left darkens the note but
+  // does not silence it. With cutoff = 48 kHz * 2^(-16.6 * (1 - f / 65535))
+  // the word is linear in semitones: 329 per semitone (Q16 pitch >> 4,
+  // then >> 12), up from kToneFloor at C1.
+  int32_t lowest = kToneFloor + ((s >> 4) * 329 >> 12);
+  if (f < lowest) {
+    f = lowest;
+  }
   CONSTRAIN(f, 0, 65535);
   *frequency = f;
 }
