@@ -72,12 +72,10 @@ class Voice {
 
   // trigger: rising edge seen on EXCITE 1 this sample.
   // pitch: target pitch in semitones above C1, Q16 (V/oct + tune).
-  // external: IN 1 is patched; shape the external signal instead.
   void Process(
       const VoiceParameters& p,
       bool trigger,
       int32_t pitch,
-      bool external,
       uint16_t* gain,
       uint16_t* frequency);
 

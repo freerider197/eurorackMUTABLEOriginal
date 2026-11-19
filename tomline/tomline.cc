@@ -4,7 +4,7 @@
 //
 // Patch: trigger into EXCITE 1, V/oct into EXCITE 2, sound from OUT 1.
 // Set channel 1's response trimmer fully clockwise (LIN) and LEVEL MOD 1
-// fully counter-clockwise. Leave IN 1 unpatched.
+// fully counter-clockwise. IN 1 is not used.
 
 #include "stmlib/system/system_clock.h"
 
@@ -63,11 +63,10 @@ void Process(uint16_t* cv) {
   }
 
   int32_t pitch = ui.Pitch(cv_scaler.excite_sample(1));
-  bool external = ui.External(cv_scaler.audio_sample(0));
 
   uint16_t gain = 0;
   uint16_t frequency = 0;
-  voice.Process(ui.parameters(), trigger, pitch, external, &gain, &frequency);
+  voice.Process(ui.parameters(), trigger, pitch, &gain, &frequency);
 
   if (ui.calibrating()) {
     // Stock calibration: VCAs closed, filters open.
