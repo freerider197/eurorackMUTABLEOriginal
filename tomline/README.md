@@ -35,7 +35,7 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 |---|---|
 | EXCITE 1 | Trigger (on above about 1.7 V, off below 0.85 V, stock thresholds) |
 | EXCITE 2 | V/oct. 0 V = C2 (65.4 Hz) with SHAPE 2 (Tune) at noon |
-| OUT 1 | The sound, 0 V to about +6.7 V (see "Offset") |
+| OUT 1 | The sound, swinging around +3.33 V (0 V to about +6.7 V, see "Offset"). Use an AC-coupled input (Erica Black Quad VCA2: IN 1–3, not IN 4) |
 | IN 1 | Not used, leave empty |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
 | LEVEL MOD 1 (big magenta knob) | **Fully counter-clockwise** |
@@ -77,7 +77,7 @@ values and V/oct calibration carry over, and the LFO starts off.
 |---|---|
 | Left column, top | BT engine |
 | Left column, 2nd | LT engine |
-| Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, or trimmer 1 not at LIN) |
+| Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, checked in the first second after power-up, or trimmer 1 not at LIN) |
 | Left column, bottom | Flashes green on each trigger |
 | Right column | Snap amount, from the bottom (1 LED = snap 0, 4 LEDs = snap 3) |
 | Engine and snap LEDs amber instead of green | Second layer active |
@@ -87,9 +87,15 @@ values and V/oct calibration carry over, and the LFO starts off.
 
 The VCA can only scale a fixed positive source (+3.33 V when IN 1 is empty),
 so OUT 1 can't go below 0 V while a note sounds. Firmware can't remove that.
-Tomline lifts the wave by its own peak level, so OUT 1 rests at 0 V between
-notes and the lift falls with the decay. What remains is a low bump that
-follows each hit: AC-coupled inputs remove it, DC-coupled ones pass it on.
+Tomline writes the wave on top of a fixed lift: OUT 1 sits at +3.33 V and
+the wave swings around it, so nothing jumps when a note starts. (In 0.2 and
+earlier, the lift followed each note's peak and jumped by about 2.4 V on every
+hit: a click that the tone filter could not remove.) AC-coupled inputs
+remove the steady 3.33 V. A DC-coupled input passes it on, and a VCA after
+it turns every change of its gain (a sidechain duck) into a thump.
+
+At power-up OUT 1 stays at 0 V for 1 s (the LEVEL MOD 1 check needs the VCA
+at zero), then rises slowly to 3.33 V over about 1 s.
 
 ## Flashing (audio bootloader, unchanged)
 
@@ -190,12 +196,16 @@ g++ -O2 -I. -o build/tomline_render tomline/test/render.cc tomline/voice.cc toml
 
 It also checks the tune range, that glide lands on the target note, the LFO
 knob maths and wave shapes, the pitch of both LFO waves at full depth, that the
-LFO at zero depth leaves the sound unchanged, and that a very loud mix (noise
-at 100 %, hard hit) clips instead of wrapping around. It exits
+LFO at zero depth leaves the sound unchanged, that OUT 1 rests at 3.33 V, that
+its average level doesn't jump on a hit, the power-up (0 V for 1 s, then a slow
+rise), and that a very loud mix (noise at 100 %, hard hit) clips instead of
+wrapping around. It exits
 with an error if a check fails.
 
-Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
-notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
+Last run: OUT 1 between 0.000 V and 6.66 V, back to 3.330 V after the
+notes. Attack jump (average over 100 ms after a hit minus before): BT -0.05 V,
+LT -0.04 V, plain BT sine +0.10 V (the old moving lift: +2.3 to +2.5 V).
+Power-up: OK. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
 range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
 depth, 0.2-1.2 s: triangle -10.30 st, ramp up -11.14 st (0.02 st from the
 expected value). LFO at zero depth: unchanged. Loud mix: clips correctly.

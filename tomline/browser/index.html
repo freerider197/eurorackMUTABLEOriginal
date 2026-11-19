@@ -282,6 +282,7 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
 
 // --- voice.cc ---
 const K_UNITY = 1073741824, K_ATTACK_STEP = 86343000, K_MAX_INC = 1932735283, K_PARTIAL = 104399;
+const K_LIFT = 32767, K_POWER_UP_HOLD = 31088;  // voice.cc kLift, kPowerUpHold
 // floor(a * c / 2^31), a >= 0, c in [0, 2^31): exact.
 function mul31(a, c) {
   const ch = Math.floor(c / 65536), cl = c - ch * 65536;
@@ -325,7 +326,7 @@ class TomlineVoice {
   constructor() {
     this.semitones = 0; this.gliding = false; this.phase = 0; this.pphase = 0; this.lfoPhase = 0;
     this.amp = 0; this.attack = K_UNITY; this.sweep = 0; this.snap = 0; this.noise = 0; this.partial = 0;
-    this.bias = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
+    this.lift = 0; this.hold = K_POWER_UP_HOLD; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
   // pitch: semitones above C1, Q16 (as Ui::Pitch). Outputs gainWord (0..65535)
@@ -385,9 +386,9 @@ class TomlineVoice {
     v += Math.imul(Math.imul(p.noiseLevel, noiseEnv) >> 15, band) >> 15;
     v += Math.imul(Math.imul(p.snapNoise, snapEnv) >> 15, white) >> 15;
     v = clip15(Math.floor(v * 31130 / 32768));
-    const magnitude = v < 0 ? -v : v, decayed = mul31(this.bias, p.amp);
-    this.bias = magnitude > decayed ? magnitude : decayed;
-    let g = this.bias + v;
+    // Fixed lift (Voice::Process): 1 s at 0 V after power-up, then +1 per sample to mid scale.
+    if (this.hold > 0) this.hold--; else if (this.lift < K_LIFT) this.lift++;
+    let g = this.lift + v;
     g = g < 0 ? 0 : (g > 65535 ? 65535 : g);
     let f = p.toneOffset + (Math.imul(env, p.toneAmount) >> 15);
     f = f < 0 ? 0 : (f > 65535 ? 65535 : f);
