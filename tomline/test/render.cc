@@ -41,7 +41,7 @@ struct OnePole {
 };
 
 struct Step {
-  int note;  // semitones above C1, -1 = rest
+  int note;  // V/oct in semitones (0 = 0 V), -1 = rest
 };
 
 struct Patch {
@@ -49,6 +49,8 @@ struct Patch {
   uint8_t snap;
   uint16_t main_layer[4];    // decay, tone, tune, sweep
   uint16_t second_layer[4];  // noise, +1 oct, sweep time, glide
+  uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
+  uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
 };
 
 struct Result {
@@ -57,10 +59,10 @@ struct Result {
 };
 
 Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
-              int repeats, bool external) {
+              int repeats) {
   VoiceParameters p;
   ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
-                         patch.second_layer, &p);
+                         patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
   Voice voice;
   voice.Init();
   Result r;
@@ -94,7 +96,7 @@ Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
     if (gate && n > next_step - samples_per_step / 2) gate = false;
     int32_t semitones = counts * kVoctK >> 8;
     pitch += (semitones - pitch) >> 5;
-    voice.Process(p, trigger, pitch, external, &gain, &frequency);
+    voice.Process(p, trigger, pitch, &gain, &frequency);
     pwm_filtered += ((65535 - frequency) - pwm_filtered) >> 4;
     int32_t pwm_word = pwm_filtered >> 6;  // 10-bit PWM
     ++n;
@@ -104,8 +106,7 @@ Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
       tick -= 1.0;
       double dac = gain / 32767.0;
       dac = dac2.Process(dac1.Process(dac, 15915.0, kHostRate), 15915.0, kHostRate);
-      double vin = external ? 5.0 * sin(2 * M_PI * 65.4 * n / kFirmwareRate) : 3.33;
-      double v = vin * dac;
+      double v = 3.33 * dac;  // IN 1 unpatched: the VCA scales +3.33 V
       double pwm_v = pwm_rc.Process(3.3 * pwm_word / 1023.0, 195.0, kHostRate);
       double fc = 48000.0 * pow(2.0, -16.6 * pwm_v / 3.3);
       if (fc > 0.45 * kHostRate) fc = 0.45 * kHostRate;
@@ -157,7 +158,7 @@ double MeasurePitch(const Patch& base, int note) {
   patch.second_layer[0] = 0;    // no noise
   patch.second_layer[1] = 0;    // no octave
   std::vector<Step> steps(1, Step{note});
-  Result r = Render(patch, steps, 30.0, 1, false);
+  Result r = Render(patch, steps, 30.0, 1);
   // Zero crossings of the AC part between 0.2 s and 1.2 s.
   size_t a = static_cast<size_t>(0.2 * kHostRate), b = static_cast<size_t>(1.2 * kHostRate);
   double mean = 0;
@@ -185,12 +186,12 @@ double MeasurePitch(const Patch& base, int note) {
   return crossings > 1 ? (crossings - 1) / (last - first) : 0.0;
 }
 
-// Glide check: C2 then C3 with glide at 50 % (time constant 129 ms). After
-// 1.5 s the second note must sit on C3.
+// Glide check: C2 then C3 (0 V, 1 V, tune at noon) with glide at 50 % (time
+// constant 129 ms). After 1.5 s the second note must sit on C3.
 double GlideErrorCents() {
   Patch patch = { ENGINE_BT, 0, { 65535, 65535, 32768, 0 }, { 0, 0, 0, 32768 } };
-  std::vector<Step> steps = { {12}, {24} };
-  Result r = Render(patch, steps, 10.0, 1, false);  // 1.5 s per step
+  std::vector<Step> steps = { {0}, {12} };
+  Result r = Render(patch, steps, 10.0, 1);  // 1.5 s per step
   // Zero crossings between 1.5 s and 2.5 s into the second note.
   double start = 1.5 + 1.5, end = 1.5 + 2.5;
   size_t a = static_cast<size_t>(start * kHostRate), b = static_cast<size_t>(end * kHostRate);
@@ -221,6 +222,77 @@ bool MixScalingOk() {
          Voice::ScaleMix(-82000) == -32767 && Voice::ScaleMix(1000) == 950;
 }
 
+// Tune range: SHAPE 2 fully left = -12 st (C1 at 0 V), noon = C2, fully
+// right = +12 st (C3). Returns the worst error in semitones.
+double TuneRangeError() {
+  const uint16_t knob[3] = { 0, 32768, 65535 };
+  const double expected[3] = { 0.0, 12.0, 24.0 };  // semitones above C1
+  double worst = 0;
+  for (int i = 0; i < 3; ++i) {
+    Patch patch = { ENGINE_BT, 1, { 29491, 40632, knob[i], 19661 },
+                    { 9830, 16384, 22938, 0 } };
+    VoiceParameters p;
+    ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
+                           patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
+    worst = fmax(worst, fabs(p.tune / 65536.0 - expected[i]));
+  }
+  return worst;
+}
+
+// Pitch LFO, depth fully up (+/-12 st), speed fully down (0.05 Hz, one cycle
+// in 20 s). Both waves start at their lowest point when the module starts,
+// so 0.2 to 1.2 s into the first note the pitch is about 12 st below C2,
+// rising by 1.2 st/s (ramp up) or 2.4 st/s (triangle). Returns the error of
+// the measured average pitch in semitones.
+double LfoPitchError(uint8_t shape, double* measured_st) {
+  Patch patch = { ENGINE_BT, 1, { 0, 0, 32768, 0 }, { 0, 0, 0, 0 },
+                  { 0, 65535, 0, 0 }, shape };
+  double rate = shape == LFO_RAMP_UP ? 1.2 : 2.4;
+  double expected = -12.0 + rate * 0.7;
+  double hz = MeasurePitch(patch, 0);
+  *measured_st = 12.0 * log2(hz / 65.40639133);
+  return fabs(*measured_st - expected);
+}
+
+// LFO knob maths: speed 0.05 / 1 / 20 Hz, depth off / 12 st, and the wave
+// shapes at their turning points.
+bool LfoParametersOk() {
+  const uint16_t knob[3] = { 0, 32768, 65535 };
+  const double hz[3] = { 0.05, 1.0, 20.0 };
+  bool ok = true;
+  for (int i = 0; i < 3; ++i) {
+    uint16_t lfo[4] = { knob[i], knob[i], 0, 0 };
+    uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
+    uint16_t second[4] = { 9830, 16384, 22938, 0 };
+    VoiceParameters p;
+    ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
+    double f = p.lfo_increment * kFirmwareRate / 4294967296.0;
+    ok = ok && fabs(f / hz[i] - 1.0) < 0.01;
+    if (i == 0) ok = ok && p.lfo_depth == 0;
+    if (i == 2) ok = ok && p.lfo_depth == 12 * 65536;
+  }
+  ok = ok && Voice::LfoWave(0, LFO_TRIANGLE) == -32768 &&
+       Voice::LfoWave(0x7fffffffUL, LFO_TRIANGLE) == 32767 &&
+       Voice::LfoWave(0x80000000UL, LFO_TRIANGLE) == 32767 &&
+       Voice::LfoWave(0xffffffffUL, LFO_TRIANGLE) == -32768 &&
+       Voice::LfoWave(0x40000000UL, LFO_TRIANGLE) == 0 &&
+       Voice::LfoWave(0, LFO_RAMP_UP) == -32768 &&
+       Voice::LfoWave(0x80000000UL, LFO_RAMP_UP) == 0 &&
+       Voice::LfoWave(0xffffffffUL, LFO_RAMP_UP) == 32767;
+  return ok;
+}
+
+// Depth at zero: the speed knob must not change the sound at all.
+bool LfoOffIsSilent(const std::vector<Step>& steps) {
+  Patch slow = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
+                 { 9830, 16384, 22938, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
+  Patch fast = slow;
+  fast.lfo_layer[0] = 65535;
+  fast.lfo_shape = LFO_RAMP_UP;
+  return Render(slow, steps, 122.0, 1).raw ==
+         Render(fast, steps, 122.0, 1).raw;
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -230,7 +302,7 @@ int main() {
   Patch bt_oct = bt;
   bt_oct.second_layer[1] = 39321;  // +1 octave at 60 %
 
-  // "Roller" pattern from the browser page, notes above C1.
+  // "Roller" pattern from the browser page (V/oct in semitones).
   std::vector<Step> roller = {
     {12}, {-1}, {12}, {24}, {-1}, {15}, {12}, {10},
     {12}, {-1}, {12}, {19}, {17}, {15}, {-1}, {10}};
@@ -241,29 +313,50 @@ int main() {
     { "build/tomline_bt_oct.wav", bt_oct },
   };
   for (auto& c : cases) {
-    Result r = Render(c.patch, roller, 122.0, 4, false);
+    Result r = Render(c.patch, roller, 122.0, 4);
     WriteWav(c.name, r.raw, true);
     printf("%-28s OUT 1 min %.3f V  max %.2f V  after the tail %.4f V\n",
            c.name, r.min_v, r.max_v, r.rest_v);
   }
-  Result ext = Render(bt, roller, 122.0, 1, true);
-  printf("%-28s OUT 1 min %.2f V  max %.2f V (external VCO into IN 1)\n",
-         "external mode", ext.min_v, ext.max_v);
 
-  printf("\nPitch at the default V/oct scale (0 V = C1), BT, tune centered:\n");
+  printf("\nPitch at the default V/oct scale (0 V = C2), BT, tune centered:\n");
   int notes[] = { 0, 12, 24, 36 };
   for (int note : notes) {
-    double expected = 32.70319566 * pow(2.0, note / 12.0);
+    double expected = 65.40639133 * pow(2.0, note / 12.0);
     double measured = MeasurePitch(bt, note);
     printf("  %d V  expected %7.2f Hz  measured %7.2f Hz  error %+.1f cents\n",
            note / 12, expected, measured, 1200.0 * log2(measured / expected));
   }
 
+  double tune_error = TuneRangeError();
+  bool tune_ok = tune_error < 0.01;
+  printf("\nTune: fully left C1, noon C2, fully right C3: worst error %.4f st  %s\n",
+         tune_error, tune_ok ? "OK" : "FAIL");
+  failures += !tune_ok;
+
   double glide = GlideErrorCents();
   bool glide_ok = fabs(glide) < 0.5;
-  printf("\nGlide C2 -> C3, 1.5 s later: %+.2f cents  %s\n", glide,
+  printf("Glide C2 -> C3, 1.5 s later: %+.2f cents  %s\n", glide,
          glide_ok ? "OK" : "FAIL (glide stops short of the note)");
   failures += !glide_ok;
+
+  bool lfo_params_ok = LfoParametersOk();
+  printf("LFO knobs (0.05 / 1 / 20 Hz, depth off / 12 st, wave shapes): %s\n",
+         lfo_params_ok ? "OK" : "FAIL");
+  failures += !lfo_params_ok;
+  for (uint8_t shape = 0; shape < LFO_SHAPE_LAST; ++shape) {
+    double measured;
+    double error = LfoPitchError(shape, &measured);
+    bool ok = error < 0.1;
+    printf("LFO %-8s at full depth, 0.2-1.2 s: %+.2f st from C2 (error %.3f st)  %s\n",
+           shape == LFO_RAMP_UP ? "ramp up" : "triangle", measured, error,
+           ok ? "OK" : "FAIL");
+    failures += !ok;
+  }
+  bool lfo_off_ok = LfoOffIsSilent(roller);
+  printf("LFO depth at zero, speed turned: sound unchanged  %s\n",
+         lfo_off_ok ? "OK" : "FAIL");
+  failures += !lfo_off_ok;
 
   bool mix_ok = MixScalingOk();
   printf("Loud output mix (noise 100 %%, hard hit): %s\n",

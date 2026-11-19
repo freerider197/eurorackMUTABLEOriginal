@@ -2,14 +2,15 @@
 //
 // Control map (see docs/HARDWARE_MAP.md for where each control is wired):
 //
-//   SHAPE 1   decay               | with METER: noise level
-//   MOD 1     tone (filter env)   | with METER: +1 octave level
-//   SHAPE 2   tune, +/-24 st      | with METER: sweep time
-//   MOD 2     sweep depth         | with METER: glide
+//   SHAPE 1   decay               | with METER: noise level  | FN 2 held: LFO speed
+//   MOD 1     tone (filter env)   | with METER: +1 octave    | FN 2 held: LFO depth
+//   SHAPE 2   tune, +/-12 st (C2) | with METER: sweep time   |
+//   MOD 2     sweep depth         | with METER: glide        |
 //   FN 1      engine: BT / LT
-//   FN 2      snap 0..3
+//   FN 2      tap: snap 0..3. Hold: LFO layer (the pitch LFO).
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
 //             Hold 1 s without turning a knob: stock offset calibration.
+//             Tapped while FN 2 is held: LFO wave, triangle / ramp up.
 //   FN 1+FN 2 held 1 s: V/oct calibration (1 V, then 3 V into EXCITE 2).
 
 #ifndef TOMLINE_UI_H_
@@ -52,10 +53,24 @@ const uint8_t kNumEvents = 8;
 struct Settings {
   uint8_t engine;
   uint8_t snap;
+  uint8_t lfo_shape;
+  uint8_t padding;
+  uint16_t second_layer[KNOB_LAST];
+  int32_t voct_offset;  // EXCITE 2 counts at 0 V
+  int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
+  uint16_t lfo_layer[KNOB_LAST];  // SHAPE 1 speed, MOD 1 depth; others unused
+  uint32_t magic;
+};
+
+// The record before the LFO was added (24 bytes). Read once at start-up so
+// the V/oct calibration and the METER values carry over.
+struct SettingsV1 {
+  uint8_t engine;
+  uint8_t snap;
   uint8_t padding[2];
   uint16_t second_layer[KNOB_LAST];
-  int32_t voct_offset;  // EXCITE 2 counts at 0 V (C1)
-  int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
+  int32_t voct_offset;
+  int32_t voct_k;
   uint32_t magic;
 };
 
@@ -83,21 +98,9 @@ class Ui {
     return pitch_;
   }
 
-  inline bool External(int16_t audio_1) {
-    // Unpatched, IN 1 sits at +3.33 V (R59 100k from +10 V, loaded by R42
-    // and R12) = about 13230 counts.
-    int32_t deviation = audio_1 - 13230;
-    if (deviation < 0) deviation = -deviation;
-    in_deviation_ += (deviation - in_deviation_) >> 10;
-    if (external_ && in_deviation_ < 1500) {
-      external_ = false;
-    } else if (!external_ && in_deviation_ > 2500) {
-      external_ = true;
-    }
-    return external_;
-  }
-
-  inline void OnSample(bool trigger, uint16_t gain, uint16_t sense) {
+  inline void OnSample(bool trigger, uint16_t gain, uint16_t sense,
+                       uint32_t lfo_phase) {
+    lfo_phase_ = lfo_phase;
     if (trigger) {
       trigger_flash_ = 100;  // 25 ms at 4 kHz
     }
@@ -117,7 +120,9 @@ class Ui {
   void OnButtonReleased(uint8_t button, uint32_t duration);
   void OnButtonsCombo();
   void ReadKnobs();
-  void SetSecondLayer(bool active);
+  void SetLayer(uint8_t layer);
+  void UpdateLayer();
+  uint16_t* LayerValues(uint8_t layer);
   void ComputeParameters();
   void CheckSetup();
   void PaintLeds();
@@ -139,11 +144,14 @@ class Ui {
 
   int32_t pot_[KNOB_LAST];          // filtered positions
   uint16_t main_layer_[KNOB_LAST];
-  bool caught_[2][KNOB_LAST];
-  bool above_[2][KNOB_LAST];
-  bool second_layer_active_;
+  bool caught_[3][KNOB_LAST];
+  bool above_[3][KNOB_LAST];
+  uint8_t layer_;  // 0 main, 1 second (METER), 2 LFO (FN 2 held)
   bool second_layer_latched_;
   bool knob_moved_while_meter_held_;
+  bool meter_held_;
+  bool fn2_held_;
+  bool fn2_used_;  // a knob or METER was used while FN 2 was held: no snap
 
   uint32_t press_time_[BUTTON_LAST];
   bool long_press_handled_[BUTTON_LAST];
@@ -155,11 +163,10 @@ class Ui {
 
   // Shared with the audio interrupt.
   volatile int32_t pitch_;
-  volatile int32_t in_deviation_;
-  volatile bool external_;
   volatile int32_t voct_accumulator_;
   volatile int32_t voct_samples_;
   volatile uint16_t trigger_flash_;
+  volatile uint32_t lfo_phase_;
   volatile uint32_t idle_samples_;
   volatile uint32_t idle_open_samples_;
   volatile uint32_t mid_samples_;

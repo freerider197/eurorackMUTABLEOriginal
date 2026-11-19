@@ -29,6 +29,12 @@ enum Engine {
   ENGINE_LAST
 };
 
+enum LfoShape {
+  LFO_TRIANGLE = 0,
+  LFO_RAMP_UP = 1,
+  LFO_SHAPE_LAST
+};
+
 // Values computed in the main loop (control rate), read by the interrupt.
 // Each field is 32 bits, so every individual write is atomic.
 struct VoiceParameters {
@@ -52,6 +58,9 @@ struct VoiceParameters {
   int32_t drive;                // Q12 pre-gain into the soft clipper
   int32_t tone_amount;          // 0..65535, as streams/meta_parameters.h
   int32_t tone_offset;          // 0..65535
+  int32_t lfo_increment;        // pitch LFO phase increment per sample
+  int32_t lfo_depth;            // semitones, Q16, 0 = off
+  int32_t lfo_shape;            // LfoShape
 };
 
 class Voice {
@@ -63,16 +72,25 @@ class Voice {
 
   // trigger: rising edge seen on EXCITE 1 this sample.
   // pitch: target pitch in semitones above C1, Q16 (V/oct + tune).
-  // external: IN 1 is patched; shape the external signal instead.
   void Process(
       const VoiceParameters& p,
       bool trigger,
       int32_t pitch,
-      bool external,
       uint16_t* gain,
       uint16_t* frequency);
 
   inline int32_t envelope() const { return amp_; }
+  inline uint32_t lfo_phase() const { return lfo_phase_; }
+
+  // Pitch LFO wave, -32768 .. 32767. Triangle: rises for the first half of
+  // the cycle, falls for the second. Ramp up: rises, then jumps back down.
+  static inline int32_t LfoWave(uint32_t phase, int32_t shape) {
+    if (shape == LFO_RAMP_UP) {
+      return static_cast<int32_t>(phase >> 16) - 32768;
+    }
+    uint32_t t = phase < 0x80000000UL ? phase : ~phase;
+    return static_cast<int32_t>(t >> 15) - 32768;
+  }
 
   // 0.95 * v, clipped to +/-32767. 64-bit: with noise at 100 % on a hard hit,
   // the mix can reach about 82000, and 82000 * 31130 overflows 32 bits.
@@ -89,6 +107,7 @@ class Voice {
 
   uint32_t phase_;
   uint32_t partial_phase_;
+  uint32_t lfo_phase_;  // free-running, not reset by triggers
 
   int32_t amp_;       // Q30
   int32_t attack_;    // Q30

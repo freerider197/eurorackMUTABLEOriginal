@@ -14,12 +14,14 @@ const cases = [
   ['build/tomline_words_lt.bin', 1, 1, [29491, 40632, 32768, 19661], [9830, 16384, 22938, 0]],
   ['build/tomline_words_glide.bin', 0, 0, [40000, 20000, 30000, 40000], [30000, 50000, 40000, 30000]],
   ['build/tomline_words_extreme.bin', 1, 3, [10000, 60000, 50000, 65535], [65535, 65535, 65535, 0]],
+  ['build/tomline_words_lfo_tri.bin', 0, 1, [29491, 40632, 32768, 19661], [9830, 16384, 22938, 30000], [50000, 40000, 0, 0], 0],
+  ['build/tomline_words_lfo_ramp.bin', 1, 2, [40000, 30000, 20000, 0], [0, 30000, 40000, 0], [20000, 65535, 0, 0], 1],
 ];
 let failed = false;
-for (const [path, engine, snap, main, second] of cases) {
+for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0] of cases) {
   const buf = fs.readFileSync(path);
   const ref = new Uint16Array(buf.buffer, buf.byteOffset, buf.length / 2);
-  const p = computeParams(engine, snap, main, second);
+  const p = computeParams(engine, snap, main, second, lfo, lfoShape);
   const v = new TomlineVoice();
   const sps = FW_RATE * 60 / 122 / 4;
   let next = 0, step = -1, counts = 0, pitch = 0;
@@ -34,7 +36,7 @@ for (const [path, engine, snap, main, second] of cases) {
     }
     const semis = (counts * VOCT_K) >> 8;
     pitch += (semis - pitch) >> 5;
-    v.process(p, trig, pitch, false);
+    v.process(p, trig, pitch);
     const dg = v.gainWord - ref[2 * i], df = v.freqWord - ref[2 * i + 1];
     maxG = Math.max(maxG, Math.abs(dg)); sumG += dg * dg; sumRef += (ref[2 * i] - 16384) ** 2;
     maxF = Math.max(maxF, Math.abs(df));

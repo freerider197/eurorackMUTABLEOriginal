@@ -92,6 +92,7 @@ canvas#scope{display:block;width:100%;height:170px;border-radius:6px;background:
 .sub .t0{fill:#3a3c42}
 #panel.shift .sub .t0{fill:#9a9da3}
 #panel.shift .sub .t1{fill:#c97a10}
+#panel.lfo .sub .t0,#panel.lfo .sub .t1{fill:#b8bbc0}
 .knob,.pbtn{cursor:pointer;outline:none}
 .knob:focus-visible .hit,.pbtn:focus-visible .hit{stroke:#2f6fe0;stroke-width:4}
 .pbtn.down .cap{transform:scale(.93)}
@@ -120,7 +121,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
       <div class="card seq">
         <div class="head">
           <h2>Sequencer</h2>
-          <span class="hint">sends a trigger to EXCITE 1 and V/oct to EXCITE 2 (0 V = C1)</span>
+          <span class="hint">sends a trigger to EXCITE 1 and V/oct to EXCITE 2 (0 V = C2 with TUNE at noon)</span>
           <div class="push" style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn" type="button" data-pat="0">Roller</button>
             <button class="btn" type="button" data-pat="1">Tom walk</button>
@@ -143,7 +144,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
       <div class="card keys">
         <div class="head">
           <h2>Keys</h2>
-          <span class="hint">A–K on your keyboard, Z / X for octave, Space to play, hold Shift for METER</span>
+          <span class="hint">A–K on your keyboard, Z / X for octave, Space to play, hold Shift for METER, L for FN 2 (LFO)</span>
           <div class="oct push"><button class="btn" type="button" id="kod" aria-label="Octave down">−</button><output id="koct">C2</output><button class="btn" type="button" id="kou" aria-label="Octave up">+</button></div>
         </div>
         <div id="piano" class="piano"></div>
@@ -166,14 +167,14 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
           <tbody>
             <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Noise level</td></tr>
             <tr><td>MOD 1</td><td>Tone: filter envelope. Closed at 7 o'clock, most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
-            <tr><td>SHAPE 2</td><td>Tune, ±24 semitones</td><td>Sweep time</td></tr>
+            <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Sweep time</td></tr>
             <tr><td>MOD 2</td><td>Sweep depth: pitch drop on each hit</td><td>Glide (fully left = off)</td></tr>
             <tr><td>FN 1</td><td>Engine: BT or LT</td><td>—</td></tr>
-            <tr><td>FN 2</td><td>Snap 0–3: attack click of 0.4, 1.5, 4 or 10 ms</td><td>—</td></tr>
+            <tr><td>FN 2</td><td>Tap: snap 0–3, attack click of 0.4, 1.5, 4 or 10 ms</td><td>—</td></tr>
+            <tr><td>FN 2 held</td><td>Pitch LFO (or hold L): SHAPE 1 speed 0.05–20 Hz, MOD 1 depth up to ±12 st (fully left = off). Tap METER: triangle / ramp up. LEDs red, the wave LED pulses</td><td>—</td></tr>
             <tr><td>METER</td><td>Tap to latch the second row, or hold Shift</td><td>—</td></tr>
             <tr><td>LEVEL MOD 1</td><td>Keep fully counter-clockwise. Turned up, it adds a DC offset <span class="an">analog</span></td><td>—</td></tr>
             <tr><td>Curve 1</td><td>Keep fully clockwise (LIN). Toward EXP, it bends the wave <span class="an">analog</span></td><td>—</td></tr>
-            <tr><td>IN 1</td><td>Tap the jack to plug in a VCO: the firmware then shapes the VCO</td><td>—</td></tr>
           </tbody>
         </table></div>
         <p class="note" id="modelnote">The voice and knob maths give the same VCA and filter words as the firmware, sample for sample: <code>tomline/test/compare_browser.js</code> checks this against the C++ code. The analog part (DAC filter, VCA, low-pass, output) follows the Streams v05 schematic with nominal part values, so levels and cutoff frequencies are estimates until measured on a module. The bass tom and low tom characters are modeled by ear.</p>
@@ -230,7 +231,7 @@ function amountOffset(value) {  // streams/meta_parameters.h
   }
   return { amount: 65535 - ((value - 32768) << 1), offset: (value - 32768) << 1 };
 }
-function computeParams(engine, snap, main, second) {
+function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0) {
   const bt = engine === 0;
   const decay = F(main[0] / F(65535)), tune = F(main[2] / F(65535)), sweep = F(main[3] / F(65535));
   const noise = F(second[0] / F(65535)), octave = F(second[1] / F(65535));
@@ -242,6 +243,8 @@ function computeParams(engine, snap, main, second) {
   const snapTau = [F(0.0004), F(0.0015), F(0.004), F(0.010)][snap];
   const harmonic = F(bt ? 0.1 : 0.3);
   const tone = amountOffset(main[1]);
+  const lfoSpeed = F(lfo[0] / F(65535)), lfoDepth = F(lfo[1] / F(65535));
+  const lfoHz = F(F(0.05) * fExp2(F(lfoSpeed * F(8.643856))));
   return {
     engine,
     amp: decayQ31(tau),
@@ -250,7 +253,7 @@ function computeParams(engine, snap, main, second) {
     sweepC: decayQ31(sweepTau),
     snapC: decayQ31(snapTau),
     glideK: glide < F(0.01) ? 0 : oneMinusExpQ31(F(F(0.004) + F(F(glide * glide) * F(0.5)))),
-    tune: q16(F(F(tune - F(0.5)) * F(48))),
+    tune: q16(F(F(12) + F(F(tune - F(0.5)) * F(24)))),
     sweepDepth: q16(F(sweep * F(bt ? 12 : 24))),
     snapDepth: q16(F(bt ? 30 : 15)),
     octave: q15(octave),
@@ -263,6 +266,9 @@ function computeParams(engine, snap, main, second) {
     drive: bt ? 4915 : 4300,
     toneAmount: tone.amount,
     toneOffset: tone.offset,
+    lfoInc: Math.trunc(F(lfoHz * F(F(4294967296) / K_SR_F))),
+    lfoDepth: lfoDepth < F(0.01) ? 0 : q16(F(F(lfoDepth * lfoDepth) * F(12))),
+    lfoShape: lfoShape === 1 ? 1 : 0,
     tauSeconds: tau
   };
 }
@@ -301,17 +307,23 @@ function semitonesToIncrement(semitones) {
   return integral < -24 ? 0 : Math.floor(increment / Math.pow(2, -integral));
 }
 const clip15 = x => x < -32767 ? -32767 : (x > 32767 ? 32767 : x);
+// Voice::LfoWave: -32768 .. 32767. Shape 0 triangle, 1 ramp up.
+function lfoWave(phase, shape) {
+  if (shape === 1) return (phase >>> 16) - 32768;
+  const t = phase < 0x80000000 ? phase : (~phase) >>> 0;
+  return (t >>> 15) - 32768;
+}
 
 class TomlineVoice {
   constructor() {
-    this.semitones = 0; this.gliding = false; this.phase = 0; this.pphase = 0;
+    this.semitones = 0; this.gliding = false; this.phase = 0; this.pphase = 0; this.lfoPhase = 0;
     this.amp = 0; this.attack = K_UNITY; this.sweep = 0; this.snap = 0; this.noise = 0; this.partial = 0;
     this.bias = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
   // pitch: semitones above C1, Q16 (as Ui::Pitch). Outputs gainWord (0..65535)
   // and freqWord (0..65535), exactly as Voice::Process.
-  process(p, trigger, pitch, external) {
+  process(p, trigger, pitch) {
     if (trigger) {
       this.gliding = p.glideK !== 0 && this.amp > (K_UNITY >> 6);
       this.amp = K_UNITY; this.attack = 0; this.sweep = K_UNITY; this.snap = K_UNITY;
@@ -333,7 +345,9 @@ class TomlineVoice {
     this.partial = mul31(this.partial, p.partialC);
     if (this.attack < K_UNITY) { this.attack += K_ATTACK_STEP; if (this.attack > K_UNITY) this.attack = K_UNITY; }
     const env = mul45(this.amp, this.attack);
+    this.lfoPhase = (this.lfoPhase + p.lfoInc) >>> 0;
     let s = this.semitones;
+    if (p.lfoDepth) s += Math.floor(p.lfoDepth * lfoWave(this.lfoPhase, p.lfoShape) / 32768);
     s += Math.floor(p.sweepDepth * this.sweep / 1073741824);
     s += Math.floor(p.snapDepth * this.snap / 1073741824);
     const increment = semitonesToIncrement(s);
@@ -364,14 +378,9 @@ class TomlineVoice {
     v += Math.imul(Math.imul(p.noiseLevel, noiseEnv) >> 15, band) >> 15;
     v += Math.imul(Math.imul(p.snapNoise, snapEnv) >> 15, white) >> 15;
     v = clip15(Math.floor(v * 31130 / 32768));
-    let g;
-    if (external) {
-      g = env;
-    } else {
-      const magnitude = v < 0 ? -v : v, decayed = mul31(this.bias, p.amp);
-      this.bias = magnitude > decayed ? magnitude : decayed;
-      g = this.bias + v;
-    }
+    const magnitude = v < 0 ? -v : v, decayed = mul31(this.bias, p.amp);
+    this.bias = magnitude > decayed ? magnitude : decayed;
+    let g = this.bias + v;
     g = g < 0 ? 0 : (g > 65535 ? 65535 : g);
     let f = p.toneOffset + (Math.imul(env, p.toneAmount) >> 15);
     f = f < 0 ? 0 : (f > 65535 ? 65535 : f);
@@ -386,14 +395,14 @@ class Engine {
   constructor(sr) {
     this.sr = sr;
     this.k = { engine: 0, snap: 1, main: [29491, 40632, 32768, 19661], second: [9830, 16384, 22938, 0],
-      level1: 0, curve1: 1, in1: false, ideal: false, kick: false, master: 0.75, bpm: 122, playing: false };
+      lfo: [32768, 0, 0, 0], lfoShape: 0, level1: 0, curve1: 1, ideal: false, kick: false, master: 0.75, bpm: 122, playing: false };
     this.p = computeParams(0, 1, this.k.main, this.k.second);
     this.voice = new TomlineVoice();
     this.pat = []; this.pos = -1; this.spc = 0;
     this.counts = 0; this.pitchQ16 = 0; this.excite = 0; this.gate = false; this.pendingTrig = false;
-    this.fwAcc = 1; this.pwmFiltered = 65535; this.inDev = 0; this.external = false;
+    this.fwAcc = 1; this.pwmFiltered = 65535;
     this.d1 = 0; this.d2 = 0; this.f1 = 0; this.f2 = 0; this.pwmV = 3.3;
-    this.vph = 0; this.kph = 0; this.kam = 0; this.kpe = 0; this.dx = 0; this.dy = 0;
+    this.kph = 0; this.kam = 0; this.kpe = 0; this.dx = 0; this.dy = 0;
     this.idle = 0; this.idleOpen = 0; this.mid = 0; this.midClosed = 0; this.checkCount = 0;
     this.levelWarn = false; this.curveWarn = false;
     this.sc = new Float32Array(512); this.si = -1; this.sd = 0;
@@ -401,9 +410,9 @@ class Engine {
   }
   handle(m) {
     if (m.t === 'k') {
-      if (m.k === 'main' || m.k === 'second') this.k[m.k][m.i] = m.v; else this.k[m.k] = m.v;
+      if (m.k === 'main' || m.k === 'second' || m.k === 'lfo') this.k[m.k][m.i] = m.v; else this.k[m.k] = m.v;
       if (m.k === 'playing' && m.v) { this.pos = -1; this.spc = 1e9; }
-      this.p = computeParams(this.k.engine, this.k.snap, this.k.main, this.k.second);
+      this.p = computeParams(this.k.engine, this.k.snap, this.k.main, this.k.second, this.k.lfo, this.k.lfoShape);
     } else if (m.t === 'pat') {
       this.pat = m.v;
     } else if (m.t === 'note') {
@@ -435,12 +444,7 @@ class Engine {
     // EXCITE 2: V/oct, as Ui::Pitch.
     const semisQ16 = Math.floor(this.counts * VOCT_K / 256);
     this.pitchQ16 += (semisQ16 - this.pitchQ16) >> 5;
-    // IN 1 detection, as Ui::External (unpatched = +3.33 V = 13230 counts).
-    const inCounts = this.k.in1 ? Math.round(5 * (2 * this.vph - 1) * COUNTS_PER_VOLT) : 13230;
-    this.inDev += (Math.abs(inCounts - 13230) - this.inDev) / 1024;
-    if (this.external && this.inDev < 1500) this.external = false;
-    else if (!this.external && this.inDev > 2500) this.external = true;
-    this.voice.process(this.p, trig, this.pitchQ16, this.external);
+    this.voice.process(this.p, trig, this.pitchQ16);
     if (trig) { this.send({ t: 'trig' }); if (this.si < 0) { this.si = 0; this.sd = 0; } }
     // pwm.Write: 1/16 smoothing, 10-bit.
     this.pwmFiltered += ((65535 - this.voice.freqWord) - this.pwmFiltered) >> 4;
@@ -455,7 +459,7 @@ class Engine {
       if (this.idle > 4096) this.levelWarn = this.idleOpen > this.idle * 0.9;
       if (this.mid > 1024) this.curveWarn = this.midClosed > this.mid / 2;
       this.idle = this.idleOpen = this.mid = this.midClosed = 0;
-      this.send({ t: 'leds', warn: this.levelWarn || this.curveWarn, ext: this.external });
+      this.send({ t: 'leds', warn: this.levelWarn || this.curveWarn });
     }
   }
   render(out) {
@@ -468,15 +472,7 @@ class Engine {
       if (k.playing) { this.spc += 1; if (this.spc >= sps) { this.spc -= sps; if (this.spc > sps) this.spc = 0; this.step(); } }
       this.fwAcc += FW_RATE / sr;
       while (this.fwAcc >= 1) { this.fwAcc -= 1; this.fwTick(); }
-      // External VCO on IN 1 (saw, follows V/oct only).
-      let vin = 3.33;
-      if (k.in1) {
-        const dt = C1_HZ * Math.pow(2, this.pitchQ16 / 65536 / 12) / sr;
-        this.vph += dt; if (this.vph >= 1) this.vph -= 1;
-        let s = 2 * this.vph - 1, t = this.vph;
-        if (t < dt) { t /= dt; s -= t + t - t * t - 1; } else if (t > 1 - dt) { t = (t - 1) / dt; s -= t * t + t + t + 1; }
-        vin = 5 * s;
-      }
+      const vin = 3.33;  // IN 1 unpatched
       // DAC reconstruction RC, then the VCA.
       this.d1 += kDac * (this.voice.gain - this.d1);
       this.d2 += kDac * (this.d1 - this.d2);
@@ -506,20 +502,20 @@ class Engine {
 <script>
 /* ===================== state ===================== */
 const NN = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const nname = n => NN[((n % 12) + 12) % 12] + (1 + Math.floor(n / 12));
+const nname = n => NN[((n % 12) + 12) % 12] + (2 + Math.floor(n / 12));  // n = semitones of V/oct; TUNE at noon
 const ENG = ['BT · bass tom', 'LT · low tom'];
-const DEFV = { main: [29491, 40632, 32768, 19661], second: [9830, 16384, 22938, 0] };
+const DEFV = { main: [29491, 40632, 32768, 19661], second: [9830, 16384, 22938, 0], lfo: [32768, 0, 0, 0] };
 const mk = a => a.map(([n, on]) => ({ n, on: !!on }));
 const PATS = [
   mk([[12,1],[12,0],[12,1],[24,1],[12,0],[15,1],[12,1],[10,1],[12,1],[12,0],[12,1],[19,1],[17,1],[15,1],[12,0],[10,1]]),
   mk([[12,1],[12,0],[12,0],[10,1],[12,0],[12,1],[12,0],[7,1],[12,1],[12,0],[15,1],[12,0],[14,1],[12,0],[10,1],[7,1]]),
   mk([[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,0],[12,1],[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[7,1],[10,1]])
 ];
-const S = { k: { engine: 0, snap: 1, main: DEFV.main.slice(), second: DEFV.second.slice(), level1: 0, level2: 0, curve1: 1, curve2: 1,
-  in1: false, ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, koct: 1,
-  warn: false, ext: false };
+const S = { k: { engine: 0, snap: 1, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
+  ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, koct: 0,
+  warn: false };
 try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { Object.assign(S.k, j.k); S.pat = j.pat; } } catch (e) {}
-S.k.ideal = false; S.k.in1 = false;
+S.k.ideal = false; delete S.k.in1;
 let saveT = 0;
 function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('tomline-fw-v1', JSON.stringify({ k: S.k, pat: S.pat })); } catch (e) {} }, 300); }
 
@@ -529,11 +525,11 @@ function onMsg(m) {
   if (m.t === 'step') showStep(m.v);
   else if (m.t === 'scope') drawScope(m.v);
   else if (m.t === 'trig') blinkTrig();
-  else if (m.t === 'leds') { S.warn = m.warn; S.ext = m.ext; drawLeds(); }
+  else if (m.t === 'leds') { S.warn = m.warn; drawLeds(); }
 }
 function syncAll() {
-  for (const key of ['engine','snap','level1','curve1','in1','ideal','kick','master','bpm']) post({ t: 'k', k: key, v: S.k[key] });
-  for (let i = 0; i < 4; i++) { post({ t: 'k', k: 'main', i, v: S.k.main[i] }); post({ t: 'k', k: 'second', i, v: S.k.second[i] }); }
+  for (const key of ['engine','snap','lfoShape','level1','curve1','ideal','kick','master','bpm']) post({ t: 'k', k: key, v: S.k[key] });
+  for (let i = 0; i < 4; i++) { for (const key of ['main', 'second', 'lfo']) post({ t: 'k', k: key, i, v: S.k[key][i] }); }
   post({ t: 'pat', v: S.pat });
 }
 const ENGINE_SRC = () => {
@@ -565,7 +561,7 @@ async function startAudio() {
   return starting;
 }
 function setK(key, v, i) {
-  if (key === 'main' || key === 'second') { S.k[key][i] = v; post({ t: 'k', k: key, i, v }); }
+  if (key === 'main' || key === 'second' || key === 'lfo') { S.k[key][i] = v; post({ t: 'k', k: key, i, v }); }
   else { S.k[key] = v; post({ t: 'k', k: key, v }); }
   save(); preview();
 }
@@ -573,12 +569,12 @@ function setK(key, v, i) {
 /* ===================== panel (Streams layout, 562 x 1200 units) ===================== */
 const svg = document.getElementById('panel');
 const C1 = '#c9306b', C2 = '#2fadb3';
-// layer 0 / layer 1 targets: ['main'|'second', index] or a hardware key.
+// layer 0 / 1 / 2 targets: ['main'|'second'|'lfo', index] or a hardware key.
 const KN = [
-  { id: 's1', x: 98, y: 182, cap: '#f4f4f4', p: [['main', 0], ['second', 0]] },
-  { id: 'm1', x: 98, y: 400, cap: '#f4f4f4', p: [['main', 1], ['second', 1]] },
-  { id: 's2', x: 462, y: 182, cap: '#f4f4f4', p: [['main', 2], ['second', 2]] },
-  { id: 'm2', x: 462, y: 400, cap: '#f4f4f4', p: [['main', 3], ['second', 3]] },
+  { id: 's1', x: 98, y: 182, cap: '#f4f4f4', p: [['main', 0], ['second', 0], ['lfo', 0]] },
+  { id: 'm1', x: 98, y: 400, cap: '#f4f4f4', p: [['main', 1], ['second', 1], ['lfo', 1]] },
+  { id: 's2', x: 462, y: 182, cap: '#f4f4f4', p: [['main', 2], ['second', 2], ['lfo', 2]] },
+  { id: 'm2', x: 462, y: 400, cap: '#f4f4f4', p: [['main', 3], ['second', 3], ['lfo', 3]] },
   { id: 'l1', x: 98, y: 630, cap: C1, p: [['level1']] },
   { id: 'l2', x: 462, y: 630, cap: C2, p: [['level2']] },
   { id: 'r1', x: 280, y: 567, trim: true, p: [['curve1']] },
@@ -586,7 +582,7 @@ const KN = [
 ];
 const JK = [
   { id: 'ex1', x: 70, y: 905, name: 'EXCITE 1', plug: '#e9a93a', what: 'patched · trigger from the sequencer' },
-  { id: 'in1', x: 212, y: 905, name: 'IN 1', tg: true, plug: '#8f63e8', what: 'tap to plug in a saw VCO that follows V/oct' },
+  { id: 'in1', x: 212, y: 905, name: 'IN 1', what: 'not used, leave empty' },
   { id: 'in2', x: 350, y: 905, name: 'IN 2', what: 'not used' },
   { id: 'ex2', x: 492, y: 905, name: 'EXCITE 2', plug: '#3d86f0', what: 'patched · V/oct from the sequencer' },
   { id: 'lv1', x: 70, y: 1032, name: 'LEVEL 1', what: 'not used, leave empty' },
@@ -654,7 +650,7 @@ ${curveIcon(232,608,C1,false)}${curveIcon(328,608,C1,true)}${curveIcon(232,742,C
 ${sub(100,766,'KEEP AT ZERO')}${sub(462,766,'NOT USED')}
 <line x1="30" y1="800" x2="532" y2="800" stroke="#b2b5bb" stroke-width="3"/>
 ${t(70,846,'EXCITE','pl','style="font-size:23px"')}${t(212,846,'IN','pl','style="font-size:23px"')}${t(350,846,'IN','pl','style="font-size:23px"')}${t(492,846,'EXCITE','pl','style="font-size:23px"')}
-${sub(70,864,'TRIG')}${sub(212,864,'EXT VCO')}${sub(492,864,'V/OCT')}
+${sub(70,864,'TRIG')}${sub(212,864,'NOT USED')}${sub(492,864,'V/OCT')}
 <rect x="24" y="958" width="92" height="32" rx="8" fill="${C1}"/>${t(70,982,'LEVEL','pl','style="font-size:21px;fill:#fff"')}
 <rect x="446" y="958" width="92" height="32" rx="8" fill="${C2}"/>${t(492,982,'LEVEL','pl','style="font-size:21px;fill:#fff"')}
 <rect x="165" y="953" width="94" height="139" rx="8" fill="#5e6168"/>${t(212,983,'OUT','pl','style="font-size:22px;fill:#fff"')}
@@ -670,12 +666,16 @@ const pct = v => Math.round(v * 100) + '%';
 const META = {
   'main0': { n: 'DECAY', f: v => Math.round(tauOf(v) * 1000) + ' ms' },
   'main1': { n: 'TONE', f: v => pct(v) + (v < 0.5 ? ' · envelope' : ' · envelope + open') },
-  'main2': { n: 'TUNE', f: v => { const s = (v - 0.5) * 48; return (s >= 0 ? '+' : '') + s.toFixed(1) + ' st'; } },
+  'main2': { n: 'TUNE', f: v => { const s = (v - 0.5) * 24; return (s >= 0 ? '+' : '') + s.toFixed(1) + ' st'; } },
   'main3': { n: 'SWEEP', f: v => (v * (S.k.engine === 0 ? 12 : 24)).toFixed(1) + ' st drop' },
   'second0': { n: 'NOISE', f: v => pct(v) },
   'second1': { n: '+1 OCT', f: v => pct(v) },
   'second2': { n: 'SWEEP TIME', f: v => Math.round((0.006 + v * v * 0.3) * 1000 * (S.k.engine === 0 ? 0.6 : 1)) + ' ms' },
   'second3': { n: 'GLIDE', f: v => v < 0.01 ? 'off' : Math.round((0.004 + v * v * 0.5) * 1000) + ' ms' },
+  'lfo0': { n: 'LFO SPEED', f: v => { const hz = 0.05 * Math.pow(400, v); return (hz < 1 ? hz.toFixed(2) : hz.toFixed(1)) + ' Hz'; } },
+  'lfo1': { n: 'LFO DEPTH', f: v => v < 0.01 ? 'off' : '±' + (v * v * 12).toFixed(2) + ' st' },
+  'lfo2': { n: 'SHAPE 2', f: () => 'not used on the LFO layer' },
+  'lfo3': { n: 'MOD 2', f: () => 'not used on the LFO layer' },
   'level1': { n: 'LEVEL MOD 1', f: v => v < 0.01 ? 'zero · correct' : 'adds a ' + (3.33 * 1.6 * v).toFixed(2) + ' V offset: turn it back to zero' },
   'level2': { n: 'LEVEL MOD 2', f: () => 'not used by Tomline' },
   'curve1': { n: 'CURVE 1', f: v => v > 0.99 ? 'LIN · correct' : 'toward EXP: bends the wave, turn fully clockwise' },
@@ -683,7 +683,7 @@ const META = {
 };
 const lcdk = document.getElementById('lcdk'), lcdv = document.getElementById('lcdv');
 function lcd(k, v) { lcdk.textContent = k; lcdv.textContent = v; }
-const target = k => (S.layer && k.p[1]) ? k.p[1] : k.p[0];
+const target = k => (S.layer && k.p[S.layer]) ? k.p[S.layer] : k.p[0];
 const keyOf = tg => tg.length > 1 ? tg[0] + tg[1] : tg[0];
 const getV = tg => tg.length > 1 ? S.k[tg[0]][tg[1]] / 65535 : S.k[tg[0]];
 function setV(tg, v) { if (tg.length > 1) setK(tg[0], Math.round(v * 65535), tg[1]); else setK(tg[0], v); }
@@ -693,9 +693,10 @@ function drawKnob(k) {
   g.setAttribute('aria-valuenow', Math.round(v * 100)); g.setAttribute('aria-label', m.n); g.setAttribute('aria-valuetext', m.f(v));
 }
 function drawKnobs() { KN.forEach(drawKnob); }
-const DEFAULT = { main: DEFV.main, second: DEFV.second, level1: 0, level2: 0, curve1: 1, curve2: 1 };
+const DEFAULT = { main: DEFV.main, second: DEFV.second, lfo: DEFV.lfo, level1: 0, level2: 0, curve1: 1, curve2: 1 };
 function setKnob(k, v) {
   v = Math.max(0, Math.min(1, v)); const tg = target(k); setV(tg, v); drawKnob(k);
+  if (S.layer === 2) S.fn2Used = true;
   const m = META[keyOf(tg)]; lcd(m.n, m.f(v));
   if (tg[0] === 'level1' || tg[0] === 'curve1') { /* the firmware's setup check updates the LED within 0.5 s */ }
 }
@@ -721,15 +722,28 @@ KN.forEach(k => {
 /* ===================== buttons + LEDs (as ui.cc PaintLeds) ===================== */
 let trigOn = false, trigT = 0, blinkT = 0;
 function paint(el, c) { el.querySelector('.lens').setAttribute('fill', c || '#dcd9cb'); el.querySelector('.lens').setAttribute('stroke', c ? 'rgba(0,0,0,.18)' : '#bdb9aa'); el.querySelector('.halo').setAttribute('fill', c ? c + '55' : 'transparent'); }
+// Off lens colour to red, for the LFO LED that pulses with the wave.
+function redAt(a) { const m = (x, y) => Math.round(x + (y - x) * a).toString(16).padStart(2, '0'); return '#' + m(0xdc, 0xff) + m(0xd9, 0x4a) + m(0xcb, 0x3d); }
+let lfoUiPhase = 0, lfoUiT = 0, lfoRaf = 0;
+function lfoLed(t) {
+  if (S.layer !== 2) { lfoRaf = 0; return; }
+  const hz = 0.05 * Math.pow(400, S.k.lfo[0] / 65535);
+  lfoUiPhase = (lfoUiPhase + hz * Math.min(0.1, (t - (lfoUiT || t)) / 1000)) % 1; lfoUiT = t;
+  const w = lfoWave(Math.floor(lfoUiPhase * 4294967296) >>> 0, S.k.lfoShape);
+  for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), i === S.k.lfoShape ? redAt((w + 32768) / 65535) : null);
+  lfoRaf = requestAnimationFrame(lfoLed);
+}
 function drawLeds() {
-  const on = S.layer ? '#ffb446' : '#6be07b';
+  const on = S.layer === 2 ? '#ff4a3d' : (S.layer ? '#ffb446' : '#6be07b');
   paint(document.getElementById('L0'), S.k.engine === 0 ? on : null);
   paint(document.getElementById('L1'), S.k.engine === 1 ? on : null);
   const blink = (Math.floor(performance.now() / 256) & 1) === 1;
-  paint(document.getElementById('L2'), S.warn ? (blink ? '#ff4a3d' : null) : (S.ext ? '#ff9a3c' : null));
+  paint(document.getElementById('L2'), S.warn && blink ? '#ff4a3d' : null);
   paint(document.getElementById('L3'), trigOn ? '#6be07b' : null);
-  for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), (3 - i) <= S.k.snap ? on : null);
-  svg.classList.toggle('shift', !!S.layer);
+  if (S.layer === 2) { if (!lfoRaf) { lfoUiT = 0; lfoRaf = requestAnimationFrame(lfoLed); } }
+  else for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), (3 - i) <= S.k.snap ? on : null);
+  svg.classList.toggle('shift', S.layer === 1);
+  svg.classList.toggle('lfo', S.layer === 2);
 }
 setInterval(() => { if (S.warn) drawLeds(); }, 128);
 function blinkTrig() { trigOn = true; paint(document.getElementById('L3'), '#6be07b'); clearTimeout(trigT); trigT = setTimeout(() => { trigOn = false; paint(document.getElementById('L3'), null); }, 25); }
@@ -745,17 +759,31 @@ function press(id, fn) {
 let comboing = false;
 function combo() { comboing = true; lcd('FN 1 + FN 2', 'V/oct calibration: runs on the module (1 V, then 3 V)'); }
 press('b1', () => { setK('engine', (S.k.engine + 1) % 2); drawLeds(); drawKnobs(); lcd('ENGINE', ENG[S.k.engine]); });
-press('b2', () => { setK('snap', (S.k.snap + 1) % 4); drawLeds(); lcd('SNAP', S.k.snap + ' of 3 · ' + [0.4, 1.5, 4, 10][S.k.snap] + ' ms click'); });
-function setLayer() { const l = (S.latched || S.held) ? 1 : 0; if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs(); lcd('METER', l ? 'second row: noise, +1 oct, sweep time, glide' : 'main row: decay, tone, tune, sweep'); }
-press('meter', () => { S.latched = !S.latched; setLayer(); });
+// FN 2: tap = snap. Held (or L held on the keyboard) = LFO layer; a knob or
+// METER used meanwhile cancels the snap step, as in ui.cc.
+press('b2', () => {
+  const used = S.fn2Used; S.fn2 = false; setLayer();
+  if (!used) { setK('snap', (S.k.snap + 1) % 4); drawLeds(); lcd('SNAP', S.k.snap + ' of 3 · ' + [0.4, 1.5, 4, 10][S.k.snap] + ' ms click'); }
+});
+{
+  const b2 = document.getElementById('b2');
+  b2.addEventListener('pointerdown', () => { S.fn2 = true; S.fn2Used = false; setLayer(); });
+  const off = () => { if (S.fn2) { S.fn2 = false; setLayer(); } };
+  b2.addEventListener('pointerup', off); b2.addEventListener('pointerleave', off); b2.addEventListener('pointercancel', off);
+}
+function setLayer() {
+  const l = S.fn2 ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
+  if (l === 2) lcd('LFO · FN 2 held', 'SHAPE 1 speed, MOD 1 depth · tap METER: ' + (S.k.lfoShape ? 'ramp up' : 'triangle'));
+  else lcd('METER', l ? 'second row: noise, +1 oct, sweep time, glide' : 'main row: decay, tone, tune, sweep');
+}
+function nextLfoShape() { setK('lfoShape', (S.k.lfoShape + 1) % 2); S.fn2Used = true; drawLeds(); lcd('LFO WAVE', S.k.lfoShape ? 'ramp up' : 'triangle'); }
+press('meter', () => { if (S.fn2) { nextLfoShape(); return; } S.latched = !S.latched; setLayer(); });
 JK.forEach(j => {
   const g = document.getElementById('j-' + j.id);
   const act = () => {
-    if (j.tg) { setK('in1', !S.k.in1); g.querySelector('.plug').setAttribute('visibility', S.k.in1 ? 'visible' : 'hidden'); g.setAttribute('aria-checked', S.k.in1); lcd('IN 1', S.k.in1 ? 'VCO patched: external mode' : 'empty: Tomline makes the sound'); }
-    else lcd(j.name, j.what);
+    lcd(j.name, j.what);
   };
   g.addEventListener('click', act);
-  if (j.tg) g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); act(); } });
 });
 
 /* ===================== sequencer ===================== */
@@ -804,20 +832,21 @@ const keyEl = s => piano.querySelector(`[data-s="${s}"]`);
 async function playKey(s) { await startAudio(); post({ t: 'note', v: Math.min(36, S.koct * 12 + s) }); const el = keyEl(s); if (el) { el.classList.add('down'); setTimeout(() => el.classList.remove('down'), 140); } }
 piano.addEventListener('pointerdown', e => { const k = e.target.closest('.key'); if (!k) return; e.preventDefault(); playKey(+k.dataset.s); });
 const koct = document.getElementById('koct');
-function setOct(o) { S.koct = Math.max(0, Math.min(2, o)); koct.textContent = 'C' + (S.koct + 1); }
+function setOct(o) { S.koct = Math.max(0, Math.min(2, o)); koct.textContent = 'C' + (S.koct + 2); }
 document.getElementById('kod').addEventListener('click', () => setOct(S.koct - 1));
 document.getElementById('kou').addEventListener('click', () => setOct(S.koct + 1));
-setOct(1);
+setOct(0);
 window.addEventListener('keydown', e => {
   if (e.target.closest && e.target.closest('input,textarea,select')) return;
   if (e.key === 'Shift') { S.held = true; setLayer(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   const k = e.key.toLowerCase();
+  if (k === 'l') { S.fn2 = true; S.fn2Used = true; setLayer(); return; }
   if (k === ' ' && !(e.target.closest && e.target.closest('button,[role="slider"],[role="button"],[role="switch"]'))) { e.preventDefault(); togglePlay(); return; }
   const i = QW.indexOf(k); if (i >= 0) { playKey(i); return; }
   if (k === 'z') setOct(S.koct - 1); if (k === 'x') setOct(S.koct + 1);
 });
-window.addEventListener('keyup', e => { if (e.key === 'Shift') { S.held = false; setLayer(); } });
+window.addEventListener('keyup', e => { if (e.key === 'Shift') { S.held = false; setLayer(); } if (e.key.toLowerCase() === 'l') { S.fn2 = false; setLayer(); } });
 
 /* ===================== scope ===================== */
 const cv = document.getElementById('scope'), cx2 = cv.getContext('2d');
@@ -846,7 +875,7 @@ function preview() {
     for (const key of ['engine','snap','level1','curve1','ideal']) e.handle({ t: 'k', k: key, v: S.k[key] });
     for (let i = 0; i < 4; i++) { e.handle({ t: 'k', k: 'main', i, v: S.k.main[i] }); e.handle({ t: 'k', k: 'second', i, v: S.k.second[i] }); }
     const buf = new Float32Array(1024); for (let i = 0; i < 4; i++) e.render(buf);
-    e.handle({ t: 'note', v: 12 }); for (let i = 0; i < 16 && !got; i++) e.render(buf);
+    e.handle({ t: 'note', v: 0 }); for (let i = 0; i < 16 && !got; i++) e.render(buf);
     if (got) drawScope(got);
   });
 }

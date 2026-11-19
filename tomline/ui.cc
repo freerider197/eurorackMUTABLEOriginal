@@ -35,6 +35,11 @@ const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
   22938,  // sweep time 35 %
   0       // glide off
 };
+const uint16_t kLfoLayerDefaults[KNOB_LAST] = {
+  32768,  // LFO speed 1 Hz
+  0,      // LFO depth off
+  0, 0    // unused
+};
 
 static inline int32_t Abs(int32_t x) { return x < 0 ? -x : x; }
 
@@ -50,14 +55,33 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
       settings_.magic != kSettingsMagic) {
     settings_.engine = ENGINE_BT;
     settings_.snap = 1;
+    settings_.lfo_shape = LFO_TRIANGLE;
+    settings_.padding = 0;
     copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
          &settings_.second_layer[0]);
     settings_.voct_offset = 0;
     settings_.voct_k = kDefaultVoctK;
+    copy(&kLfoLayerDefaults[0], &kLfoLayerDefaults[KNOB_LAST],
+         &settings_.lfo_layer[0]);
     settings_.magic = kSettingsMagic;
+    // Settings saved by the firmware before the LFO: keep them. The new
+    // record is written from the start of the settings pages (version 0),
+    // which erases each page before its first write, as for a fresh module.
+    SettingsV1 old;
+    uint16_t old_token;
+    if (settings_storage.ParsimoniousLoad(&old, &old_token) &&
+        old.magic == kSettingsMagic) {
+      settings_.engine = old.engine;
+      settings_.snap = old.snap;
+      copy(&old.second_layer[0], &old.second_layer[KNOB_LAST],
+           &settings_.second_layer[0]);
+      settings_.voct_offset = old.voct_offset;
+      settings_.voct_k = old.voct_k;
+    }
   }
   if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
   if (settings_.snap > 3) settings_.snap = 1;
+  if (settings_.lfo_shape >= LFO_SHAPE_LAST) settings_.lfo_shape = LFO_TRIANGLE;
 
   // The ADC scans one pot per ms: read all four before starting.
   for (uint8_t i = 0; i < 8; ++i) {
@@ -70,24 +94,28 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     caught_[0][i] = true;
     caught_[1][i] = false;
     above_[1][i] = pot_[i] > settings_.second_layer[i];
+    caught_[2][i] = false;
+    above_[2][i] = pot_[i] > settings_.lfo_layer[i];
   }
   fill(&press_time_[0], &press_time_[BUTTON_LAST], 0);
   fill(&long_press_handled_[0], &long_press_handled_[BUTTON_LAST], false);
   combo_handled_ = false;
   event_read_ = event_write_ = 0;
-  second_layer_active_ = false;
+  layer_ = 0;
   second_layer_latched_ = false;
   knob_moved_while_meter_held_ = false;
+  meter_held_ = false;
+  fn2_held_ = false;
+  fn2_used_ = false;
 
   mode_ = UI_MODE_NORMAL;
   settings_dirty_ = false;
   settings_change_time_ = 0;
   pitch_ = 0;
-  in_deviation_ = 0;
-  external_ = false;
   voct_accumulator_ = 0;
   voct_samples_ = 0;
   trigger_flash_ = 0;
+  lfo_phase_ = 0;
   idle_samples_ = idle_open_samples_ = mid_samples_ = mid_closed_samples_ = 0;
   warning_ = false;
   curve_warning_ = false;
@@ -170,10 +198,15 @@ void Ui::HandleEvents() {
     } else if (e.duration == 0) {
       long_press_handled_[e.button] = false;
       OnButtonPressed(e.button);
-    } else if (!e.ignored) {
-      OnButtonReleased(e.button, e.duration);
+    } else {
+      if (!e.ignored) {
+        OnButtonReleased(e.button, e.duration);
+      }
+      if (e.button == BUTTON_FN_2) fn2_held_ = false;
+      if (e.button == BUTTON_METER) meter_held_ = false;
     }
   }
+  UpdateLayer();
 }
 
 void Ui::OnButtonPressed(uint8_t button) {
@@ -189,9 +222,24 @@ void Ui::OnButtonPressed(uint8_t button) {
     parameters_dirty_ = true;
     return;
   }
-  if (button == BUTTON_METER && mode_ == UI_MODE_NORMAL) {
-    knob_moved_while_meter_held_ = false;
-    SetSecondLayer(true);
+  if (mode_ != UI_MODE_NORMAL) {
+    return;
+  }
+  if (button == BUTTON_FN_2) {
+    fn2_held_ = true;
+    fn2_used_ = false;
+  } else if (button == BUTTON_METER) {
+    if (fn2_held_) {
+      // FN 2 held + METER: next LFO wave. METER's release does nothing.
+      settings_.lfo_shape = (settings_.lfo_shape + 1) % LFO_SHAPE_LAST;
+      settings_dirty_ = true;
+      parameters_dirty_ = true;
+      fn2_used_ = true;
+      long_press_handled_[button] = true;
+    } else {
+      knob_moved_while_meter_held_ = false;
+      meter_held_ = true;
+    }
   }
 }
 
@@ -242,7 +290,7 @@ void Ui::OnButtonReleased(uint8_t button, uint32_t duration) {
       break;
 
     case BUTTON_FN_2:
-      if (short_press) {
+      if (short_press && !fn2_used_) {
         settings_.snap = (settings_.snap + 1) & 3;
         settings_dirty_ = true;
         parameters_dirty_ = true;
@@ -261,7 +309,6 @@ void Ui::OnButtonReleased(uint8_t button, uint32_t duration) {
           offset_calibration_shown_ = 0;
         }
       }
-      SetSecondLayer(second_layer_latched_);
       break;
   }
 }
@@ -274,14 +321,34 @@ void Ui::OnButtonsCombo() {
   }
 }
 
-void Ui::SetSecondLayer(bool active) {
-  if (active == second_layer_active_) {
+uint16_t* Ui::LayerValues(uint8_t layer) {
+  if (layer == 1) return settings_.second_layer;
+  if (layer == 2) return settings_.lfo_layer;
+  return main_layer_;
+}
+
+// FN 2 held wins over METER; METER held or latched wins over the main layer.
+void Ui::UpdateLayer() {
+  if (mode_ != UI_MODE_NORMAL) {
     return;
   }
-  second_layer_active_ = active;
-  uint8_t layer = active ? 1 : 0;
+  uint8_t layer = 0;
+  if (fn2_held_) {
+    layer = 2;
+  } else if (meter_held_ || second_layer_latched_) {
+    layer = 1;
+  }
+  SetLayer(layer);
+}
+
+void Ui::SetLayer(uint8_t layer) {
+  if (layer == layer_) {
+    return;
+  }
+  layer_ = layer;
+  const uint16_t* values = LayerValues(layer);
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
-    int32_t value = active ? settings_.second_layer[i] : main_layer_[i];
+    int32_t value = values[i];
     caught_[layer][i] = Abs(pot_[i] - value) < kPickupWindow;
     above_[layer][i] = pot_[i] > value;
   }
@@ -290,10 +357,11 @@ void Ui::SetSecondLayer(bool active) {
 // --- Main loop ---------------------------------------------------------------
 
 void Ui::ReadKnobs() {
-  uint8_t layer = second_layer_active_ ? 1 : 0;
+  uint8_t layer = layer_;
+  uint16_t* values = LayerValues(layer);
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
     int32_t position = pot_[i];
-    uint16_t* value = layer ? &settings_.second_layer[i] : &main_layer_[i];
+    uint16_t* value = &values[i];
     if (!caught_[layer][i]) {
       // Pick-up: the stored value only follows the knob once the knob has
       // reached it, so switching layers never makes a parameter jump.
@@ -313,6 +381,9 @@ void Ui::ReadKnobs() {
       if (press_time_[BUTTON_METER]) {
         knob_moved_while_meter_held_ = true;
       }
+      if (layer == 2) {
+        fn2_used_ = true;
+      }
     }
   }
 }
@@ -321,7 +392,7 @@ void Ui::ComputeParameters() {
   VoiceParameters n;
   ComputeVoiceParameters(
       settings_.engine, settings_.snap, main_layer_, settings_.second_layer,
-      &n);
+      settings_.lfo_layer, settings_.lfo_shape, &n);
   // Copy field by field: each 32-bit store is atomic for the interrupt.
   volatile int32_t* dst = reinterpret_cast<volatile int32_t*>(&parameters_);
   const int32_t* src = reinterpret_cast<const int32_t*>(&n);
@@ -443,17 +514,24 @@ void Ui::PaintLeds() {
       break;
   }
 
-  // Normal mode. Amber instead of green while the second layer is active.
-  uint8_t red = second_layer_active_ ? 255 : 0;
-  uint8_t green = second_layer_active_ ? 120 : 255;
+  // Normal mode. Amber instead of green while the second layer is active,
+  // red on the LFO layer.
+  uint8_t red = layer_ ? 255 : 0;
+  uint8_t green = layer_ == 1 ? 120 : (layer_ == 2 ? 0 : 255);
   leds_.set(settings_.engine, red, green);
-  if (warning_ || curve_warning_) {
-    if (blink) leds_.set(2, 255, 0);
-  } else if (external_) {
-    leds_.set(2, 255, 90);
+  if ((warning_ || curve_warning_) && blink) {
+    leds_.set(2, 255, 0);
   }
   if (trigger_flash_) {
     leds_.set(3, 0, 255);
+  }
+  if (layer_ == 2) {
+    // Right column: top LED = triangle, second = ramp up. It pulses with
+    // the LFO, so its speed is visible even with the depth at zero.
+    int32_t wave = Voice::LfoWave(lfo_phase_, settings_.lfo_shape);
+    uint8_t brightness = static_cast<uint8_t>((wave + 32768) >> 8);
+    leds_.set(4 + settings_.lfo_shape, brightness, 0);
+    return;
   }
   for (uint8_t row = 0; row < 4; ++row) {
     if (3 - row <= settings_.snap) {

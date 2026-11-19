@@ -4,7 +4,7 @@
 //
 // Patch: trigger into EXCITE 1, V/oct into EXCITE 2, sound from OUT 1.
 // Set channel 1's response trimmer fully clockwise (LIN) and LEVEL MOD 1
-// fully counter-clockwise. Leave IN 1 unpatched.
+// fully counter-clockwise. IN 1 is not used.
 
 #include "stmlib/system/system_clock.h"
 
@@ -31,6 +31,16 @@ Ui ui;
 Voice voice;
 
 bool gate = false;
+
+// The stock Dac::Write returns while the SPI is still sending the second half
+// of the word. A second write right after it raises SYNC before the DAC8552
+// has its 24 bits, and the DAC drops the first word (channel 1 never got its
+// VCA level). Wait for the end of each transfer. 32 bits at 18 MHz: 1.8 us.
+static inline void DacWrite(uint8_t channel, uint16_t value) {
+  dac.Write(channel, value);
+  while (!(SPI2->SR & SPI_I2S_FLAG_TXE)) { }
+  while (SPI2->SR & SPI_I2S_FLAG_BSY) { }
+}
 
 extern "C" {
 
@@ -63,26 +73,25 @@ void Process(uint16_t* cv) {
   }
 
   int32_t pitch = ui.Pitch(cv_scaler.excite_sample(1));
-  bool external = ui.External(cv_scaler.audio_sample(0));
 
   uint16_t gain = 0;
   uint16_t frequency = 0;
-  voice.Process(ui.parameters(), trigger, pitch, external, &gain, &frequency);
+  voice.Process(ui.parameters(), trigger, pitch, &gain, &frequency);
 
   if (ui.calibrating()) {
     // Stock calibration: VCAs closed, filters open.
-    dac.Write(0, cv_scaler.ScaleGain(0, 0));
+    DacWrite(0, cv_scaler.ScaleGain(0, 0));
     pwm.Write(0, 0);
-    dac.Write(1, cv_scaler.ScaleGain(1, 0));
+    DacWrite(1, cv_scaler.ScaleGain(1, 0));
     pwm.Write(1, 0);
   } else {
-    dac.Write(0, cv_scaler.ScaleGain(0, gain));
+    DacWrite(0, cv_scaler.ScaleGain(0, gain));
     pwm.Write(0, 65535 - frequency);
     // Channel 2 makes no sound: VCA closed, filter closed.
-    dac.Write(1, cv_scaler.ScaleGain(1, 0));
+    DacWrite(1, cv_scaler.ScaleGain(1, 0));
     pwm.Write(1, 65535);
   }
-  ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0));
+  ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0), voice.lfo_phase());
 }
 
 void Init() {

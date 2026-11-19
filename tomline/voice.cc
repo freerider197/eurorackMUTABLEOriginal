@@ -57,6 +57,7 @@ void Voice::Init() {
   gliding_ = false;
   phase_ = 0;
   partial_phase_ = 0;
+  lfo_phase_ = 0;
   amp_ = 0;
   attack_ = kUnity;
   sweep_ = 0;
@@ -73,7 +74,6 @@ void Voice::Process(
     const VoiceParameters& p,
     bool trigger,
     int32_t pitch,
-    bool external,
     uint16_t* gain,
     uint16_t* frequency) {
   if (trigger) {
@@ -120,8 +120,15 @@ void Voice::Process(
   int32_t env = static_cast<int32_t>(
       static_cast<int64_t>(amp_) * attack_ >> 45);  // Q15
 
-  // Oscillators.
+  // Pitch LFO, added after the glide so the glide does not smooth it.
+  lfo_phase_ += static_cast<uint32_t>(p.lfo_increment);
   int32_t s = semitones_;
+  if (p.lfo_depth) {
+    s += static_cast<int32_t>(static_cast<int64_t>(p.lfo_depth) *
+                              LfoWave(lfo_phase_, p.lfo_shape) >> 15);
+  }
+
+  // Oscillators.
   s += static_cast<int32_t>(static_cast<int64_t>(p.sweep_depth) * sweep_ >> 30);
   s += static_cast<int32_t>(static_cast<int64_t>(p.snap_depth) * snap_ >> 30);
   uint32_t increment = SemitonesToIncrement(s);
@@ -165,19 +172,13 @@ void Voice::Process(
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
   v = ScaleMix(v);
 
-  int32_t g;
-  if (external) {
-    // IN 1 is patched: plain envelope, unity gain at the peak (lin law).
-    g = env;
-  } else {
-    // Lift the wave by its own peak level so the VCA word never goes below
-    // zero. The lift decays with the amplitude envelope, so OUT 1 goes back
-    // to 0 V when the note dies out.
-    int32_t magnitude = v < 0 ? -v : v;
-    int32_t decayed = Decay(bias_, p.amp_coefficient);
-    bias_ = magnitude > decayed ? magnitude : decayed;
-    g = bias_ + v;
-  }
+  // Lift the wave by its own peak level so the VCA word never goes below
+  // zero. The lift decays with the amplitude envelope, so OUT 1 goes back to
+  // 0 V when the note dies out.
+  int32_t magnitude = v < 0 ? -v : v;
+  int32_t decayed = Decay(bias_, p.amp_coefficient);
+  bias_ = magnitude > decayed ? magnitude : decayed;
+  int32_t g = bias_ + v;
   CONSTRAIN(g, 0, 65535);
   *gain = g;
 
