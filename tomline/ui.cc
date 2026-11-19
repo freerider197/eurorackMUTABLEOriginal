@@ -514,6 +514,25 @@ void Ui::PaintLeds() {
       break;
   }
 
+  // DIAGNOSTIC BUILD: LED meters instead of the normal display.
+  // Left column: IN 1 voltage, one green LED per volt from the bottom (top
+  // LED red if it reads below -0.5 V). Right column, top three: VCA 1 sense
+  // reading, one amber LED per quarter of the ADC range from the top.
+  // Bottom right: flashes green on each trigger into EXCITE 1.
+  {
+    int32_t in1 = cv_scaler_->audio_sample(0);
+    int32_t volts = (in1 + kCountsPerVolt / 2) / kCountsPerVolt;
+    if (in1 < -kCountsPerVolt / 2) {
+      leds_.set(0, 255, 0);
+    } else {
+      for (int32_t i = 0; i < 4 && i < volts; ++i) leds_.set(3 - i, 0, 255);
+    }
+    int32_t sense = cv_scaler_->raw_gain_sample(0);
+    for (int32_t i = 0; i < 3 && i < (sense >> 14); ++i) leds_.set(4 + i, 255, 120);
+    if (trigger_flash_) leds_.set(7, 0, 255);
+    return;
+  }
+
   // Normal mode. Amber instead of green while the second layer is active,
   // red on the LFO layer.
   uint8_t red = layer_ ? 255 : 0;

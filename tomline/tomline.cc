@@ -15,6 +15,7 @@
 #include "streams/drivers/system.h"
 #include "streams/gain.h"
 
+#include "tomline/tables.h"
 #include "tomline/ui.h"
 #include "tomline/voice.h"
 
@@ -31,6 +32,12 @@ Ui ui;
 Voice voice;
 
 bool gate = false;
+
+// DIAGNOSTIC BUILD (test tone): no voice. Channel 1 plays a steady 220 Hz
+// tone, channel 2 a steady 330 Hz tone, filters open. Increments at the
+// 31,088 Hz firmware rate: f / 31088.08 * 2^32.
+uint32_t tone_phase[2] = { 0, 0 };
+const uint32_t kToneIncrement[2] = { 30394693, 45592040 };
 
 extern "C" {
 
@@ -64,9 +71,15 @@ void Process(uint16_t* cv) {
 
   int32_t pitch = ui.Pitch(cv_scaler.excite_sample(1));
 
+  (void)pitch;
   uint16_t gain = 0;
-  uint16_t frequency = 0;
-  voice.Process(ui.parameters(), trigger, pitch, &gain, &frequency);
+  uint16_t tone_gain[2];
+  for (uint8_t ch = 0; ch < 2; ++ch) {
+    tone_phase[ch] += kToneIncrement[ch];
+    int32_t s = lut_sine[tone_phase[ch] >> 22];
+    tone_gain[ch] = static_cast<uint16_t>(16384 + (s * 12000 >> 15));
+  }
+  gain = tone_gain[0];
 
   if (ui.calibrating()) {
     // Stock calibration: VCAs closed, filters open.
@@ -75,11 +88,10 @@ void Process(uint16_t* cv) {
     dac.Write(1, cv_scaler.ScaleGain(1, 0));
     pwm.Write(1, 0);
   } else {
-    dac.Write(0, cv_scaler.ScaleGain(0, gain));
-    pwm.Write(0, 65535 - frequency);
-    // Channel 2 makes no sound: VCA closed, filter closed.
-    dac.Write(1, cv_scaler.ScaleGain(1, 0));
-    pwm.Write(1, 65535);
+    dac.Write(0, cv_scaler.ScaleGain(0, tone_gain[0]));
+    pwm.Write(0, 0);  // filter open
+    dac.Write(1, cv_scaler.ScaleGain(1, tone_gain[1]));
+    pwm.Write(1, 0);
   }
   ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0), voice.lfo_phase());
 }
