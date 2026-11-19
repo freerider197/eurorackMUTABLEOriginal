@@ -166,9 +166,9 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
           <thead><tr><th>Control</th><th>Job</th><th>With METER</th></tr></thead>
           <tbody>
             <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Noise level</td></tr>
-            <tr><td>MOD 1</td><td>Tone: filter envelope. Closed at 7 o'clock, most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
-            <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Sweep time</td></tr>
-            <tr><td>MOD 2</td><td>Sweep depth: pitch drop on each hit</td><td>Glide (fully left = off)</td></tr>
+            <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
+            <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Sweep time: how fast the pitch falls back to the note</td></tr>
+            <tr><td>MOD 2</td><td>Sweep amount: 808/909-style pitch envelope. Each hit starts on the note, rises by this amount in 1 ms, then falls back</td><td>Glide (fully left = off)</td></tr>
             <tr><td>FN 1</td><td>Engine: BT or LT</td><td>—</td></tr>
             <tr><td>FN 2</td><td>Tap: snap 0–3, attack click of 0.4, 1.5, 4 or 10 ms</td><td>—</td></tr>
             <tr><td>FN 2 held</td><td>Pitch LFO (or hold L): SHAPE 1 speed 0.05–20 Hz, MOD 1 depth up to ±12 st (fully left = off). Tap METER: triangle / ramp up. LEDs red, the wave LED pulses</td><td>—</td></tr>
@@ -682,7 +682,7 @@ const META = {
   'main0': { n: 'DECAY', f: v => Math.round(tauOf(v) * 1000) + ' ms' },
   'main1': { n: 'TONE', f: v => pct(v) + (v < 0.5 ? ' · envelope' : ' · envelope + open') },
   'main2': { n: 'TUNE', f: v => { const s = (v - 0.5) * 24; return (s >= 0 ? '+' : '') + s.toFixed(1) + ' st'; } },
-  'main3': { n: 'SWEEP', f: v => (v * (S.k.engine === 0 ? 12 : 24)).toFixed(1) + ' st drop' },
+  'main3': { n: 'SWEEP', f: v => '+' + (v * (S.k.engine === 0 ? 12 : 24)).toFixed(1) + ' st pitch envelope' },
   'second0': { n: 'NOISE', f: v => pct(v) },
   'second1': { n: '+1 OCT', f: v => pct(v) },
   'second2': { n: 'SWEEP TIME', f: v => Math.round((0.006 + v * v * 0.3) * 1000 * (S.k.engine === 0 ? 0.6 : 1)) + ' ms' },
