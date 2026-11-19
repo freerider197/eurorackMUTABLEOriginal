@@ -14,6 +14,9 @@ The owner is not a developer. Explain results in plain words, and ask before any
 ## Commands
 
 ```bash
+# FIRST, every session: start from the newest tomline-firmware (the clone may be on master, which lags behind)
+git fetch origin tomline-firmware && git checkout -B "$(git branch --show-current)" origin/tomline-firmware
+
 # once per clone: the shared libraries are git submodules
 git submodule update --init --depth 1 stmlib stm_audio_bootloader
 
@@ -81,7 +84,7 @@ node tomline/test/compare_browser.js
   follow-up issue instead of doing it.
 - Before coding, restate the goal and "done when" in 2–3 lines. For anything touching flash layout, calibration, saved
   settings or the bootloader, describe the plan and wait for an OK.
-- Branch from `tomline-firmware` and open the PR against it. Branch names: `<agent>/<issue-number>-<short-topic>`,
+- Branch from the newest `tomline-firmware` (first command above, before any work) and open the PR against it. Branch names: `<agent>/<issue-number>-<short-topic>`,
   e.g. `claude/12-lt-decay-range`.
 - Commits: one change each. Subject ≤ 72 chars, imperative, no semicolon lists ("Fix LT pitch drift at high V/oct").
   Add a body only for the why.
