@@ -4,7 +4,7 @@
 //
 //   SHAPE 1   decay               | with METER: noise level
 //   MOD 1     tone (filter env)   | with METER: +1 octave level
-//   SHAPE 2   tune, +/-24 st      | with METER: sweep time
+//   SHAPE 2   tune, +/-12 st (C2) | with METER: sweep time
 //   MOD 2     sweep depth         | with METER: glide
 //   FN 1      engine: BT / LT
 //   FN 2      snap 0..3
@@ -54,7 +54,7 @@ struct Settings {
   uint8_t snap;
   uint8_t padding[2];
   uint16_t second_layer[KNOB_LAST];
-  int32_t voct_offset;  // EXCITE 2 counts at 0 V (C1)
+  int32_t voct_offset;  // EXCITE 2 counts at 0 V
   int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
   uint32_t magic;
 };
