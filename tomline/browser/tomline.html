@@ -165,7 +165,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
         <div class="tbl"><table>
           <thead><tr><th>Control</th><th>Job</th><th>With METER</th></tr></thead>
           <tbody>
-            <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Crush: fully left = off, then the sample rate from 6 kHz down to 750 Hz (ring tones and grit)</td></tr>
+            <tr><td>SHAPE 1</td><td>Decay, 95 ms to 2.5 s</td><td>Crush: fully left = off, then the sample rate from 6 kHz down to 750 Hz (ring tones and grit)</td></tr>
             <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
             <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Wave: fully left = sine, then triangle, folded sine, and square at fully right</td></tr>
             <tr><td>MOD 2</td><td>Soft distortion: fully left = clean, turning up drives the sound into a soft clipper (up to +12 dB). The loud start of each hit saturates, the quiet tail stays clean</td><td>Glide (fully left = off)</td></tr>
@@ -255,7 +255,7 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
   let fold = F(w3 - F(1));
   if (fold < F(0)) fold = F(0);
   if (fold > F(1)) fold = F(1);
-  const tau = F(F(0.015) * fExp2(F(decay * F(7.38082))));
+  const tau = F(F(0.095) * fExp2(F(decay * F(4.717857))));
   const snapTau = [F(0.0004), F(0.0015), F(0.004), F(0.010)][snap];
   const harmonic = F(bt ? 0.1 : 0.3);
   const tone = amountOffset(main[1]);
@@ -442,7 +442,7 @@ class TomlineVoice {
 class Engine {
   constructor(sr) {
     this.sr = sr;
-    this.k = { engine: 0, snap: 1, main: [29491, 40632, 32768, 19661], second: [0, 16384, 0, 0],
+    this.k = { engine: 0, snap: 1, main: [9146, 40632, 32768, 19661], second: [0, 16384, 0, 0],
       lfo: [32768, 0, 0, 0], lfoShape: 0, lfoFree: 0, level1: 0, curve1: 1, ideal: false, kick: false, master: 0.75, bpm: 122, playing: false };
     this.p = computeParams(0, 1, this.k.main, this.k.second);
     this.voice = new TomlineVoice();
@@ -556,7 +556,7 @@ class Engine {
 const NN = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const nname = n => NN[((n % 12) + 12) % 12] + (2 + Math.floor(n / 12));  // n = semitones of V/oct; TUNE at noon
 const ENG = ['BT · bass tom', 'LT · low tom'];
-const DEFV = { main: [29491, 40632, 32768, 19661], second: [0, 16384, 0, 0], lfo: [32768, 0, 0, 0] };
+const DEFV = { main: [9146, 40632, 32768, 19661], second: [0, 16384, 0, 0], lfo: [32768, 0, 0, 0] };
 const mk = a => a.map(([n, on]) => ({ n, on: !!on }));
 const PATS = [
   mk([[12,1],[12,0],[12,1],[24,1],[12,0],[15,1],[12,1],[10,1],[12,1],[12,0],[12,1],[19,1],[17,1],[15,1],[12,0],[10,1]]),
@@ -713,7 +713,7 @@ ${JK.map(jack).join('')}
 <text x="281" y="1166" text-anchor="middle" class="sub" style="font-size:15px;letter-spacing:1.5px">STREAMS ALT FIRMWARE · BROWSER MODEL</text>`;
 
 /* ===================== knob behavior ===================== */
-const tauOf = v => 0.015 * Math.pow(2, v * 7.38082);
+const tauOf = v => 0.095 * Math.pow(2, v * 4.717857);
 const pct = v => Math.round(v * 100) + '%';
 const META = {
   'main0': { n: 'DECAY', f: v => Math.round(tauOf(v) * 1000) + ' ms' },

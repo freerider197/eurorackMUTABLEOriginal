@@ -48,7 +48,7 @@ blinks red.
 
 | Control | Job | Hold METER (or tap METER to latch) |
 |---|---|---|
-| SHAPE 1 | Decay, 15 ms to 2.5 s | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
+| SHAPE 1 | Decay, 95 ms to 2.5 s | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
 | SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The +1 octave and snap don't change |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer | Glide between notes (fully CCW = off) |

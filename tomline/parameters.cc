@@ -70,8 +70,8 @@ void ComputeVoiceParameters(
   float lfo_speed = lfo_layer[KNOB_SHAPE_1] / 65535.0f;
   float lfo_depth = lfo_layer[KNOB_MOD_1] / 65535.0f;
 
-  // Decay time constant: 15 ms .. 2.5 s.
-  float tau = 0.015f * Exp2(decay * 7.38082f);  // 166.67 = 2^7.38082
+  // Decay time constant: 95 ms .. 2.5 s (shorter was too short to use).
+  float tau = 0.095f * Exp2(decay * 4.717857f);  // 26.316 = 2^4.717857
   const float snap_tau[4] = { 0.0004f, 0.0015f, 0.004f, 0.010f };
   float harmonic = bt ? 0.1f : 0.3f;
 

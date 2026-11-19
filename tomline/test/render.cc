@@ -256,7 +256,7 @@ double TuneRangeError() {
   const double expected[3] = { 0.0, 12.0, 24.0 };  // semitones above C1
   double worst = 0;
   for (int i = 0; i < 3; ++i) {
-    Patch patch = { ENGINE_BT, 1, { 29491, 40632, knob[i], 19661 },
+    Patch patch = { ENGINE_BT, 1, { 9146, 40632, knob[i], 19661 },
                     { 0, 16384, 0, 0 } };
     VoiceParameters p;
     ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
@@ -290,7 +290,7 @@ bool LfoParametersOk() {
   bool ok = true;
   for (int i = 0; i < 3; ++i) {
     uint16_t lfo[4] = { knob[i], knob[i], 0, 0 };
-    uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
+    uint16_t main_layer[4] = { 9146, 40632, 32768, 19661 };
     uint16_t second[4] = { 0, 16384, 0, 0 };
     VoiceParameters p;
     ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
@@ -313,7 +313,7 @@ bool LfoParametersOk() {
 // Restart on trigger: right after any trigger the LFO is at the middle of
 // its wave, wherever it was before. Free running: a trigger leaves it alone.
 bool LfoRestartOk() {
-  uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
+  uint16_t main_layer[4] = { 9146, 40632, 32768, 19661 };
   uint16_t second[4] = { 0, 16384, 0, 0 };
   uint16_t lfo[4] = { 50000, 40000, 0, 0 };
   bool ok = true;
@@ -343,7 +343,7 @@ bool LfoRestartOk() {
 
 // Depth at zero: the speed knob must not change the sound at all.
 bool LfoOffIsSilent(const std::vector<Step>& steps) {
-  Patch slow = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
+  Patch slow = { ENGINE_BT, 1, { 9146, 40632, 32768, 19661 },
                  { 0, 16384, 0, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
   Patch fast = slow;
   fast.lfo_layer[0] = 65535;
@@ -361,7 +361,7 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
 struct DistortionResult { double h3_db, tail_db; int32_t peak; };
 
 DistortionResult MeasureDistortion(uint8_t engine, uint16_t knob) {
-  uint16_t main_layer[4] = { 29491, 65535, 32768, knob };
+  uint16_t main_layer[4] = { 9146, 65535, 32768, knob };
   uint16_t second[4] = { 0, 0, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(engine, 0, main_layer, second, lfo, LFO_TRIANGLE, &p);
@@ -396,7 +396,7 @@ bool DistortionOk(uint8_t engine) {
   const double expected_tail[3] = { 0.0, 20 * log10(1.75), 20 * log10(4.0) };
   DistortionResult r[3];
   for (int i = 0; i < 3; ++i) r[i] = MeasureDistortion(engine, knobs[i]);
-  uint16_t off_layer[4] = { 29491, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  uint16_t off_layer[4] = { 9146, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(engine, 0, off_layer, zero, zero, LFO_TRIANGLE, &p);
   bool ok = p.distortion == 0 && r[1].h3_db > r[0].h3_db + 1 &&
@@ -426,7 +426,7 @@ bool DistortionOk(uint8_t engine) {
 struct WaveResult { double h[17]; int32_t peak; };
 
 WaveResult MeasureWave(uint8_t engine, uint16_t knob, double start_s = 0) {
-  uint16_t main_layer[4] = { 29491, 65535, 32768, 0 };
+  uint16_t main_layer[4] = { 9146, 65535, 32768, 0 };
   uint16_t second[4] = { 0, 0, knob, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(engine, 0, main_layer, second, lfo, LFO_TRIANGLE, &p);
@@ -460,7 +460,7 @@ bool WaveOk(uint8_t engine) {
   const char* names[4] = { "sine", "triangle", "folded", "square" };
   WaveResult r[4];
   for (int i = 0; i < 4; ++i) r[i] = MeasureWave(engine, knobs[i]);
-  uint16_t main_layer[4] = { 29491, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  uint16_t main_layer[4] = { 9146, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(engine, 0, main_layer, zero, zero, LFO_TRIANGLE, &p);
   bool ok = p.wave_tri == 0 && p.wave_fold == 0 && p.wave_square == 0;
@@ -782,7 +782,7 @@ double AttackJumpVolts(const Patch& patch) {
 // Power-up: VCA word at 0 for the first second (Ui::CheckSetup reads LEVEL
 // MOD 1 there), then a rise of one step per sample to 32767, never faster.
 bool PowerUpOk() {
-  uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
+  uint16_t main_layer[4] = { 9146, 40632, 32768, 19661 };
   uint16_t second[4] = { 0, 16384, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
@@ -801,7 +801,7 @@ bool PowerUpOk() {
 
 int main() {
   int failures = 0;
-  Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
+  Patch bt = { ENGINE_BT, 1, { 9146, 40632, 32768, 19661 },
                { 0, 16384, 0, 0 } };
   Patch lt = bt;
   lt.engine = ENGINE_LT;
