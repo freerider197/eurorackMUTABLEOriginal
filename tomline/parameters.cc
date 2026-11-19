@@ -50,7 +50,8 @@ void ComputeVoiceParameters(
     const uint16_t* second_layer,
     const uint16_t* lfo_layer,
     uint8_t lfo_shape,
-    VoiceParameters* p) {
+    VoiceParameters* p,
+    bool lfo_free) {
   bool bt = engine == ENGINE_BT;
   float decay = main_layer[KNOB_SHAPE_1] / 65535.0f;
   float tune = main_layer[KNOB_SHAPE_2] / 65535.0f;
@@ -102,6 +103,7 @@ void ComputeVoiceParameters(
   n.lfo_increment = static_cast<int32_t>(lfo_hz * (4294967296.0f / kSampleRate));
   n.lfo_depth = lfo_depth < 0.01f ? 0 : Q16(lfo_depth * lfo_depth * 12.0f);
   n.lfo_shape = lfo_shape == LFO_RAMP_UP ? LFO_RAMP_UP : LFO_TRIANGLE;
+  n.lfo_free = lfo_free ? 1 : 0;
 
 }
 

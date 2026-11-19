@@ -56,7 +56,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     settings_.engine = ENGINE_BT;
     settings_.snap = 1;
     settings_.lfo_shape = LFO_TRIANGLE;
-    settings_.padding = 0;
+    settings_.lfo_free = 0;
     copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
          &settings_.second_layer[0]);
     settings_.voct_offset = 0;
@@ -82,6 +82,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
   if (settings_.snap > 3) settings_.snap = 1;
   if (settings_.lfo_shape >= LFO_SHAPE_LAST) settings_.lfo_shape = LFO_TRIANGLE;
+  if (settings_.lfo_free > 1) settings_.lfo_free = 0;
 
   // The ADC scans one pot per ms: read all four before starting.
   for (uint8_t i = 0; i < 8; ++i) {
@@ -107,6 +108,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   meter_held_ = false;
   fn2_held_ = false;
   fn2_used_ = false;
+  fn1_with_fn2_ = false;
 
   mode_ = UI_MODE_NORMAL;
   settings_dirty_ = false;
@@ -225,7 +227,12 @@ void Ui::OnButtonPressed(uint8_t button) {
   if (mode_ != UI_MODE_NORMAL) {
     return;
   }
-  if (button == BUTTON_FN_2) {
+  if (button == BUTTON_FN_1) {
+    // Acted on at the release, so pressing FN 1 + FN 2 for the V/oct
+    // calibration (its release is ignored) does not also toggle it.
+    fn1_with_fn2_ = fn2_held_;
+    if (fn2_held_) fn2_used_ = true;
+  } else if (button == BUTTON_FN_2) {
     fn2_held_ = true;
     fn2_used_ = false;
   } else if (button == BUTTON_METER) {
@@ -282,7 +289,14 @@ void Ui::OnButtonReleased(uint8_t button, uint32_t duration) {
 
   switch (button) {
     case BUTTON_FN_1:
-      if (short_press) {
+      if (fn1_with_fn2_) {
+        // Tapped while FN 2 was held: LFO restart on trigger / free running.
+        if (short_press) {
+          settings_.lfo_free = !settings_.lfo_free;
+          settings_dirty_ = true;
+          parameters_dirty_ = true;
+        }
+      } else if (short_press) {
         settings_.engine = (settings_.engine + 1) % ENGINE_LAST;
         settings_dirty_ = true;
         parameters_dirty_ = true;
@@ -392,7 +406,7 @@ void Ui::ComputeParameters() {
   VoiceParameters n;
   ComputeVoiceParameters(
       settings_.engine, settings_.snap, main_layer_, settings_.second_layer,
-      settings_.lfo_layer, settings_.lfo_shape, &n);
+      settings_.lfo_layer, settings_.lfo_shape, &n, settings_.lfo_free != 0);
   // Copy field by field: each 32-bit store is atomic for the interrupt.
   volatile int32_t* dst = reinterpret_cast<volatile int32_t*>(&parameters_);
   const int32_t* src = reinterpret_cast<const int32_t*>(&n);
@@ -527,10 +541,14 @@ void Ui::PaintLeds() {
   }
   if (layer_ == 2) {
     // Right column: top LED = triangle, second = ramp up. It pulses with
-    // the LFO, so its speed is visible even with the depth at zero.
+    // the LFO, so its speed is visible even with the depth at zero. Third
+    // LED on = free running (off = restarts on each trigger).
     int32_t wave = Voice::LfoWave(lfo_phase_, settings_.lfo_shape);
     uint8_t brightness = static_cast<uint8_t>((wave + 32768) >> 8);
     leds_.set(4 + settings_.lfo_shape, brightness, 0);
+    if (settings_.lfo_free) {
+      leds_.set(6, 255, 0);
+    }
     return;
   }
   for (uint8_t row = 0; row < 4; ++row) {

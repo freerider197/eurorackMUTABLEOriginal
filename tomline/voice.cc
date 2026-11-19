@@ -87,6 +87,9 @@ void Voice::Process(
     partial_ = kUnity;
     phase_ = 0;
     partial_phase_ = 0;
+    if (!p.lfo_free) {
+      lfo_phase_ = LfoStart(p.lfo_shape);
+    }
   }
 
   // Pitch.

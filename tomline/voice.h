@@ -61,6 +61,7 @@ struct VoiceParameters {
   int32_t lfo_increment;        // pitch LFO phase increment per sample
   int32_t lfo_depth;            // semitones, Q16, 0 = off
   int32_t lfo_shape;            // LfoShape
+  int32_t lfo_free;             // 1 = free running, 0 = restarts on each trigger
 };
 
 class Voice {
@@ -81,6 +82,12 @@ class Voice {
 
   inline int32_t envelope() const { return amp_; }
   inline uint32_t lfo_phase() const { return lfo_phase_; }
+
+  // Where a trigger restarts the LFO: the middle of the wave (no pitch
+  // offset), going up.
+  static inline uint32_t LfoStart(int32_t shape) {
+    return shape == LFO_RAMP_UP ? 0x80000000UL : 0x40000000UL;
+  }
 
   // Pitch LFO wave, -32768 .. 32767. Triangle: rises for the first half of
   // the cycle, falls for the second. Ramp up: rises, then jumps back down.
@@ -107,7 +114,7 @@ class Voice {
 
   uint32_t phase_;
   uint32_t partial_phase_;
-  uint32_t lfo_phase_;  // free-running, not reset by triggers
+  uint32_t lfo_phase_;  // restarted by triggers unless lfo_free
 
   int32_t amp_;       // Q30
   int32_t attack_;    // Q30

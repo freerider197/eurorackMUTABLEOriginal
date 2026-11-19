@@ -6,7 +6,8 @@
 //   MOD 1     tone (filter env)   | with METER: +1 octave    | FN 2 held: LFO depth
 //   SHAPE 2   tune, +/-12 st (C2) | with METER: sweep time   |
 //   MOD 2     sweep depth         | with METER: glide        |
-//   FN 1      engine: BT / LT
+//   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
+//             each trigger (default) / free running.
 //   FN 2      tap: snap 0..3. Hold: LFO layer (the pitch LFO).
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
 //             Hold 1 s without turning a knob: stock offset calibration.
@@ -54,7 +55,7 @@ struct Settings {
   uint8_t engine;
   uint8_t snap;
   uint8_t lfo_shape;
-  uint8_t padding;
+  uint8_t lfo_free;  // 0 = LFO restarts on each trigger (was padding, so 0)
   uint16_t second_layer[KNOB_LAST];
   int32_t voct_offset;  // EXCITE 2 counts at 0 V
   int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
@@ -152,6 +153,7 @@ class Ui {
   bool meter_held_;
   bool fn2_held_;
   bool fn2_used_;  // a knob or METER was used while FN 2 was held: no snap
+  bool fn1_with_fn2_;  // FN 1 pressed while FN 2 held: its tap toggles free run
 
   uint32_t press_time_[BUTTON_LAST];
   bool long_press_handled_[BUTTON_LAST];
