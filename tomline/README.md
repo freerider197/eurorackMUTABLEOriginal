@@ -23,7 +23,9 @@ The sound comes from a bit-exact JavaScript port of `voice.cc` and
 filter words as the firmware, sample for sample (`test/compare_browser.js`
 checks this). The analog part after the DAC is modeled from the schematic,
 so levels and cutoff frequencies are estimates. The panel shows the
-firmware's LEDs and setup warnings.
+firmware's LEDs and setup warnings. With a mouse only: click METER to latch the
+second page, and click **Hold FN 2 · LFO** to keep the LFO page open (click
+it or FN 2 again to let go).
 
 When `voice.cc` or `parameters.cc` changes, update the block between
 `BEGIN FIRMWARE PORT` and `END FIRMWARE PORT` in `browser/tomline.html`, run

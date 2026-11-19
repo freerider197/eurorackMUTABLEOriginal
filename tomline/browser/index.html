@@ -122,6 +122,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
         <button id="play" class="play" type="button"><svg viewBox="0 0 14 14" aria-hidden="true"><path id="playIcon" d="M2 1 L13 7 L2 13 Z" fill="currentColor"/></svg><span id="playTxt">Play</span></button>
         <label class="sl" for="bpm">TEMPO <input id="bpm" type="range" min="60" max="180" step="1" value="122"><output id="bpmv">122</output></label>
         <label class="sl" for="master">VOLUME <input id="master" type="range" min="0" max="1" step="0.01" value="0.75"></label>
+        <button class="btn" type="button" id="fn2lock" aria-pressed="false" title="For a mouse: keeps FN 2 held, so the knobs set the LFO. Click again (or click FN 2) to let go">Hold FN 2 · LFO</button>
         <div class="lcd" aria-live="polite"><span id="lcdk">ENGINE</span><span id="lcdv">BT · bass tom</span></div>
       </div>
 
@@ -151,7 +152,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
       <div class="card keys">
         <div class="head">
           <h2>Keys</h2>
-          <span class="hint">A–K on your keyboard, Z / X for octave, Space to play, hold Shift for METER, L for FN 2 (LFO)</span>
+          <span class="hint">A–K on your keyboard, Z / X for octave, Space to play, hold Shift for METER, L for FN 2 (LFO). Mouse only: tap METER to latch it, or use Hold FN 2 above</span>
           <div class="oct push"><button class="btn" type="button" id="kod" aria-label="Octave down">−</button><output id="koct">C2</output><button class="btn" type="button" id="kou" aria-label="Octave up">+</button></div>
         </div>
         <div id="piano" class="piano"></div>
@@ -816,13 +817,14 @@ function press(id, fn) {
 let comboing = false;
 function combo() { comboing = true; lcd('FN 1 + FN 2', 'V/oct calibration: runs on the module (1 V, then 3 V)'); }
 // FN 1 tapped while FN 2 is held: LFO restart on trigger / free running.
-document.getElementById('b1').addEventListener('pointerdown', () => { S.fn1WithFn2 = S.fn2; if (S.fn2) S.fn2Used = true; });
+document.getElementById('b1').addEventListener('pointerdown', () => { S.fn1WithFn2 = S.fn2 || S.fn2Lock; if (S.fn1WithFn2) S.fn2Used = true; });
 press('b1', () => {
   if (S.fn1WithFn2) { S.fn1WithFn2 = false; setK('lfoFree', S.k.lfoFree ? 0 : 1); drawLeds(); lcd('LFO', S.k.lfoFree ? 'free running' : 'restarts on each trigger'); return; }
   setK('engine', (S.k.engine + 1) % 2); drawLeds(); drawKnobs(); lcd('ENGINE', ENG[S.k.engine]); });
 // FN 2: tap = snap. Held (or L held on the keyboard) = LFO layer; a knob or
 // METER used meanwhile cancels the snap step, as in ui.cc.
 press('b2', () => {
+  if (S.fn2Lock) { S.fn2 = false; setFn2Lock(false); return; }  // a click on FN 2 lets go of the hold
   const used = S.fn2Used; S.fn2 = false; setLayer();
   if (!used) { setK('snap', (S.k.snap + 1) % 4); drawLeds(); lcd('SNAP', ['off · no click', '0.4 ms click', '1.5 ms click', '4 ms click'][S.k.snap]); }
 });
@@ -832,13 +834,18 @@ press('b2', () => {
   const off = () => { if (S.fn2) { S.fn2 = false; setLayer(); } };
   b2.addEventListener('pointerup', off); b2.addEventListener('pointerleave', off); b2.addEventListener('pointercancel', off);
 }
+// Hold FN 2 button (for a mouse): FN 2 stays held until clicked again.
+S.fn2Lock = false;
+const fn2LockBtn = document.getElementById('fn2lock');
+function setFn2Lock(on) { S.fn2Lock = on; S.fn2Used = true; fn2LockBtn.setAttribute('aria-pressed', on); setLayer(); }
+fn2LockBtn.addEventListener('click', () => setFn2Lock(!S.fn2Lock));
 function setLayer() {
-  const l = S.fn2 ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
+  const l = (S.fn2 || S.fn2Lock) ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
   if (l === 2) lcd('LFO · FN 2 held', 'SHAPE 1 speed, MOD 1 depth · tap METER: ' + (S.k.lfoShape ? 'ramp up' : 'triangle') + ' · tap FN 1: ' + (S.k.lfoFree ? 'free running' : 'restart on trigger'));
   else lcd('METER', l ? 'second row: crush, —, wave, glide' : 'main row: decay, tone, tune, drive');
 }
 function nextLfoShape() { setK('lfoShape', (S.k.lfoShape + 1) % 2); S.fn2Used = true; drawLeds(); lcd('LFO WAVE', S.k.lfoShape ? 'ramp up' : 'triangle'); }
-press('meter', () => { if (S.fn2) { nextLfoShape(); return; } S.latched = !S.latched; setLayer(); });
+press('meter', () => { if (S.fn2 || S.fn2Lock) { nextLfoShape(); return; } S.latched = !S.latched; setLayer(); });
 JK.forEach(j => {
   const g = document.getElementById('j-' + j.id);
   const act = () => {
