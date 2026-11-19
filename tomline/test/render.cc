@@ -528,10 +528,9 @@ bool WaveLevelOk(uint8_t engine) {
 
 // Crush (METER + SHAPE 1), read from the voice's own VCA words with snap,
 // +1 octave and distortion off. One hit of C2, 0.1 to 0.6 s. Off: the words
-// change on most samples. Noon: a new value about every 100 samples
-// (300 Hz), every value still free. Full: also multiples of 4096 only, and
-// the quiet tail stops sooner. The output must stay within full scale.
-struct CrushResult { double changes, rms_db; bool on_grid; int32_t peak; double end_s; };
+// change on most samples. Just past off: about 6 kHz. Noon: about 2.1 kHz.
+// Full: about 750 Hz. The level must stay, and within full scale.
+struct CrushResult { double changes, rms_db; int32_t peak; };
 
 CrushResult MeasureCrush(uint8_t engine, uint16_t knob) {
   uint16_t main_layer[4] = { 40000, 65535, 32768, 0 };
@@ -542,7 +541,7 @@ CrushResult MeasureCrush(uint8_t engine, uint16_t knob) {
   voice.Init();
   uint16_t g, f;
   for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
-  CrushResult r = { 0, 0, true, 0, 0 };
+  CrushResult r = { 0, 0, 0 };
   const int a = static_cast<int>(0.1 * kFirmwareRate), b = static_cast<int>(0.6 * kFirmwareRate);
   int32_t last = 0;
   double sum = 0;
@@ -551,10 +550,8 @@ CrushResult MeasureCrush(uint8_t engine, uint16_t knob) {
     voice.Process(p, n == 0, 0, &g, &f);
     int32_t v = static_cast<int32_t>(g) - 32767;
     if (abs(v) > r.peak) r.peak = abs(v);
-    if (v != 0) r.end_s = static_cast<double>(n) / kFirmwareRate;
     if (n >= a && n < b) {
       if (v != last) ++changes;
-      if (v % 4096 != 0 && v != 32767 && v != -32767) r.on_grid = false;
       sum += static_cast<double>(v) * v;
     }
     last = v;
@@ -566,22 +563,23 @@ CrushResult MeasureCrush(uint8_t engine, uint16_t knob) {
 
 bool CrushOk(uint8_t engine) {
   CrushResult off = MeasureCrush(engine, 0);
+  CrushResult start = MeasureCrush(engine, 700);
   CrushResult mid = MeasureCrush(engine, 32768);
   CrushResult full = MeasureCrush(engine, 65535);
   uint16_t main_layer[4] = { 40000, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(engine, 0, main_layer, zero, zero, LFO_TRIANGLE, &p);
-  double rate_mid = mid.changes * kFirmwareRate;
-  bool ok = p.crush_increment == 0 && off.changes > 0.9 && !off.on_grid &&
-            rate_mid > 250 && rate_mid < 310 && !mid.on_grid && full.on_grid &&
-            fabs(mid.rms_db - off.rms_db) < 1.5 && fabs(full.rms_db - off.rms_db) < 2.0 &&
-            full.end_s < off.end_s && full.peak <= 32767 && mid.peak <= 32767;
-  printf("Crush %s (off / noon / full): new value on %.0f %% / %.1f %% / %.1f %% of samples "
-         "(noon: %.0f Hz), level %+.1f / %+.1f dB, multiples of 4096 at full: %s, "
-         "sound ends after %.2f / %.2f / %.2f s  %s\n",
-         engine == ENGINE_BT ? "BT" : "LT", off.changes * 100, mid.changes * 100,
-         full.changes * 100, rate_mid, mid.rms_db - off.rms_db, full.rms_db - off.rms_db,
-         full.on_grid ? "yes" : "no", off.end_s, mid.end_s, full.end_s, ok ? "OK" : "FAIL");
+  double hz[3] = { start.changes * kFirmwareRate, mid.changes * kFirmwareRate,
+                   full.changes * kFirmwareRate };
+  const double expected[3] = { 6000 * pow(2, -3 * 700 / 65535.0), 6000 * pow(2, -1.5), 750 };
+  bool ok = p.crush_increment == 0 && off.changes > 0.9 &&
+            full.peak <= 32767 && mid.peak <= 32767 && start.peak <= 32767;
+  for (int i = 0; i < 3; ++i) ok = ok && fabs(hz[i] / expected[i] - 1) < 0.05;
+  ok = ok && fabs(mid.rms_db - off.rms_db) < 1.0 && fabs(full.rms_db - off.rms_db) < 1.0;
+  printf("Crush %s (just past off / noon / full): sample rate %.0f / %.0f / %.0f Hz "
+         "(expected %.0f / %.0f / %.0f), level %+.1f / %+.1f dB  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", hz[0], hz[1], hz[2], expected[0], expected[1],
+         expected[2], mid.rms_db - off.rms_db, full.rms_db - off.rms_db, ok ? "OK" : "FAIL");
   return ok;
 }
 

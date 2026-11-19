@@ -48,7 +48,7 @@ blinks red.
 
 | Control | Job | Hold METER (or tap METER to latch) |
 |---|---|---|
-| SHAPE 1 | Decay, 15 ms to 2.5 s | Crush (bitcrusher). Fully CCW = off. The first half lowers the sample rate from 31 kHz to 300 Hz: ring tones on top of the note. The second half also cuts the levels (bit depth) down to 4 bits: the decay turns grainy, then stops early. Best heard with Tone open |
+| SHAPE 1 | Decay, 15 ms to 2.5 s | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
 | SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The +1 octave and snap don't change |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer | Glide between notes (fully CCW = off) |
@@ -236,8 +236,8 @@ closed keeps each note within 6 dB of Tone fully open (BT and LT, 0 to 4 V),
 and the Wave stages (sine, triangle, folded, square): the fundamental stays
 within 6 dB, the triangle has its 5th harmonic, the fold adds bright
 harmonics, the square has odd harmonics, and the level stays within 1 dB,
-and Crush (off / noon / full): the sample rate, the 4-bit levels, the level,
-and that the quiet tail stops sooner.
+and Crush: the sample rate just past off, at noon and at full, and that the
+level stays.
 It also checks that OUT 1 rests at 3.33 V, that its average level doesn't jump
 on a hit, and the power-up (0 V for 1 s, then a slow rise). It exits
 with an error if a check fails.
@@ -257,9 +257,8 @@ square), fundamental: BT +0.0 / -0.3 / -3.3 / -0.3 dB; level along the knob:
 BT -0.5 to +0.0 dB, LT -0.0 to +0.3 dB (without the level matching: -1.7 to
 +1.6 dB); triangle 5th harmonic 0.3 s into a note BT -31.5 dB (sine -36.5), LT
 -38.0 dB (sine -44.9); square 3rd harmonic BT -8.6, LT -9.6 dB (ideal -9.5).
-Crush (off / noon / full): a new value on 95-99 % / 1.0 % / 0.8 % of samples
-(302 Hz at noon), level within 0.1 dB, multiples of 4096 at full; the sound
-stops after 0.92 s instead of fading on. Tone closed vs open: BT -4.5 to
+Crush sample rate (just past off / noon / full): 5856 / 2120 / 748 Hz
+(expected 5868 / 2121 / 750), level within 0.1 dB. Tone closed vs open: BT -4.5 to
 -4.7 dB, LT -4.3 to -4.6 dB at every
 voltage (-2.6 dB with the moving lift, whose bump passed the closed filter;
 -25 dB before the floor). Retrigger: worst one-sample jump BT 0.39 V, LT
@@ -289,7 +288,7 @@ untouched values on page changes; with it, nothing moves.
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for 13
 patches (BT, LT, glide, everything at maximum, LFO triangle and ramp up, each
 restarting and free running, the wave at triangle, folded and square, and
-crush at a low rate and at full), and
+crush at two rates), and
 `tomline/test/compare_browser.js` runs the browser port on the same input:
 
 ```

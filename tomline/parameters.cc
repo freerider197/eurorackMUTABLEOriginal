@@ -121,23 +121,13 @@ void ComputeVoiceParameters(
   if (i > 15) i = 15;
   float level = kWaveLevelDb[i] + (kWaveLevelDb[i + 1] - kWaveLevelDb[i]) * (pos - i);
   n.wave_gain = static_cast<int32_t>(Exp2(-level * 0.1660964f) * 4096.0f);
-  // Crush. First half: the sample rate falls from 31 kHz to 300 Hz
-  // (2^-6.695); a bass note needs a rate this low for strong aliasing.
-  // Second half, at 300 Hz: the level step grows from 1 to 4096 (8 levels
-  // each side of zero). Fully CCW = off.
-  if (crush < 0.01f) {
-    n.crush_increment = 0;
-    n.crush_step = 1;
-  } else {
-    float rate = crush * 2.0f;
-    if (rate > 1.0f) rate = 1.0f;
-    float levels = crush * 2.0f - 1.0f;
-    if (levels < 0.0f) levels = 0.0f;
-    // 2147483520 = the largest float below 2^31.
-    n.crush_increment = static_cast<int32_t>(
-        Exp2(rate * -6.695f) * 2147483520.0f);
-    n.crush_step = static_cast<int32_t>(Exp2(levels * 12.0f));
-  }
+  // Crush: the sample rate goes from 6 kHz, just past fully CCW (off), down
+  // to 750 Hz at fully CW, 3 octaves (the owner's useful range). 2147483520
+  // = the largest float below 2^31.
+  n.crush_increment = crush < 0.01f
+      ? 0
+      : static_cast<int32_t>(Exp2(crush * -3.0f) *
+                             (6000.0f / kSampleRate * 2147483520.0f));
   ComputeAmountOffset(main_layer[KNOB_MOD_1], &n.tone_amount, &n.tone_offset);
 
   // Pitch LFO: 0.05 Hz .. 20 Hz (1 Hz at noon), depth up to +/-12 semitones

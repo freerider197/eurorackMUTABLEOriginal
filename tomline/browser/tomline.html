@@ -165,7 +165,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
         <div class="tbl"><table>
           <thead><tr><th>Control</th><th>Job</th><th>With METER</th></tr></thead>
           <tbody>
-            <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Crush: fully left = off, first half lowers the sample rate (ring tones), second half also the bit depth (grainy tail)</td></tr>
+            <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Crush: fully left = off, then the sample rate from 6 kHz down to 750 Hz (ring tones and grit)</td></tr>
             <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
             <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Wave: fully left = sine, then triangle, folded sine, and square at fully right</td></tr>
             <tr><td>MOD 2</td><td>Soft distortion: fully left = clean, turning up drives the sound into a soft clipper (up to +12 dB). The loud start of each hit saturates, the quiet tail stays clean</td><td>Glide (fully left = off)</td></tr>
@@ -241,13 +241,10 @@ function waveGain(wave) {
   const level = F(WAVE_LEVEL_DB[i] + F(F(WAVE_LEVEL_DB[i + 1] - WAVE_LEVEL_DB[i]) * F(pos - i)));
   return Math.trunc(F(fExp2(F(-level * F(0.1660964))) * F(4096)));
 }
-// parameters.cc Crush: sample rate 31 kHz -> 300 Hz, then level step 1 -> 4096.
+// parameters.cc Crush: sample rate 6 kHz (just past off) -> 750 Hz.
 function crushParams(crush) {
-  if (crush < F(0.01)) return { crushInc: 0, crushStep: 1 };
-  let rate = F(crush * F(2)); if (rate > F(1)) rate = F(1);
-  let levels = F(F(crush * F(2)) - F(1)); if (levels < F(0)) levels = F(0);
-  return { crushInc: Math.trunc(F(fExp2(F(rate * F(-6.695))) * F(2147483520))),
-           crushStep: Math.trunc(fExp2(F(levels * F(12)))) };
+  if (crush < F(0.01)) return { crushInc: 0 };
+  return { crushInc: Math.trunc(F(fExp2(F(crush * F(-3))) * F(F(F(6000) / K_SR_F) * F(2147483520)))) };
 }
 function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0, lfoFree = 0) {
   const bt = engine === 0;
@@ -416,14 +413,10 @@ class TomlineVoice {
     v += Math.imul(Math.imul(p.snapNoise, snapEnv) >> 15, white) >> 15;
     if (p.distortion) v = softClip(Math.imul(v, p.distortion) >> 12);  // MOD 2 soft distortion
     v = clip15(Math.floor(v * 31130 / 32768));
-    if (p.crushInc) {  // Crush: sample and hold, then fewer levels
+    if (p.crushInc) {  // Crush: sample and hold at a lower rate
       const before = this.crushPhase;
       this.crushPhase = (this.crushPhase + p.crushInc * 2) >>> 0;
-      if (this.crushPhase < before) {
-        let m = Math.abs(v);
-        if (p.crushStep > 1) { m = Math.trunc((m + (p.crushStep >> 1)) / p.crushStep) * p.crushStep; if (m > 32767) m = 32767; }
-        this.crushHold = v < 0 ? -m : m;
-      }
+      if (this.crushPhase < before) this.crushHold = v;
       v = this.crushHold;
     }
     if (this.fade > 0) {
@@ -727,7 +720,7 @@ const META = {
   'main1': { n: 'TONE', f: v => pct(v) + (v < 0.5 ? ' · envelope' : ' · envelope + open') },
   'main2': { n: 'TUNE', f: v => { const s = (v - 0.5) * 24; return (s >= 0 ? '+' : '') + s.toFixed(1) + ' st'; } },
   'main3': { n: 'DRIVE', f: v => v < 0.01 ? 'off · clean' : '+' + (20 * Math.log10(1 + 3 * v * v)).toFixed(1) + ' dB soft distortion' },
-  'second0': { n: 'CRUSH', f: v => v < 0.01 ? 'off' : v <= 0.5 ? Math.round(31088 * Math.pow(2, -6.695 * v * 2)) + ' Hz' : '300 Hz · ' + Math.round(Math.log2(32768 / Math.pow(2, (v * 2 - 1) * 12)) + 1) + ' bits' },
+  'second0': { n: 'CRUSH', f: v => v < 0.01 ? 'off' : Math.round(6000 * Math.pow(2, -3 * v)) + ' Hz' },
   'second1': { n: '+1 OCT', f: v => pct(v) },
   'second2': { n: 'WAVE', f: v => v < 0.01 ? 'sine' : v < 1 / 3 ? 'sine → triangle' : v < 2 / 3 ? 'triangle → folded' : v < 0.99 ? 'folded → square' : 'square' },
   'second3': { n: 'GLIDE', f: v => v < 0.01 ? 'off' : Math.round((0.004 + v * v * 0.5) * 1000) + ' ms' },

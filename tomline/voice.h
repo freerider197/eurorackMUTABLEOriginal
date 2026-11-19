@@ -59,7 +59,6 @@ struct VoiceParameters {
   int32_t wave_square;          // Q15, folded -> square
   int32_t wave_gain;            // Q12, evens out the level along the Wave knob
   int32_t crush_increment;      // Q31 sample-and-hold rate / 31088 Hz, 0 = off
-  int32_t crush_step;           // level step of the held sample, 1 = all levels
   int32_t tone_amount;          // 0..65535, as streams/meta_parameters.h
   int32_t tone_offset;          // 0..65535
   int32_t lfo_increment;        // pitch LFO phase increment per sample

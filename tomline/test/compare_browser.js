@@ -22,7 +22,7 @@ const cases = [
   ['build/tomline_words_wave_fold.bin', 1, 2, [45000, 60000, 32768, 0], [0, 20000, 50000, 0]],
   ['build/tomline_words_wave_square.bin', 0, 0, [50000, 50000, 20000, 40000], [0, 0, 65535, 20000]],
   ['build/tomline_words_crush_rate.bin', 0, 1, [40000, 60000, 32768, 19661], [20000, 16384, 0, 0]],
-  ['build/tomline_words_crush_bits.bin', 1, 2, [50000, 65535, 32768, 30000], [55000, 16384, 30000, 0]],
+  ['build/tomline_words_crush_low.bin', 1, 2, [50000, 65535, 32768, 30000], [55000, 16384, 30000, 0]],
 ];
 let failed = false;
 for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0, lfoFree = 0] of cases) {

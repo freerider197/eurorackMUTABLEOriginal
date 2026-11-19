@@ -220,19 +220,12 @@ void Voice::Process(
   }
   v = ScaleMix(v);
   // Crush (METER + SHAPE 1): the mix is sampled at a lower rate and held
-  // (aliasing: ring tones), and each held sample is rounded to the nearest
-  // multiple of crush_step (fewer levels: the quiet tail turns grainy, then
-  // stops).
+  // (aliasing: ring tones and grit).
   if (p.crush_increment) {
     uint32_t before = crush_phase_;
     crush_phase_ += static_cast<uint32_t>(p.crush_increment) << 1;
     if (crush_phase_ < before) {
-      int32_t m = v < 0 ? -v : v;
-      if (p.crush_step > 1) {
-        m = (m + (p.crush_step >> 1)) / p.crush_step * p.crush_step;
-        if (m > 32767) m = 32767;
-      }
-      crush_hold_ = v < 0 ? -m : m;
+      crush_hold_ = v;
     }
     v = crush_hold_;
   }
