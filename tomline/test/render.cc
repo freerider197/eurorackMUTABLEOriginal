@@ -49,6 +49,8 @@ struct Patch {
   uint8_t snap;
   uint16_t main_layer[4];    // decay, tone, tune, sweep
   uint16_t second_layer[4];  // noise, +1 oct, sweep time, glide
+  uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
+  uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
 };
 
 struct Result {
@@ -60,7 +62,7 @@ Result Render(const Patch& patch, const std::vector<Step>& steps, double bpm,
               int repeats, bool external) {
   VoiceParameters p;
   ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
-                         patch.second_layer, &p);
+                         patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
   Voice voice;
   voice.Init();
   Result r;
@@ -232,10 +234,64 @@ double TuneRangeError() {
                     { 9830, 16384, 22938, 0 } };
     VoiceParameters p;
     ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
-                           patch.second_layer, &p);
+                           patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
     worst = fmax(worst, fabs(p.tune / 65536.0 - expected[i]));
   }
   return worst;
+}
+
+// Pitch LFO, depth fully up (+/-12 st), speed fully down (0.05 Hz, one cycle
+// in 20 s). Both waves start at their lowest point when the module starts,
+// so 0.2 to 1.2 s into the first note the pitch is about 12 st below C2,
+// rising by 1.2 st/s (ramp up) or 2.4 st/s (triangle). Returns the error of
+// the measured average pitch in semitones.
+double LfoPitchError(uint8_t shape, double* measured_st) {
+  Patch patch = { ENGINE_BT, 1, { 0, 0, 32768, 0 }, { 0, 0, 0, 0 },
+                  { 0, 65535, 0, 0 }, shape };
+  double rate = shape == LFO_RAMP_UP ? 1.2 : 2.4;
+  double expected = -12.0 + rate * 0.7;
+  double hz = MeasurePitch(patch, 0);
+  *measured_st = 12.0 * log2(hz / 65.40639133);
+  return fabs(*measured_st - expected);
+}
+
+// LFO knob maths: speed 0.05 / 1 / 20 Hz, depth off / 12 st, and the wave
+// shapes at their turning points.
+bool LfoParametersOk() {
+  const uint16_t knob[3] = { 0, 32768, 65535 };
+  const double hz[3] = { 0.05, 1.0, 20.0 };
+  bool ok = true;
+  for (int i = 0; i < 3; ++i) {
+    uint16_t lfo[4] = { knob[i], knob[i], 0, 0 };
+    uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
+    uint16_t second[4] = { 9830, 16384, 22938, 0 };
+    VoiceParameters p;
+    ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
+    double f = p.lfo_increment * kFirmwareRate / 4294967296.0;
+    ok = ok && fabs(f / hz[i] - 1.0) < 0.01;
+    if (i == 0) ok = ok && p.lfo_depth == 0;
+    if (i == 2) ok = ok && p.lfo_depth == 12 * 65536;
+  }
+  ok = ok && Voice::LfoWave(0, LFO_TRIANGLE) == -32768 &&
+       Voice::LfoWave(0x7fffffffUL, LFO_TRIANGLE) == 32767 &&
+       Voice::LfoWave(0x80000000UL, LFO_TRIANGLE) == 32767 &&
+       Voice::LfoWave(0xffffffffUL, LFO_TRIANGLE) == -32768 &&
+       Voice::LfoWave(0x40000000UL, LFO_TRIANGLE) == 0 &&
+       Voice::LfoWave(0, LFO_RAMP_UP) == -32768 &&
+       Voice::LfoWave(0x80000000UL, LFO_RAMP_UP) == 0 &&
+       Voice::LfoWave(0xffffffffUL, LFO_RAMP_UP) == 32767;
+  return ok;
+}
+
+// Depth at zero: the speed knob must not change the sound at all.
+bool LfoOffIsSilent(const std::vector<Step>& steps) {
+  Patch slow = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
+                 { 9830, 16384, 22938, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
+  Patch fast = slow;
+  fast.lfo_layer[0] = 65535;
+  fast.lfo_shape = LFO_RAMP_UP;
+  return Render(slow, steps, 122.0, 1, false).raw ==
+         Render(fast, steps, 122.0, 1, false).raw;
 }
 
 int main() {
@@ -287,6 +343,24 @@ int main() {
   printf("Glide C2 -> C3, 1.5 s later: %+.2f cents  %s\n", glide,
          glide_ok ? "OK" : "FAIL (glide stops short of the note)");
   failures += !glide_ok;
+
+  bool lfo_params_ok = LfoParametersOk();
+  printf("LFO knobs (0.05 / 1 / 20 Hz, depth off / 12 st, wave shapes): %s\n",
+         lfo_params_ok ? "OK" : "FAIL");
+  failures += !lfo_params_ok;
+  for (uint8_t shape = 0; shape < LFO_SHAPE_LAST; ++shape) {
+    double measured;
+    double error = LfoPitchError(shape, &measured);
+    bool ok = error < 0.1;
+    printf("LFO %-8s at full depth, 0.2-1.2 s: %+.2f st from C2 (error %.3f st)  %s\n",
+           shape == LFO_RAMP_UP ? "ramp up" : "triangle", measured, error,
+           ok ? "OK" : "FAIL");
+    failures += !ok;
+  }
+  bool lfo_off_ok = LfoOffIsSilent(roller);
+  printf("LFO depth at zero, speed turned: sound unchanged  %s\n",
+         lfo_off_ok ? "OK" : "FAIL");
+  failures += !lfo_off_ok;
 
   bool mix_ok = MixScalingOk();
   printf("Loud output mix (noise 100 %%, hard hit): %s\n",

@@ -48,6 +48,8 @@ void ComputeVoiceParameters(
     uint8_t snap,
     const uint16_t* main_layer,
     const uint16_t* second_layer,
+    const uint16_t* lfo_layer,
+    uint8_t lfo_shape,
     VoiceParameters* p) {
   bool bt = engine == ENGINE_BT;
   float decay = main_layer[KNOB_SHAPE_1] / 65535.0f;
@@ -57,6 +59,8 @@ void ComputeVoiceParameters(
   float octave = second_layer[KNOB_MOD_1] / 65535.0f;
   float sweep_time = second_layer[KNOB_SHAPE_2] / 65535.0f;
   float glide = second_layer[KNOB_MOD_2] / 65535.0f;
+  float lfo_speed = lfo_layer[KNOB_SHAPE_1] / 65535.0f;
+  float lfo_depth = lfo_layer[KNOB_MOD_1] / 65535.0f;
 
   // Decay time constant: 15 ms .. 2.5 s.
   float tau = 0.015f * Exp2(decay * 7.38082f);  // 166.67 = 2^7.38082
@@ -91,6 +95,13 @@ void ComputeVoiceParameters(
   n.noise_k2 = bt ? 1928 : 3889;
   n.drive = bt ? 4915 : 4300;  // Q12: 1.2 / 1.05
   ComputeAmountOffset(main_layer[KNOB_MOD_1], &n.tone_amount, &n.tone_offset);
+
+  // Pitch LFO: 0.05 Hz .. 20 Hz (1 Hz at noon), depth up to +/-12 semitones
+  // on a squared curve, so small vibrato depths are easy to set.
+  float lfo_hz = 0.05f * Exp2(lfo_speed * 8.643856f);  // 400 = 2^8.643856
+  n.lfo_increment = static_cast<int32_t>(lfo_hz * (4294967296.0f / kSampleRate));
+  n.lfo_depth = lfo_depth < 0.01f ? 0 : Q16(lfo_depth * lfo_depth * 12.0f);
+  n.lfo_shape = lfo_shape == LFO_RAMP_UP ? LFO_RAMP_UP : LFO_TRIANGLE;
 
 }
 

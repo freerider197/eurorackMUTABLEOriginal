@@ -82,7 +82,7 @@ void Process(uint16_t* cv) {
     dac.Write(1, cv_scaler.ScaleGain(1, 0));
     pwm.Write(1, 65535);
   }
-  ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0));
+  ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0), voice.lfo_phase());
 }
 
 void Init() {
