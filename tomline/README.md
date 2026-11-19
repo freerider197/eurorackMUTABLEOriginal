@@ -49,8 +49,8 @@ blinks red.
 | Control | Job | Hold METER (or tap METER to latch) |
 |---|---|---|
 | SHAPE 1 | Decay, 95 ms to 2.5 s | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
-| MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
-| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The +1 octave and snap don't change |
+| MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | Not used (was the +1 octave; free for something new) |
+| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button), tap | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
@@ -76,7 +76,7 @@ always goes to pitch and is added after the glide. By default every trigger
 restarts it at the middle of its wave (no pitch jump, going up), so each hit
 gets the same pitch movement; free running, it ignores triggers.
 
-Engine, snap, the four second-layer values (crush, +1 octave, wave, glide), LFO speed, depth, wave and free run, and the
+Engine, snap, the second-layer values (crush, wave, glide), LFO speed, depth, wave and free run, and the
 V/oct calibration are saved to flash 2 s after the last change. Settings saved
 by an older Tomline (before the LFO) are read once: engine, snap, second-layer
 values and V/oct calibration carry over, and the LFO starts off. Settings saved
@@ -204,8 +204,8 @@ Check the stack after every firmware change:
 python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
 ```
 
-Last run: worst case 564 bytes (main loop 308, SysTick 100, audio interrupt
-156), 4096 reserved, 3532 to spare. The
+Last run: worst case 556 bytes (main loop 300, SysTick 100, audio interrupt
+156), 4096 reserved, 3540 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -242,7 +242,7 @@ It also checks that OUT 1 rests at 3.33 V, that its average level doesn't jump
 on a hit, and the power-up (0 V for 1 s, then a slow rise). It exits
 with an error if a check fails.
 
-Last run: OUT 1 between 0.04 V and 6.62 V, back to 3.330 V after the
+Last run: OUT 1 between 0.02 V and 6.65 V, back to 3.330 V after the
 notes. Attack jump (average over 100 ms after a hit minus before): BT -0.04 V,
 LT +0.05 V, BT with Tone closed and snap 0 +0.11 V (the moving lift of 0.4:
 +2.3 to +2.4 V). Power-up: OK. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
@@ -253,22 +253,22 @@ expected value). LFO restart on every trigger / free run: OK. LFO at zero depth:
 unchanged. Distortion (MOD 2 off / noon / full), 3rd harmonic at the start
 of a hit: BT -17.3 / -14.4 / -10.7 dB, LT -21.8 / -17.2 / -11.5 dB; the quiet
 tail +0.0 / +4.9 / +12.0 dB, as designed. Wave (sine / triangle / folded /
-square), fundamental: BT +0.0 / -0.3 / -3.3 / -0.3 dB; level along the knob:
-BT -0.5 to +0.0 dB, LT -0.0 to +0.3 dB (without the level matching: -1.7 to
-+1.6 dB); triangle 5th harmonic 0.3 s into a note BT -31.5 dB (sine -36.5), LT
--38.0 dB (sine -44.9); square 3rd harmonic BT -8.6, LT -9.6 dB (ideal -9.5).
+square), fundamental: BT +0.0 / -0.2 / -3.3 / -0.6 dB; level along the knob:
+BT -0.5 to +0.1 dB, LT -0.1 to +0.2 dB (without the level matching: about
+-1.7 to +1.6 dB); triangle 5th harmonic 0.3 s into a note BT -33.3 dB (sine
+-36.5), LT -41.9 dB (sine -44.9): the level matching clips the triangle's
+tips a little; square 3rd harmonic BT -8.5, LT -9.6 dB (ideal -9.5).
 Crush sample rate (just past off / noon / full): 5856 / 2120 / 748 Hz
 (expected 5868 / 2121 / 750), level within 0.1 dB. Tone closed vs open: BT -4.5 to
 -4.7 dB, LT -4.3 to -4.6 dB at every
 voltage (-2.6 dB with the moving lift, whose bump passed the closed filter;
--25 dB before the floor). Retrigger: worst one-sample jump BT 0.39 V, LT
-0.23 V, 1.1 / 1.0 x a note from silence (0.35 / 0.23 V); with the moving lift
+-25 dB before the floor). Retrigger: worst one-sample jump BT 0.38 V, LT
+0.25 V, 1.1 / 1.1 x a note from silence (0.35 / 0.23 V); with the moving lift
 0.45 / 0.36 V against 0.51 / 0.42 V. Loud mix: clips
-correctly. Knob jump, end to end in the middle of a note (9 values, BT and
+correctly. Knob jump, end to end in the middle of a note (8 values, BT and
 LT): with the 40 ms glide no one-sample jump is bigger than the note's own
 at the settings the glide passes through (the folded wave, half way along
-Wave, is spikier than both ends);
-an instant jump of +1 octave would click at 0.80 V against the note's 0.10 V.
+Wave, is spikier than both ends).
 
 `tomline/test/panel.cc` runs the firmware's own `ui.cc` on a computer, with
 stand-ins for the drivers in `tomline/test/stub/`, and plays knob and button

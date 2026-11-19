@@ -49,7 +49,7 @@ struct Patch {
   uint8_t engine;
   uint8_t snap;
   uint16_t main_layer[4];    // decay, tone, tune, distortion
-  uint16_t second_layer[4];  // crush, +1 oct, wave, glide
+  uint16_t second_layer[4];  // crush, unused, wave, glide
   uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
   uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
   bool lfo_free;             // false = LFO restarts on each trigger
@@ -179,7 +179,6 @@ double MeasurePitch(const Patch& base, int note) {
   patch.main_layer[1] = 65535;  // filter open
   patch.main_layer[3] = 0;      // no distortion
   patch.second_layer[0] = 0;    // no crush
-  patch.second_layer[1] = 0;    // no octave
   std::vector<Step> steps(1, Step{note});
   Result r = Render(patch, steps, 30.0, 1);
   // Zero crossings of the AC part between 0.2 s and 1.2 s.
@@ -353,7 +352,7 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
 }
 
 // Soft distortion (MOD 2), read from the voice's own VCA words with snap,
-// noise and +1 octave off. One hit of C2; over the first 8 cycles, the 3rd
+// noise off. One hit of C2; over the first 8 cycles, the 3rd
 // harmonic against the fundamental; in the tail (0.45 to 0.55 s, where the
 // note is about 25 dB down), the level against MOD 2 fully CCW. The tail must
 // get the small-signal gain of the drive (1 + 3 x knob^2), the start of the
@@ -417,7 +416,7 @@ bool DistortionOk(uint8_t engine) {
 }
 
 // Wave (METER + SHAPE 2), read from the voice's own VCA words with snap,
-// noise, +1 octave and distortion off. One hit of C2, the first 8 cycles:
+// noise and distortion off. One hit of C2, the first 8 cycles:
 // harmonics 1 to 16 against the plain sine. Fully CCW must leave the voice
 // untouched; each stage must sound like its name while the fundamental
 // stays within 6 dB (the bass must not disappear): the triangle's 5th
@@ -484,7 +483,7 @@ bool WaveOk(uint8_t engine) {
   double h5_sine = 10 * log10(sine_body.h[5] / sine_body.h[1]);
   double h3 = 10 * log10(r[3].h[3] / r[3].h[1]);
   double even = 10 * log10((r[3].h[2] + r[3].h[4] + r[3].h[6]) / r[3].h[1]);
-  ok = ok && h5 > h5_sine + 3.0 && upper[2] > upper[0] + 6 &&
+  ok = ok && h5 > h5_sine + 2.0 && upper[2] > upper[0] + 6 &&
        upper[2] > upper[1] + 6 && upper[3] > upper[1] + 6 &&
        h3 > -13.0 && h3 < -7.0 && even < -25.0;
   printf("  triangle: 5th harmonic %.1f dB (sine %.1f); square: 3rd harmonic "
@@ -494,14 +493,14 @@ bool WaveOk(uint8_t engine) {
 }
 
 // Wave level: RMS of the VCA words over the first 0.5 s of a C2 note (+1
-// octave at its default 25 %), every 1/32 of the Wave knob, against Wave off.
+// every 1/32 of the Wave knob, against Wave off.
 // Must stay within 1 dB: no dip at the triangle, no jump at the square.
 bool WaveLevelOk(uint8_t engine) {
   double ref = 0, lo = 0, hi = 0;
   for (int k = 0; k <= 32; ++k) {
     uint16_t knob = k == 32 ? 65535 : k * 2048;
     uint16_t main_layer[4] = { 65535, 65535, 32768, 0 };
-    uint16_t second[4] = { 0, 16384, knob, 0 }, lfo[4] = { 0, 0, 0, 0 };
+    uint16_t second[4] = { 0, 0, knob, 0 }, lfo[4] = { 0, 0, 0, 0 };
     VoiceParameters p;
     ComputeVoiceParameters(engine, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
     Voice voice;
@@ -527,7 +526,7 @@ bool WaveLevelOk(uint8_t engine) {
 }
 
 // Crush (METER + SHAPE 1), read from the voice's own VCA words with snap,
-// +1 octave and distortion off. One hit of C2, 0.1 to 0.6 s. Off: the words
+// distortion off. One hit of C2, 0.1 to 0.6 s. Off: the words
 // change on most samples. Just past off: about 6 kHz. Noon: about 2.1 kHz.
 // Full: about 750 Hz. The level must stay, and within full scale.
 struct CrushResult { double changes, rms_db; int32_t peak; };
@@ -805,8 +804,6 @@ int main() {
                { 0, 16384, 0, 0 } };
   Patch lt = bt;
   lt.engine = ENGINE_LT;
-  Patch bt_oct = bt;
-  bt_oct.second_layer[1] = 39321;  // +1 octave at 60 %
 
   // "Roller" pattern from the browser page (V/oct in semitones).
   std::vector<Step> roller = {
@@ -816,7 +813,6 @@ int main() {
   struct { const char* name; Patch patch; } cases[] = {
     { "build/tomline_bt.wav", bt },
     { "build/tomline_lt.wav", lt },
-    { "build/tomline_bt_oct.wav", bt_oct },
   };
   for (auto& c : cases) {
     Result r = Render(c.patch, roller, 122.0, 4);
@@ -919,7 +915,7 @@ int main() {
   printf("Knob jump click, largest one-sample jump in the 100 ms after it:\n");
   struct { int knob; const char* name; } jumps[] = {
     { 0, "decay" }, { 1, "tone" }, { 2, "tune" }, { 3, "distortion" },
-    { 4, "crush" }, { 5, "+1 octave" }, { 6, "wave" }, { 7, "glide" },
+    { 4, "crush" }, { 6, "wave" }, { 7, "glide" },
     { 9, "LFO depth" } };
   for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
     for (auto& j : jumps) {

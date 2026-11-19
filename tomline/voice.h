@@ -47,7 +47,6 @@ struct VoiceParameters {
   int32_t glide_k;              // Q31, 0 = no glide
   int32_t tune;                 // semitones, Q16
   int32_t snap_depth;           // semitones, Q16
-  int32_t octave_level;         // Q15
   int32_t harmonic_level;       // Q15 (2nd harmonic of BT, partial of LT)
   int32_t normalization;        // Q15
   int32_t snap_noise;           // Q15

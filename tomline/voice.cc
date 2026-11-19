@@ -187,14 +187,13 @@ void Voice::Process(
         static_cast<int64_t>(p.harmonic_level) * partial_ >> 30);
     x += Sine(partial_phase_) * level >> 15;
   }
-  x += octave * p.octave_level >> 15;
   x = static_cast<int32_t>(static_cast<int64_t>(x) * p.normalization >> 15);
 
   // Drive into a cubic soft clipper.
   x = SoftClip(x * p.drive >> 12);
   // Wave, added after the clipper: the clipper would round a triangle back
-  // into a sine. Only the change from the sine is added, so the +1 octave
-  // and the partial stay as they are.
+  // into a sine. Only the change from the sine is added, so BT's 2nd
+  // harmonic and LT's partial stay as they are.
   if (p.wave_tri) {
     int32_t shaped = Wave(p, phase_, fundamental) - fundamental;
     x += static_cast<int32_t>(

@@ -31,7 +31,7 @@ const int32_t kCountsPerVolt = 3972;
 const int32_t kDefaultVoctK = 12 * 65536 * 256 / kCountsPerVolt;
 const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
   0,      // crush off
-  16384,  // +1 octave level 25 %
+  0,      // unused (was the +1 octave)
   0,      // wave: plain sine
   0       // glide off
 };
@@ -40,7 +40,8 @@ const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
 // time), which would start the wave at a random place. kFlagCrush, the same
 // for second-layer SHAPE 1: crush, which was the noise level. An older
 // Tomline reads any flag value above 1 as "LFO restarts on trigger" and keeps
-// the rest.
+// the rest. Second-layer MOD 1 (the old +1 octave) is unused; whatever goes
+// there next needs its own flag in the same way.
 const uint8_t kFlagLfoFree = 0x01;
 const uint8_t kFlagCrush = 0x40;
 const uint8_t kFlagWave = 0x80;

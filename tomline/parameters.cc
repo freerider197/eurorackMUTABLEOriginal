@@ -64,7 +64,7 @@ void ComputeVoiceParameters(
   float tune = main_layer[KNOB_SHAPE_2] / 65535.0f;
   float distortion = main_layer[KNOB_MOD_2] / 65535.0f;
   float crush = second_layer[KNOB_SHAPE_1] / 65535.0f;
-  float octave = second_layer[KNOB_MOD_1] / 65535.0f;
+  // second_layer[KNOB_MOD_1] is unused (it was the +1 octave).
   float wave = second_layer[KNOB_SHAPE_2] / 65535.0f;
   float glide = second_layer[KNOB_MOD_2] / 65535.0f;
   float lfo_speed = lfo_layer[KNOB_SHAPE_1] / 65535.0f;
@@ -86,9 +86,8 @@ void ComputeVoiceParameters(
   // +/-12 semitones; at noon, 0 V on EXCITE 2 plays C2.
   n.tune = Q16(12.0f + (tune - 0.5f) * 24.0f);
   n.snap_depth = Q16(bt ? 30.0f : 15.0f);
-  n.octave_level = Q15(octave);
   n.harmonic_level = Q15(harmonic);
-  n.normalization = Q15(1.0f / (1.0f + 0.6f * harmonic + 0.55f * octave));
+  n.normalization = Q15(1.0f / (1.0f + 0.6f * harmonic));
   n.snap_noise = Q15(bt ? 0.5f : 0.3f);
   n.drive = bt ? 4915 : 4300;  // Q12: 1.2 / 1.05
   // Soft distortion: gain 1 to 4 (+12 dB) on a squared curve, divided by
@@ -113,8 +112,8 @@ void ComputeVoiceParameters(
   // the fold are quieter than the sine at the same peak, the square louder.
   // Measured with render.cc's level check, BT and LT averaged.
   static const float kWaveLevelDb[17] = {
-    0.00f, -0.25f, -0.55f, -0.80f, -1.15f, -1.45f, -1.15f, -0.55f, -0.45f,
-    -0.85f, -1.90f, -2.60f, -1.50f, -0.45f, 0.45f, 1.25f, 2.00f
+    0.00f, -0.30f, -0.60f, -1.00f, -1.30f, -1.70f, -1.25f, -0.60f, -0.30f,
+    -0.55f, -1.70f, -2.65f, -1.30f, -0.10f, 0.80f, 1.60f, 2.25f
   };
   float pos = wave * 16.0f;
   int32_t i = static_cast<int32_t>(pos);
