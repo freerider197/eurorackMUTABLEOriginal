@@ -430,6 +430,10 @@ class Engine {
     this.fwAcc = 1; this.pwmFiltered = 65535;
     this.d1 = 0; this.d2 = 0; this.f1 = 0; this.f2 = 0; this.pwmV = 3.3;
     this.kph = 0; this.kam = 0; this.kpe = 0; this.dx = 0; this.dy = 0;
+    // The module has been on for a while: past the power-up (1 s at 0 V, then
+    // the lift's rise), with OUT 1 and the audio input settled at the lift.
+    this.voice.lift = K_LIFT; this.voice.hold = 0;
+    this.d1 = this.d2 = 1; this.f1 = this.f2 = 3.33; this.dx = 10 * Math.tanh(3.33 / 10);
     this.idle = 0; this.idleOpen = 0; this.mid = 0; this.midClosed = 0; this.checkCount = 0;
     this.levelWarn = false; this.curveWarn = false;
     this.sc = new Float32Array(512); this.si = -1; this.sd = 0;
