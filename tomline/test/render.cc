@@ -333,6 +333,31 @@ bool PitchEnvelopeOk(uint8_t engine) {
   return ok;
 }
 
+// Tone fully closed must not silence the note: RMS of OUT 1 (AC-coupled,
+// 3 Hz high-pass) over the first second of a note, Tone fully CCW against
+// fully CW. Returns the ratio in dB. A 1 s rest first lets the filter
+// control voltage settle from power-up.
+double NoteRms(Patch patch, int note) {
+  std::vector<Step> steps = { {-1}, {note} };
+  Result r = Render(patch, steps, 15.0, 1);  // 1 s per step
+  double x1 = 0, y1 = 0, k = 1.0 - 2 * M_PI * 3.0 / kHostRate, sum = 0;
+  size_t n = static_cast<size_t>(kHostRate);
+  for (size_t i = 0; i < 2 * n; ++i) {
+    double y = r.raw[i] - x1 + k * y1;
+    x1 = r.raw[i]; y1 = y;
+    if (i >= n) sum += y * y;
+  }
+  return sqrt(sum / n);
+}
+
+double ToneClosedDb(Patch patch, int note) {
+  patch.main_layer[1] = 65535;
+  double open = NoteRms(patch, note);
+  patch.main_layer[1] = 0;
+  double closed = NoteRms(patch, note);
+  return 20.0 * log10(closed / open);
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -400,6 +425,18 @@ int main() {
 
   for (uint8_t engine = 0; engine < 2; ++engine) {
     failures += !PitchEnvelopeOk(engine);
+  }
+
+  printf("\nTone fully closed vs fully open, RMS over a note (must be >= -6 dB):\n");
+  for (int e = 0; e < 2; ++e) {
+    printf("  %s", e ? "LT" : "BT");
+    for (int v = 0; v <= 4; ++v) {
+      double db = ToneClosedDb(e ? lt : bt, v * 12);
+      bool ok = db >= -6.0;
+      printf("  %d V %+.1f dB%s", v, db, ok ? "" : " FAIL");
+      failures += !ok;
+    }
+    printf("\n");
   }
 
   bool mix_ok = MixScalingOk();

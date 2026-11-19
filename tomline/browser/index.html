@@ -281,7 +281,7 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
 }
 
 // --- voice.cc ---
-const K_UNITY = 1073741824, K_ATTACK_STEP = 86343000, K_MAX_INC = 1932735283, K_PARTIAL = 104399;
+const K_UNITY = 1073741824, K_ATTACK_STEP = 86343000, K_MAX_INC = 1932735283, K_PARTIAL = 104399, K_TONE_FLOOR = 25277;
 const K_SWEEP_ATTACK_STEP = K_UNITY / 32;  // 32 samples = 1.03 ms
 // floor(a * c / 2^31), a >= 0, c in [0, 2^31): exact.
 function mul31(a, c) {
@@ -397,6 +397,8 @@ class TomlineVoice {
     let g = this.bias + v;
     g = g < 0 ? 0 : (g > 65535 ? 65535 : g);
     let f = p.toneOffset + (Math.imul(env, p.toneAmount) >> 15);
+    const lowest = K_TONE_FLOOR + (((s >> 4) * 329) >> 12);  // floor just above the pitch
+    if (f < lowest) f = lowest;
     f = f < 0 ? 0 : (f > 65535 ? 65535 : f);
     this.gainWord = g; this.freqWord = f; this.v = v / 32767; this.env = env / 32767;
     this.gain = g / 32767; this.freq = f;
