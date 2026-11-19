@@ -1,0 +1,465 @@
+// Tomline: panel handling. See ui.h for the control map.
+
+#include "tomline/ui.h"
+
+#include <algorithm>
+
+#include "stmlib/system/storage.h"
+#include "stmlib/system/system_clock.h"
+
+#include "streams/gain.h"
+
+#include "tomline/tables.h"
+
+namespace tomline {
+
+using namespace std;
+using namespace stmlib;
+using namespace streams;
+
+// Same flash location as the stock UI settings (4 pages below the
+// calibration page). The record has a different size, so the stock firmware
+// ignores it and falls back to its defaults if it is flashed back.
+Storage<0x801fc00, 4> settings_storage;
+
+const uint32_t kSettingsMagic = 0x4e4c4d54;  // "TMLN"
+const uint32_t kLongPress = 1000;            // ms, as the stock firmware
+const int32_t kPickupWindow = 1024;
+// EXCITE inputs: x0.2 inverting buffer into a 3.3 V ADC, 16-bit left aligned.
+// 65536 * 0.2 / 3.3 = 3972 counts per volt.
+const int32_t kCountsPerVolt = 3972;
+const int32_t kDefaultVoctK = 12 * 65536 * 256 / kCountsPerVolt;
+const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
+  9830,   // noise level 15 %
+  16384,  // +1 octave level 25 %
+  22938,  // sweep time 35 %
+  0       // glide off
+};
+
+static inline int32_t Abs(int32_t x) { return x < 0 ? -x : x; }
+
+// ----------------------------------------------------------------------------
+
+void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
+  adc_ = adc;
+  cv_scaler_ = cv_scaler;
+  leds_.Init();
+  switches_.Init();
+
+  if (!settings_storage.ParsimoniousLoad(&settings_, &version_token_) ||
+      settings_.magic != kSettingsMagic) {
+    settings_.engine = ENGINE_BT;
+    settings_.snap = 1;
+    copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
+         &settings_.second_layer[0]);
+    settings_.voct_offset = 0;
+    settings_.voct_k = kDefaultVoctK;
+    settings_.magic = kSettingsMagic;
+  }
+  if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
+  if (settings_.snap > 3) settings_.snap = 1;
+
+  // The ADC scans one pot per ms: read all four before starting.
+  for (uint8_t i = 0; i < 8; ++i) {
+    adc_->ScanPots();
+    for (volatile uint32_t wait = 0; wait < 20000; ++wait) { }
+  }
+  for (uint8_t i = 0; i < KNOB_LAST; ++i) {
+    pot_[i] = adc_->pot(i);
+    main_layer_[i] = pot_[i];
+    caught_[0][i] = true;
+    caught_[1][i] = false;
+    above_[1][i] = pot_[i] > settings_.second_layer[i];
+  }
+  fill(&press_time_[0], &press_time_[BUTTON_LAST], 0);
+  fill(&long_press_handled_[0], &long_press_handled_[BUTTON_LAST], false);
+  combo_handled_ = false;
+  event_read_ = event_write_ = 0;
+  second_layer_active_ = false;
+  second_layer_latched_ = false;
+  knob_moved_while_meter_held_ = false;
+
+  mode_ = UI_MODE_NORMAL;
+  settings_dirty_ = false;
+  settings_change_time_ = 0;
+  pitch_ = 0;
+  in_deviation_ = 0;
+  external_ = false;
+  voct_accumulator_ = 0;
+  voct_samples_ = 0;
+  trigger_flash_ = 0;
+  idle_samples_ = idle_open_samples_ = mid_samples_ = mid_closed_samples_ = 0;
+  warning_ = false;
+  curve_warning_ = false;
+  parameters_dirty_ = false;
+  last_check_time_ = 0;
+  feedback_timer_ = 0;
+  feedback_ok_ = false;
+  voct_1v_ = 0;
+  offset_calibration_shown_ = 0;
+  divider_ = 0;
+
+  ComputeParameters();
+}
+
+// --- SysTick: 4 kHz ----------------------------------------------------------
+
+void Ui::Poll() {
+  ++divider_;
+  if ((divider_ & 3) == 0) {
+    system_clock.Tick();
+    switches_.Debounce();
+    uint32_t now = system_clock.milliseconds();
+    for (uint8_t i = 0; i < BUTTON_LAST; ++i) {
+      if (switches_.just_pressed(i)) {
+        press_time_[i] = now;
+        PushEvent(i, 0, false);
+      } else if (switches_.released(i) && press_time_[i]) {
+        uint32_t duration = now - press_time_[i];
+        press_time_[i] = 0;
+        // A release that ends a FN 1 + FN 2 combo is flagged so it does not
+        // also count as a single press.
+        PushEvent(i, duration ? duration : 1,
+                  combo_handled_ && i != BUTTON_METER);
+      }
+    }
+    // FN 1 + FN 2 held together.
+    if (press_time_[BUTTON_FN_1] && press_time_[BUTTON_FN_2] && !combo_handled_) {
+      uint32_t t = max(press_time_[BUTTON_FN_1], press_time_[BUTTON_FN_2]);
+      if (now - t >= kLongPress) {
+        combo_handled_ = true;
+        PushEvent(BUTTON_LAST, 0, false);
+      }
+    }
+    if (!press_time_[BUTTON_FN_1] && !press_time_[BUTTON_FN_2]) {
+      combo_handled_ = false;
+    }
+    adc_->ScanPots();
+    uint8_t i = adc_->last_read_pot();
+    pot_[i] += (adc_->pot(i) - pot_[i]) >> 2;
+  }
+  if (trigger_flash_) {
+    --trigger_flash_;
+  }
+  if (feedback_timer_) {
+    --feedback_timer_;
+  }
+  PaintLeds();
+  leds_.Write();
+}
+
+// Buttons are only detected in the SysTick interrupt; everything they do
+// (including flash writes) runs in the main loop, as in the stock firmware.
+void Ui::PushEvent(uint8_t button, uint32_t duration, bool ignored) {
+  uint8_t next = (event_write_ + 1) % kNumEvents;
+  if (next == event_read_) {
+    return;  // queue full: drop
+  }
+  events_[event_write_].button = button;
+  events_[event_write_].duration = duration;
+  events_[event_write_].ignored = ignored;
+  event_write_ = next;
+}
+
+void Ui::HandleEvents() {
+  while (event_read_ != event_write_) {
+    ButtonEvent e = events_[event_read_];
+    event_read_ = (event_read_ + 1) % kNumEvents;
+    if (e.button == BUTTON_LAST) {
+      OnButtonsCombo();
+    } else if (e.duration == 0) {
+      long_press_handled_[e.button] = false;
+      OnButtonPressed(e.button);
+    } else if (!e.ignored) {
+      OnButtonReleased(e.button, e.duration);
+    }
+  }
+}
+
+void Ui::OnButtonPressed(uint8_t button) {
+  if (mode_ == UI_MODE_OFFSET_CALIBRATION) {
+    // Stock behaviour: any button saves the calibration and leaves.
+    cv_scaler_->SaveCalibrationData();
+    mode_ = UI_MODE_NORMAL;
+    offset_calibration_shown_ = 0;
+    long_press_handled_[button] = true;  // swallow the release
+    for (uint8_t i = 0; i < KNOB_LAST; ++i) {
+      main_layer_[i] = pot_[i];  // SHAPE 1/2 were used to null the VCAs
+    }
+    parameters_dirty_ = true;
+    return;
+  }
+  if (button == BUTTON_METER && mode_ == UI_MODE_NORMAL) {
+    knob_moved_while_meter_held_ = false;
+    SetSecondLayer(true);
+  }
+}
+
+void Ui::OnButtonReleased(uint8_t button, uint32_t duration) {
+  if (long_press_handled_[button]) {
+    return;
+  }
+  bool short_press = duration < kLongPress;
+
+  if (mode_ == UI_MODE_VOCT_CALIBRATION_1V ||
+      mode_ == UI_MODE_VOCT_CALIBRATION_3V) {
+    if (button == BUTTON_FN_2) {
+      int32_t samples = voct_samples_;
+      int32_t reading = samples ? voct_accumulator_ / samples : 0;
+      if (mode_ == UI_MODE_VOCT_CALIBRATION_1V) {
+        voct_1v_ = reading;
+        mode_ = UI_MODE_VOCT_CALIBRATION_3V;
+      } else {
+        int32_t span = reading - voct_1v_;  // two octaves
+        bool ok = span > kCountsPerVolt * 2 * 8 / 10 &&
+                  span < kCountsPerVolt * 2 * 12 / 10;
+        if (ok) {
+          settings_.voct_k = 24 * 65536 * 256 / span;
+          settings_.voct_offset = voct_1v_ - span / 2;
+          SaveSettings();
+        }
+        feedback_ok_ = ok;
+        feedback_timer_ = 4000;  // 1 s
+        mode_ = UI_MODE_NORMAL;
+      }
+    } else if (button == BUTTON_FN_1) {
+      mode_ = UI_MODE_NORMAL;  // cancel
+    }
+    return;
+  }
+
+  if (mode_ != UI_MODE_NORMAL) {
+    return;
+  }
+
+  switch (button) {
+    case BUTTON_FN_1:
+      if (short_press) {
+        settings_.engine = (settings_.engine + 1) % ENGINE_LAST;
+        settings_dirty_ = true;
+        parameters_dirty_ = true;
+      }
+      break;
+
+    case BUTTON_FN_2:
+      if (short_press) {
+        settings_.snap = (settings_.snap + 1) & 3;
+        settings_dirty_ = true;
+        parameters_dirty_ = true;
+      }
+      break;
+
+    case BUTTON_METER:
+      if (!knob_moved_while_meter_held_) {
+        if (short_press) {
+          second_layer_latched_ = !second_layer_latched_;
+        } else if (cv_scaler_->can_calibrate()) {
+          // Stock offset calibration: all inputs patched with cables whose
+          // other end is left unplugged.
+          cv_scaler_->CaptureAdcOffsets();
+          mode_ = UI_MODE_OFFSET_CALIBRATION;
+          offset_calibration_shown_ = 0;
+        }
+      }
+      SetSecondLayer(second_layer_latched_);
+      break;
+  }
+}
+
+void Ui::OnButtonsCombo() {
+  if (mode_ == UI_MODE_NORMAL) {
+    mode_ = UI_MODE_VOCT_CALIBRATION_1V;
+    voct_accumulator_ = 0;
+    voct_samples_ = 0;
+  }
+}
+
+void Ui::SetSecondLayer(bool active) {
+  if (active == second_layer_active_) {
+    return;
+  }
+  second_layer_active_ = active;
+  uint8_t layer = active ? 1 : 0;
+  for (uint8_t i = 0; i < KNOB_LAST; ++i) {
+    int32_t value = active ? settings_.second_layer[i] : main_layer_[i];
+    caught_[layer][i] = Abs(pot_[i] - value) < kPickupWindow;
+    above_[layer][i] = pot_[i] > value;
+  }
+}
+
+// --- Main loop ---------------------------------------------------------------
+
+void Ui::ReadKnobs() {
+  uint8_t layer = second_layer_active_ ? 1 : 0;
+  for (uint8_t i = 0; i < KNOB_LAST; ++i) {
+    int32_t position = pot_[i];
+    uint16_t* value = layer ? &settings_.second_layer[i] : &main_layer_[i];
+    if (!caught_[layer][i]) {
+      // Pick-up: the stored value only follows the knob once the knob has
+      // reached it, so switching layers never makes a parameter jump.
+      bool above = position > *value;
+      if (above != above_[layer][i] || Abs(position - *value) < kPickupWindow) {
+        caught_[layer][i] = true;
+      }
+      above_[layer][i] = above;
+    }
+    if (caught_[layer][i] && Abs(position - *value) > 64) {
+      *value = position;
+      parameters_dirty_ = true;
+      if (layer) {
+        settings_dirty_ = true;
+        settings_change_time_ = system_clock.milliseconds();
+      }
+      if (press_time_[BUTTON_METER]) {
+        knob_moved_while_meter_held_ = true;
+      }
+    }
+  }
+}
+
+void Ui::ComputeParameters() {
+  VoiceParameters n;
+  ComputeVoiceParameters(
+      settings_.engine, settings_.snap, main_layer_, settings_.second_layer,
+      &n);
+  // Copy field by field: each 32-bit store is atomic for the interrupt.
+  volatile int32_t* dst = reinterpret_cast<volatile int32_t*>(&parameters_);
+  const int32_t* src = reinterpret_cast<const int32_t*>(&n);
+  for (size_t i = 0; i < sizeof(VoiceParameters) / sizeof(int32_t); ++i) {
+    dst[i] = src[i];
+  }
+}
+
+void Ui::CheckSetup() {
+  // LEVEL MOD 1 must be fully counter-clockwise: with the VCA word at zero,
+  // channel 1's VCA control voltage must sit at the "nulled" end (the stock
+  // calibration test reads > 59000 there).
+  if (idle_samples_ > 4096) {
+    warning_ = idle_open_samples_ > idle_samples_ / 10 * 9;
+  }
+  // Response trimmer 1 must be fully clockwise (LIN): at VCA words between
+  // -12 and -6 dB, the lin law keeps the control voltage under 0.5 V. Toward
+  // EXP, the same words push it to the 3.3 V clamp.
+  if (mid_samples_ > 1024) {
+    curve_warning_ = mid_closed_samples_ > mid_samples_ / 2;
+  }
+  idle_samples_ = idle_open_samples_ = mid_samples_ = mid_closed_samples_ = 0;
+}
+
+void Ui::SaveSettings() {
+  settings_storage.ParsimoniousSave(settings_, &version_token_);
+  settings_dirty_ = false;
+}
+
+void Ui::DoEvents() {
+  HandleEvents();
+  uint32_t now = system_clock.milliseconds();
+  if (mode_ == UI_MODE_OFFSET_CALIBRATION) {
+    // Stock behaviour: SHAPE 1 / SHAPE 2 null the VCA bleed of channel 1 / 2.
+    for (uint8_t channel = 0; channel < 2; ++channel) {
+      int32_t position = pot_[channel * 2];
+      int32_t min = kDefaultOffset >> 1;
+      int32_t max = 3 * min + 256;
+      if (Abs(position - main_layer_[channel * 2]) > 256) {
+        main_layer_[channel * 2] = position;
+        cv_scaler_->set_dac_offset(channel, min + ((max - min) * position >> 16));
+        offset_calibration_shown_ |= 1 << channel;
+      }
+    }
+    return;
+  }
+  if (mode_ == UI_MODE_VOCT_CALIBRATION_1V ||
+      mode_ == UI_MODE_VOCT_CALIBRATION_3V) {
+    // Keep a fresh 0.25 s average of EXCITE 2.
+    if (voct_samples_ > 7500) {
+      voct_accumulator_ = voct_accumulator_ / voct_samples_ * 64;
+      voct_samples_ = 64;
+    }
+    return;
+  }
+  ReadKnobs();
+  if (parameters_dirty_) {
+    parameters_dirty_ = false;
+    ComputeParameters();
+  }
+  if (now - last_check_time_ >= 500) {
+    last_check_time_ = now;
+    CheckSetup();
+  }
+  if (settings_dirty_ && now - settings_change_time_ > 2000) {
+    SaveSettings();
+  }
+}
+
+// --- LEDs --------------------------------------------------------------------
+// leds_.set(column * 4 + row, red, green). Column 0 = left (channel 1),
+// column 1 = right (channel 2). Row 0 = top, row 3 = bottom.
+
+void Ui::PaintLeds() {
+  leds_.Clear();
+  uint32_t ms = system_clock.milliseconds();
+  bool blink = (ms & 256) != 0;
+
+  if (feedback_timer_) {
+    for (uint8_t i = 0; i < 8; ++i) {
+      leds_.set(i, feedback_ok_ ? 0 : 255, feedback_ok_ ? 255 : 0);
+    }
+    return;
+  }
+
+  switch (mode_) {
+    case UI_MODE_OFFSET_CALIBRATION:
+      // Stock pattern: column 1 full, column 2 top and bottom; red until the
+      // VCA is nulled, then green.
+      for (uint8_t channel = 0; channel < 2; ++channel) {
+        uint8_t red = 0, green = 255;
+        if (offset_calibration_shown_ & (1 << channel)) {
+          bool nulled = cv_scaler_->raw_gain_sample(channel) > 59000;
+          red = nulled ? 0 : 255;
+          green = nulled ? 255 : 0;
+        }
+        uint8_t pattern = channel == 0 ? 15 : 9;
+        for (uint8_t row = 0; row < 4; ++row) {
+          bool on = pattern & (1 << row);
+          leds_.set(channel * 4 + row, on ? red : 0, on ? green : 0);
+        }
+      }
+      return;
+
+    case UI_MODE_VOCT_CALIBRATION_1V:
+    case UI_MODE_VOCT_CALIBRATION_3V:
+      {
+        uint8_t first = mode_ == UI_MODE_VOCT_CALIBRATION_1V ? 0 : 2;
+        if (blink) {
+          leds_.set(4 + first, 0, 255);
+          leds_.set(4 + first + 1, 0, 255);
+        }
+        leds_.set(first, 255, 255);
+        leds_.set(first + 1, 255, 255);
+      }
+      return;
+
+    default:
+      break;
+  }
+
+  // Normal mode. Amber instead of green while the second layer is active.
+  uint8_t red = second_layer_active_ ? 255 : 0;
+  uint8_t green = second_layer_active_ ? 120 : 255;
+  leds_.set(settings_.engine, red, green);
+  if (warning_ || curve_warning_) {
+    if (blink) leds_.set(2, 255, 0);
+  } else if (external_) {
+    leds_.set(2, 255, 90);
+  }
+  if (trigger_flash_) {
+    leds_.set(3, 0, 255);
+  }
+  for (uint8_t row = 0; row < 4; ++row) {
+    if (3 - row <= settings_.snap) {
+      leds_.set(4 + row, red, green);
+    }
+  }
+}
+
+}  // namespace tomline
