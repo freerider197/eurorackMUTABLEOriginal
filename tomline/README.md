@@ -53,7 +53,7 @@ blinks red.
 | SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
-| FN 2 (right button), tap | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
+| FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | |
 | FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones). SHAPE 2 and MOD 2 do nothing here | |
 | FN 2 held + tap METER | LFO wave: triangle / ramp up | |
 | FN 2 held + tap FN 1 | LFO restarts on each trigger (default) / free running | |
@@ -83,8 +83,10 @@ values and V/oct calibration carry over, and the LFO starts off. Settings saved
 before the free-run option read as "restart on trigger". Settings saved before
 the wave start with the wave at sine (that slot held an unused old value);
 everything else carries over. Settings saved before Crush start with Crush
-off (that slot was the noise level; the noise is gone). Going back to an older Tomline keeps all
-settings except free run, which reads as "restart on trigger".
+off (that slot was the noise level; the noise is gone). A snap saved before
+"off" existed keeps its length (10 ms becomes 4 ms). Going back to an older
+Tomline keeps all settings except free run, which reads as "restart on
+trigger", and plays the snap one step longer.
 
 ## LEDs
 
@@ -94,7 +96,7 @@ settings except free run, which reads as "restart on trigger".
 | Left column, 2nd | LT engine |
 | Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, checked in the first second after power-up, or trimmer 1 not at LIN) |
 | Left column, bottom | Flashes green on each trigger |
-| Right column | Snap amount, from the bottom (1 LED = snap 0, 4 LEDs = snap 3) |
+| Right column | Snap, from the bottom: no LED = off, 1 = 0.4 ms, 2 = 1.5 ms, 3 = 4 ms |
 | Engine and snap LEDs amber instead of green | Second layer active |
 | FN 2 held: engine LED red, right column top (triangle) or 2nd (ramp up) pulsing red | LFO layer; the pulse follows the LFO, so the speed shows even at zero depth |
 | FN 2 held: right column 3rd LED red | LFO free running (off = restarts on each trigger) |
@@ -237,14 +239,14 @@ and the Wave stages (sine, triangle, folded, square): the fundamental stays
 within 6 dB, the triangle has its 5th harmonic, the fold adds bright
 harmonics, the square has odd harmonics, and the level stays within 1 dB,
 and Crush: the sample rate just past off, at noon and at full, and that the
-level stays.
+level stays, and that snap off has no click noise or pitch blip.
 It also checks that OUT 1 rests at 3.33 V, that its average level doesn't jump
 on a hit, and the power-up (0 V for 1 s, then a slow rise). It exits
 with an error if a check fails.
 
 Last run: OUT 1 between 0.02 V and 6.65 V, back to 3.330 V after the
 notes. Attack jump (average over 100 ms after a hit minus before): BT -0.04 V,
-LT +0.05 V, BT with Tone closed and snap 0 +0.11 V (the moving lift of 0.4:
+LT +0.05 V, BT with Tone closed and snap off +0.11 V (the moving lift of 0.4:
 +2.3 to +2.4 V). Power-up: OK. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
 range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
 depth, 0.2-1.2 s, restart on trigger: triangle +1.71 st, ramp up +0.86 st; free
@@ -255,9 +257,11 @@ of a hit: BT -17.3 / -14.4 / -10.7 dB, LT -21.8 / -17.2 / -11.5 dB; the quiet
 tail +0.0 / +4.9 / +12.0 dB, as designed. Wave (sine / triangle / folded /
 square), fundamental: BT +0.0 / -0.2 / -3.3 / -0.6 dB; level along the knob:
 BT -0.5 to +0.1 dB, LT -0.1 to +0.2 dB (without the level matching: about
--1.7 to +1.6 dB); triangle 5th harmonic 0.3 s into a note BT -33.3 dB (sine
--36.5), LT -41.9 dB (sine -44.9): the level matching clips the triangle's
-tips a little; square 3rd harmonic BT -8.5, LT -9.6 dB (ideal -9.5).
+-1.7 to +1.6 dB); triangle 5th harmonic 1 s into a long note BT -36.1 dB (sine
+-40.8), LT -42.6 dB (sine -58.3): the level matching
+clips the triangle's tips a little; square 3rd harmonic BT -8.3, LT -9.6 dB (ideal -9.5).
+Snap off: largest jump in the first 3 ms of a hit BT 0.08 V, LT 0.08 V (0.4 ms
+snap: 0.27 / 0.19 V).
 Crush sample rate (just past off / noon / full): 5856 / 2120 / 748 Hz
 (expected 5868 / 2121 / 750), level within 0.1 dB. Tone closed vs open: BT -4.5 to
 -4.7 dB, LT -4.3 to -4.6 dB at every
@@ -282,7 +286,7 @@ g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tom
 ./build/tomline_panel
 ```
 
-Last run: all 48 checks OK. Without the LEDs-off reading, the model moves
+Last run: all 52 checks OK. Without the LEDs-off reading, the model moves
 untouched values on page changes; with it, nothing moves.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for 13

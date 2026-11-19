@@ -72,7 +72,8 @@ void ComputeVoiceParameters(
 
   // Decay time constant: 95 ms .. 2.5 s (shorter was too short to use).
   float tau = 0.095f * Exp2(decay * 4.717857f);  // 26.316 = 2^4.717857
-  const float snap_tau[4] = { 0.0004f, 0.0015f, 0.004f, 0.010f };
+  // Snap: off, then a click (noise and a pitch blip) of 0.4, 1.5 or 4 ms.
+  const float snap_tau[4] = { 0.0004f, 0.0004f, 0.0015f, 0.004f };
   float harmonic = bt ? 0.1f : 0.3f;
 
   VoiceParameters& n = *p;
@@ -85,10 +86,10 @@ void ComputeVoiceParameters(
       : OneMinusExpQ31(0.004f + glide * glide * 0.5f);
   // +/-12 semitones; at noon, 0 V on EXCITE 2 plays C2.
   n.tune = Q16(12.0f + (tune - 0.5f) * 24.0f);
-  n.snap_depth = Q16(bt ? 30.0f : 15.0f);
+  n.snap_depth = snap ? Q16(bt ? 30.0f : 15.0f) : 0;
   n.harmonic_level = Q15(harmonic);
   n.normalization = Q15(1.0f / (1.0f + 0.6f * harmonic));
-  n.snap_noise = Q15(bt ? 0.5f : 0.3f);
+  n.snap_noise = snap ? Q15(bt ? 0.5f : 0.3f) : 0;
   n.drive = bt ? 4915 : 4300;  // Q12: 1.2 / 1.05
   // Soft distortion: gain 1 to 4 (+12 dB) on a squared curve, divided by
   // the soft clipper's slope of 1.5, so quiet sounds keep their level.

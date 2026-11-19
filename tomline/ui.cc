@@ -41,8 +41,12 @@ const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
 // for second-layer SHAPE 1: crush, which was the noise level. An older
 // Tomline reads any flag value above 1 as "LFO restarts on trigger" and keeps
 // the rest. Second-layer MOD 1 (the old +1 octave) is unused; whatever goes
-// there next needs its own flag in the same way.
+// there next needs its own flag in the same way. kFlagSnap: snap 0 is off and
+// 1 to 3 are 0.4, 1.5 and 4 ms; older records have 0 to 3 = 0.4, 1.5, 4 and
+// 10 ms, moved up one step (10 ms becomes 4 ms). An older Tomline plays this
+// record's snap one step longer.
 const uint8_t kFlagLfoFree = 0x01;
+const uint8_t kFlagSnap = 0x20;
 const uint8_t kFlagCrush = 0x40;
 const uint8_t kFlagWave = 0x80;
 const uint16_t kLfoLayerDefaults[KNOB_LAST] = {
@@ -64,9 +68,9 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   if (!settings_storage.ParsimoniousLoad(&settings_, &version_token_) ||
       settings_.magic != kSettingsMagic) {
     settings_.engine = ENGINE_BT;
-    settings_.snap = 1;
+    settings_.snap = 2;  // 1.5 ms
     settings_.lfo_shape = LFO_TRIANGLE;
-    settings_.flags = kFlagWave | kFlagCrush;
+    settings_.flags = kFlagWave | kFlagCrush | kFlagSnap;
     copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
          &settings_.second_layer[0]);
     settings_.voct_offset = 0;
@@ -96,9 +100,14 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   if (!(settings_.flags & kFlagCrush)) {
     settings_.second_layer[KNOB_SHAPE_1] = 0;  // crush starts off
   }
-  settings_.flags = (settings_.flags & kFlagLfoFree) | kFlagWave | kFlagCrush;
+  if (!(settings_.flags & kFlagSnap)) {
+    if (settings_.snap > 3) settings_.snap = 1;
+    settings_.snap = settings_.snap >= 2 ? 3 : settings_.snap + 1;
+  }
+  settings_.flags = (settings_.flags & kFlagLfoFree) | kFlagWave | kFlagCrush |
+      kFlagSnap;
   if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
-  if (settings_.snap > 3) settings_.snap = 1;
+  if (settings_.snap > 3) settings_.snap = 2;
   if (settings_.lfo_shape >= LFO_SHAPE_LAST) settings_.lfo_shape = LFO_TRIANGLE;
 
   // The ADC scans one pot per ms: read all four before starting.
@@ -585,7 +594,7 @@ void Ui::PaintLeds() {
     return;
   }
   for (uint8_t row = 0; row < 4; ++row) {
-    if (3 - row <= settings_.snap) {
+    if (3 - row < settings_.snap) {
       leds_.set(4 + row, red, green);
     }
   }

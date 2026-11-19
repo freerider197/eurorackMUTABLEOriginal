@@ -8,7 +8,7 @@
 //   MOD 2     soft distortion     | with METER: glide        |
 //   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
 //             each trigger (default) / free running.
-//   FN 2      tap: snap 0..3. Hold: LFO layer (the pitch LFO).
+//   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: LFO layer (pitch LFO).
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
 //             Hold 3 s without turning a knob: stock offset calibration.
 //             Tapped while FN 2 is held: LFO wave, triangle / ramp up.

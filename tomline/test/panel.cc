@@ -154,7 +154,7 @@ int main() {
               ui->settings_.second_layer[k] == second_before[k];
     }
     Check(still, "page changes back and forth, knobs untouched: no value moves");
-    Check(ui->settings_.snap == 1, "  ... and FN 2 holds did not step snap");
+    Check(ui->settings_.snap == 2, "  ... and FN 2 holds did not step snap");
   }
   Tap(BUTTON_METER);
   Check(ui->second_layer_latched_, "METER tap still latches");
@@ -255,26 +255,26 @@ int main() {
   printf("FN 1, FN 2\n");
   Start();
   Tap(BUTTON_FN_2);
-  Check(ui->settings_.snap == 2, "FN 2 tap: next snap");
+  Check(ui->settings_.snap == 3, "FN 2 tap: next snap");
   Start(10000);
   Down(BUTTON_FN_2);
   Turn(S1, 25000, 400);
   Up(BUTTON_FN_2);
-  Check(ui->settings_.snap == 1, "FN 2 short hold while turning SHAPE 1: snap unchanged");
+  Check(ui->settings_.snap == 2, "FN 2 short hold while turning SHAPE 1: snap unchanged");
   Check(Near(ui->settings_.lfo_layer[S1], 25000), "  ... and the LFO speed followed the knob");
   Check(Decay() == 10000, "  ... decay unchanged");
   Start();
   Down(BUTTON_FN_2);
   Tap(BUTTON_METER);
   Up(BUTTON_FN_2);
-  Check(ui->settings_.lfo_shape == LFO_RAMP_UP && ui->settings_.snap == 1 &&
+  Check(ui->settings_.lfo_shape == LFO_RAMP_UP && ui->settings_.snap == 2 &&
         !ui->second_layer_latched_, "FN 2 held + METER tap: LFO wave only");
   Start();
   Down(BUTTON_FN_2);
   Tap(BUTTON_FN_1);
   Up(BUTTON_FN_2);
   Check((ui->settings_.flags & kFlagLfoFree) && ui->settings_.engine == ENGINE_BT &&
-        ui->settings_.snap == 1, "FN 2 held + FN 1 tap: LFO free run only");
+        ui->settings_.snap == 2, "FN 2 held + FN 1 tap: LFO free run only");
   Down(BUTTON_FN_2);
   Tap(BUTTON_FN_1);
   Up(BUTTON_FN_2);
@@ -291,7 +291,7 @@ int main() {
   Down(BUTTON_METER);
   Tap(BUTTON_FN_2);
   Up(BUTTON_METER);
-  Check(ui->settings_.snap == 1 && !ui->second_layer_latched_,
+  Check(ui->settings_.snap == 2 && !ui->second_layer_latched_,
         "METER held + FN 2 tap: no snap, no latch");
   Start();
   Down(BUTTON_METER);
@@ -309,7 +309,7 @@ int main() {
   Up(BUTTON_FN_1);
   Up(BUTTON_FN_2);
   Check(ui->mode_ == UI_MODE_VOCT_CALIBRATION_1V && ui->settings_.engine == ENGINE_BT &&
-        ui->settings_.snap == 1, "FN 1 + FN 2 held 1 s: V/oct calibration only");
+        ui->settings_.snap == 2, "FN 1 + FN 2 held 1 s: V/oct calibration only");
   Tap(BUTTON_FN_1);
   Check(ui->mode_ == UI_MODE_NORMAL, "  ... FN 1 cancels it");
 
@@ -352,7 +352,7 @@ int main() {
   stmlib::sim_settings_record_size = sizeof(old_record);
   Start();
   Check(ui->settings_.second_layer[S2] == 0 && ui->settings_.engine == ENGINE_LT &&
-        ui->settings_.snap == 2 && (ui->settings_.flags & kFlagLfoFree) &&
+        ui->settings_.snap == 3 && (ui->settings_.flags & kFlagLfoFree) &&
         ui->settings_.second_layer[S1] == 0 && ui->settings_.voct_k == 12345,
         "settings saved before the wave: wave and crush off, everything else kept");
   old_record.flags = kFlagWave;  // the first Wave test build: S1 was noise
@@ -365,6 +365,16 @@ int main() {
   Start();
   Check(ui->settings_.second_layer[S2] == 30000 && ui->settings_.second_layer[S1] == 4000,
         "settings saved with wave and crush: both kept");
+  Check(ui->settings_.snap == 3, "  ... old snap 4 ms: still 4 ms (one step up)");
+  old_record.snap = 3;  // 10 ms
+  Start();
+  Check(ui->settings_.snap == 3, "old snap 10 ms: 4 ms, the longest now");
+  old_record.snap = 0;  // 0.4 ms
+  Start();
+  Check(ui->settings_.snap == 1, "old snap 0.4 ms: still 0.4 ms");
+  old_record.flags = kFlagWave | kFlagCrush | kFlagSnap;
+  Start();
+  Check(ui->settings_.snap == 0, "settings saved with snap off: off kept");
   stmlib::sim_settings_record = NULL;
 
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);
