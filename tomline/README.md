@@ -53,15 +53,23 @@ blinks red.
 | SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time |
 | MOD 2 | Sweep depth: pitch drop on each hit (up to 12 st on BT, 24 st on LT) | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
-| FN 2 (right button) | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
+| FN 2 (right button), tap | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
+| FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones). SHAPE 2 and MOD 2 do nothing here | |
+| FN 2 held + tap METER | LFO wave: triangle / ramp up | |
 | METER, tap | Latch / unlatch the second layer | |
 | METER, hold 1 s without turning a knob | Stock offset calibration (see Calibration) | |
 | FN 1 + FN 2, hold 1 s | V/oct calibration | |
 
-Second-layer knobs use pick-up: a value only moves once the knob passes it,
-so switching layers never makes a parameter jump. Engine, snap, the four
-second-layer values and the V/oct calibration are saved to flash 2 s after
-the last change.
+Second-layer and LFO knobs use pick-up: a value only moves once the knob
+passes it, so switching layers never makes a parameter jump. Turning a knob
+or tapping METER while FN 2 is held does not change snap. The LFO always goes
+to pitch, runs freely (a trigger does not restart it) and is added after the
+glide.
+
+Engine, snap, the four second-layer values, LFO speed, depth and wave, and the
+V/oct calibration are saved to flash 2 s after the last change. Settings saved
+by an older Tomline (before the LFO) are read once: engine, snap, second-layer
+values and V/oct calibration carry over, and the LFO starts off.
 
 ## LEDs
 
@@ -73,6 +81,7 @@ the last change.
 | Left column, bottom | Flashes green on each trigger |
 | Right column | Snap amount, from the bottom (1 LED = snap 0, 4 LEDs = snap 3) |
 | Engine and snap LEDs amber instead of green | Second layer active |
+| FN 2 held: engine LED red, right column top (triangle) or 2nd (ramp up) pulsing red | LFO layer; the pulse follows the LFO, so the speed shows even at zero depth |
 
 ## Offset
 
@@ -179,16 +188,20 @@ g++ -O2 -I. -o build/tomline_render tomline/test/render.cc tomline/voice.cc toml
 ./build/tomline_render
 ```
 
-It also checks that glide lands on the target note and that a very loud
-mix (noise at 100 %, hard hit) clips instead of wrapping around. It exits
+It also checks the tune range, that glide lands on the target note, the LFO
+knob maths and wave shapes, the pitch of both LFO waves at full depth, that the
+LFO at zero depth leaves the sound unchanged, and that a very loud mix (noise
+at 100 %, hard hit) clips instead of wrapping around. It exits
 with an error if a check fails.
 
 Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
 notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
-range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. Loud mix: clips correctly.
+range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
+depth, 0.2-1.2 s: triangle -10.30 st, ramp up -11.14 st (0.02 st from the
+expected value). LFO at zero depth: unchanged. Loud mix: clips correctly.
 
-`tomline/test/words.cc` dumps the firmware's VCA and filter words for four
-patches (BT, LT, glide, everything at maximum), and
+`tomline/test/words.cc` dumps the firmware's VCA and filter words for six
+patches (BT, LT, glide, everything at maximum, LFO triangle, LFO ramp up), and
 `tomline/test/compare_browser.js` runs the browser port on the same input:
 
 ```
@@ -197,7 +210,7 @@ g++ -O2 -I. -o build/tomline_words tomline/test/words.cc tomline/voice.cc tomlin
 node tomline/test/compare_browser.js
 ```
 
-Last run: identical in all four cases (244,627 samples each, zero
+Last run: identical in all six cases (244,627 samples each, zero
 difference).
 
 ## Files

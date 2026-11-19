@@ -57,6 +57,7 @@ void Voice::Init() {
   gliding_ = false;
   phase_ = 0;
   partial_phase_ = 0;
+  lfo_phase_ = 0;
   amp_ = 0;
   attack_ = kUnity;
   sweep_ = 0;
@@ -120,8 +121,15 @@ void Voice::Process(
   int32_t env = static_cast<int32_t>(
       static_cast<int64_t>(amp_) * attack_ >> 45);  // Q15
 
-  // Oscillators.
+  // Pitch LFO, added after the glide so the glide does not smooth it.
+  lfo_phase_ += static_cast<uint32_t>(p.lfo_increment);
   int32_t s = semitones_;
+  if (p.lfo_depth) {
+    s += static_cast<int32_t>(static_cast<int64_t>(p.lfo_depth) *
+                              LfoWave(lfo_phase_, p.lfo_shape) >> 15);
+  }
+
+  // Oscillators.
   s += static_cast<int32_t>(static_cast<int64_t>(p.sweep_depth) * sweep_ >> 30);
   s += static_cast<int32_t>(static_cast<int64_t>(p.snap_depth) * snap_ >> 30);
   uint32_t increment = SemitonesToIncrement(s);
