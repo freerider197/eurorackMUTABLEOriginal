@@ -15,7 +15,7 @@ The owner is not a developer. Explain results in plain words, and ask before any
 
 ```bash
 # FIRST, every session: start from the newest tomline-firmware (the clone may be on master, which lags behind)
-git fetch origin tomline-firmware && git checkout -B "$(git branch --show-current)" origin/tomline-firmware
+git fetch origin tomline-firmware && git merge --no-edit origin/tomline-firmware
 
 # once per clone: the shared libraries are git submodules
 git submodule update --init --depth 1 stmlib stm_audio_bootloader
