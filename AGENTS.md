@@ -115,3 +115,5 @@ Keep it short. Use exactly these sections:
   highlighted and labelled with what they do, one view per layer. Current one: https://claude.ai/artifact/U51rhAbef4VycZWjVJHTs3;
   update it after every control change.
 - Hand over a new `.wav` with the flashing steps from `tomline/README.md` ("Flashing") every time, even if not asked.
+  Never hand over a plain `tomline.wav`: copy it to `build/tomline/tomline-test-<topic>-<short commit>.wav` and send that,
+  so the owner can tell test builds apart.
