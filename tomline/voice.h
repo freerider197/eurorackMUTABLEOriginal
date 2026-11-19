@@ -92,6 +92,11 @@ class Voice {
     return static_cast<int32_t>(t >> 15) - 32768;
   }
 
+  // Pitch envelope offset above the root, semitones Q16 (for the tests).
+  int32_t sweep_offset(const VoiceParameters& p) const {
+    return static_cast<int32_t>(static_cast<int64_t>(p.sweep_depth) * sweep_ >> 30);
+  }
+
   // 0.95 * v, clipped to +/-32767. 64-bit: with noise at 100 % on a hard hit,
   // the mix can reach about 82000, and 82000 * 31130 overflows 32 bits.
   static inline int32_t ScaleMix(int32_t v) {
@@ -112,10 +117,14 @@ class Voice {
   int32_t amp_;       // Q30
   int32_t attack_;    // Q30
   int32_t sweep_;     // Q30
+  bool sweep_rising_;
   int32_t snap_;      // Q30
   int32_t noise_;     // Q30
   int32_t partial_;   // Q30
   int32_t bias_;      // Q15
+  int32_t last_mix_;  // Q15, previous output sample (before the lift)
+  int32_t tail_;      // Q15, old note's last sample, faded out on retrigger
+  int32_t fade_;      // Q15, tail level, 0 = no tail
 
   uint32_t rng_state_;
   int32_t noise_lp1_;

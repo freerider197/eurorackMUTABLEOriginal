@@ -23,6 +23,9 @@ g++ -O2 -I. -o build/tomline_render tomline/test/render.cc tomline/voice.cc toml
 # firmware + audio update file (needs arm-none-eabi-gcc and numpy) -> build/tomline/tomline.bin, tomline.wav
 make -f tomline/makefile TOOLCHAIN_PATH=/usr/ wav
 
+# worst-case stack (main loop + both interrupts) must fit the 4 KB in tomline/tomline.ld. Run after every firmware build
+python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
+
 # check an update file decodes back to the .bin, packet by packet
 python3 tomline/tools/check_wav.py build/tomline/tomline.wav build/tomline/tomline.bin
 
