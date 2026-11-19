@@ -49,7 +49,7 @@ struct Patch {
   uint8_t engine;
   uint8_t snap;
   uint16_t main_layer[4];    // decay, tone, tune, distortion
-  uint16_t second_layer[4];  // noise, +1 oct, unused, glide
+  uint16_t second_layer[4];  // crush, unused, wave, glide
   uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
   uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
   bool lfo_free;             // false = LFO restarts on each trigger
@@ -178,8 +178,7 @@ double MeasurePitch(const Patch& base, int note) {
   patch.main_layer[0] = 65535;  // longest decay
   patch.main_layer[1] = 65535;  // filter open
   patch.main_layer[3] = 0;      // no distortion
-  patch.second_layer[0] = 0;    // no noise
-  patch.second_layer[1] = 0;    // no octave
+  patch.second_layer[0] = 0;    // no crush
   std::vector<Step> steps(1, Step{note});
   Result r = Render(patch, steps, 30.0, 1);
   // Zero crossings of the AC part between 0.2 s and 1.2 s.
@@ -238,8 +237,8 @@ double GlideErrorCents() {
   return 1200.0 * log2(measured / (32.70319566 * 4.0));
 }
 
-// Overflow check: the output mix can reach about 82000 with noise at 100 %
-// on a hard hit. Scaling it must clip at the top, never wrap to the bottom.
+// Overflow check: the output mix (tone and snap) stays under 50000, but
+// scaling any mix must clip at the top, never wrap to the bottom.
 bool MixScalingOk() {
   // With MOD 2 at full (gain word 10923) the soft clipper gets about
   // 218000: it must stay at full scale too.
@@ -256,8 +255,8 @@ double TuneRangeError() {
   const double expected[3] = { 0.0, 12.0, 24.0 };  // semitones above C1
   double worst = 0;
   for (int i = 0; i < 3; ++i) {
-    Patch patch = { ENGINE_BT, 1, { 29491, 40632, knob[i], 19661 },
-                    { 9830, 16384, 22938, 0 } };
+    Patch patch = { ENGINE_BT, 2, { 9146, 40632, knob[i], 19661 },
+                    { 0, 16384, 0, 0 } };
     VoiceParameters p;
     ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
                            patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
@@ -273,7 +272,7 @@ double TuneRangeError() {
 // lowest point when the module starts, about 12 st below C2. Returns the error
 // of the measured average pitch in semitones.
 double LfoPitchError(uint8_t shape, bool free_run, double* measured_st) {
-  Patch patch = { ENGINE_BT, 1, { 0, 0, 32768, 0 }, { 0, 0, 0, 0 },
+  Patch patch = { ENGINE_BT, 2, { 0, 0, 32768, 0 }, { 0, 0, 0, 0 },
                   { 0, 65535, 0, 0 }, shape, free_run };
   double rate = shape == LFO_RAMP_UP ? 1.2 : 2.4;
   double expected = (free_run ? -12.0 : 0.0) + rate * 0.7;
@@ -290,10 +289,10 @@ bool LfoParametersOk() {
   bool ok = true;
   for (int i = 0; i < 3; ++i) {
     uint16_t lfo[4] = { knob[i], knob[i], 0, 0 };
-    uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-    uint16_t second[4] = { 9830, 16384, 22938, 0 };
+    uint16_t main_layer[4] = { 9146, 40632, 32768, 19661 };
+    uint16_t second[4] = { 0, 16384, 0, 0 };
     VoiceParameters p;
-    ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
+    ComputeVoiceParameters(ENGINE_BT, 2, main_layer, second, lfo, LFO_TRIANGLE, &p);
     double f = p.lfo_increment * kFirmwareRate / 4294967296.0;
     ok = ok && fabs(f / hz[i] - 1.0) < 0.01;
     if (i == 0) ok = ok && p.lfo_depth == 0;
@@ -313,14 +312,14 @@ bool LfoParametersOk() {
 // Restart on trigger: right after any trigger the LFO is at the middle of
 // its wave, wherever it was before. Free running: a trigger leaves it alone.
 bool LfoRestartOk() {
-  uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-  uint16_t second[4] = { 9830, 16384, 22938, 0 };
+  uint16_t main_layer[4] = { 9146, 40632, 32768, 19661 };
+  uint16_t second[4] = { 0, 16384, 0, 0 };
   uint16_t lfo[4] = { 50000, 40000, 0, 0 };
   bool ok = true;
   for (uint8_t shape = 0; shape < LFO_SHAPE_LAST; ++shape) {
     for (int free_run = 0; free_run < 2; ++free_run) {
       VoiceParameters p;
-      ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, shape, &p,
+      ComputeVoiceParameters(ENGINE_BT, 2, main_layer, second, lfo, shape, &p,
                              free_run != 0);
       Voice voice;
       voice.Init();
@@ -343,8 +342,8 @@ bool LfoRestartOk() {
 
 // Depth at zero: the speed knob must not change the sound at all.
 bool LfoOffIsSilent(const std::vector<Step>& steps) {
-  Patch slow = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
-                 { 9830, 16384, 22938, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
+  Patch slow = { ENGINE_BT, 2, { 9146, 40632, 32768, 19661 },
+                 { 0, 16384, 0, 0 }, { 0, 0, 0, 0 }, LFO_TRIANGLE };
   Patch fast = slow;
   fast.lfo_layer[0] = 65535;
   fast.lfo_shape = LFO_RAMP_UP;
@@ -353,7 +352,7 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
 }
 
 // Soft distortion (MOD 2), read from the voice's own VCA words with snap,
-// noise and +1 octave off. One hit of C2; over the first 8 cycles, the 3rd
+// noise off. One hit of C2; over the first 8 cycles, the 3rd
 // harmonic against the fundamental; in the tail (0.45 to 0.55 s, where the
 // note is about 25 dB down), the level against MOD 2 fully CCW. The tail must
 // get the small-signal gain of the drive (1 + 3 x knob^2), the start of the
@@ -361,7 +360,7 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
 struct DistortionResult { double h3_db, tail_db; int32_t peak; };
 
 DistortionResult MeasureDistortion(uint8_t engine, uint16_t knob) {
-  uint16_t main_layer[4] = { 29491, 65535, 32768, knob };
+  uint16_t main_layer[4] = { 9146, 65535, 32768, knob };
   uint16_t second[4] = { 0, 0, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(engine, 0, main_layer, second, lfo, LFO_TRIANGLE, &p);
@@ -396,7 +395,7 @@ bool DistortionOk(uint8_t engine) {
   const double expected_tail[3] = { 0.0, 20 * log10(1.75), 20 * log10(4.0) };
   DistortionResult r[3];
   for (int i = 0; i < 3; ++i) r[i] = MeasureDistortion(engine, knobs[i]);
-  uint16_t off_layer[4] = { 29491, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  uint16_t off_layer[4] = { 9146, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
   ComputeVoiceParameters(engine, 0, off_layer, zero, zero, LFO_TRIANGLE, &p);
   bool ok = p.distortion == 0 && r[1].h3_db > r[0].h3_db + 1 &&
@@ -413,6 +412,175 @@ bool DistortionOk(uint8_t engine) {
   printf(" dB (expected +0.0 %+.1f %+.1f), peak word %d %d %d  %s\n",
          expected_tail[1], expected_tail[2], r[0].peak, r[1].peak, r[2].peak,
          ok ? "OK" : "FAIL");
+  return ok;
+}
+
+// Wave (METER + SHAPE 2), read from the voice's own VCA words with snap,
+// noise and distortion off. One hit of C2, the first 8 cycles:
+// harmonics 1 to 16 against the plain sine. Fully CCW must leave the voice
+// untouched; each stage must sound like its name while the fundamental
+// stays within 6 dB (the bass must not disappear): the triangle's 5th
+// harmonic near 1/25, the folded wave far brighter, and fully CW square-like:
+// odd harmonics, 3rd near 1/3 (-9.5 dB), even ones low.
+struct WaveResult { double h[17]; int32_t peak; };
+
+WaveResult MeasureWave(uint8_t engine, uint16_t knob, double start_s = 0,
+                       uint16_t decay = 9146) {
+  uint16_t main_layer[4] = { decay, 65535, 32768, 0 };
+  uint16_t second[4] = { 0, 0, knob, 0 }, lfo[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, main_layer, second, lfo, LFO_TRIANGLE, &p);
+  Voice voice;
+  voice.Init();
+  uint16_t g, f;
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+  const double f0 = 65.40639133;
+  const int cycles = static_cast<int>(8 * kFirmwareRate / f0 + 0.5);
+  const int start = static_cast<int>(start_s * kFirmwareRate);
+  double re[17] = { 0 }, im[17] = { 0 };
+  WaveResult r;
+  r.peak = 0;
+  for (int n = 0; n < start + cycles; ++n) {
+    voice.Process(p, n == 0, 0, &g, &f);  // 0 V: C2
+    if (n < start) continue;
+    int32_t v = static_cast<int32_t>(g) - 32767;
+    if (abs(v) > r.peak) r.peak = abs(v);
+    double w = 2 * M_PI * f0 * n / kFirmwareRate;
+    for (int k = 1; k <= 16; ++k) {
+      re[k] += v * cos(k * w);
+      im[k] += v * sin(k * w);
+    }
+  }
+  for (int k = 1; k <= 16; ++k) r.h[k] = re[k] * re[k] + im[k] * im[k];
+  return r;
+}
+
+bool WaveOk(uint8_t engine) {
+  const uint16_t knobs[4] = { 0, 21845, 43690, 65535 };  // off, triangle, folded, square
+  const char* names[4] = { "sine", "triangle", "folded", "square" };
+  WaveResult r[4];
+  for (int i = 0; i < 4; ++i) r[i] = MeasureWave(engine, knobs[i]);
+  uint16_t main_layer[4] = { 9146, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, main_layer, zero, zero, LFO_TRIANGLE, &p);
+  bool ok = p.wave_tri == 0 && p.wave_fold == 0 && p.wave_square == 0;
+  double upper[4], fund[4];
+  printf("Wave %s: fundamental / harmonics 2-16 (dB against the sine's fundamental):\n",
+         engine == ENGINE_BT ? "BT" : "LT");
+  for (int i = 0; i < 4; ++i) {
+    double sum = 0;
+    for (int k = 2; k <= 16; ++k) sum += r[i].h[k];
+    fund[i] = 10 * log10(r[i].h[1] / r[0].h[1]);
+    upper[i] = 10 * log10(sum / r[0].h[1]);
+    printf("  %-8s %+5.1f / %+6.1f dB, peak word %d\n", names[i], fund[i], upper[i], r[i].peak);
+    ok = ok && fund[i] > -6.0 && r[i].peak <= 32767;
+  }
+  // The triangle is no brighter than the sine, which the drive already
+  // clips a little; it is told apart by its 5th harmonic, in the body of a
+  // long note (decay 2.5 s, 1 s in, steady enough for a clean measurement):
+  // the level matching clips its tips at the start of a hit.
+  WaveResult sine_body = MeasureWave(engine, knobs[0], 1.0, 65535);
+  WaveResult tri_body = MeasureWave(engine, knobs[1], 1.0, 65535);
+  double h5 = 10 * log10(tri_body.h[5] / tri_body.h[1]);
+  double h5_sine = 10 * log10(sine_body.h[5] / sine_body.h[1]);
+  double h3 = 10 * log10(r[3].h[3] / r[3].h[1]);
+  double even = 10 * log10((r[3].h[2] + r[3].h[4] + r[3].h[6]) / r[3].h[1]);
+  ok = ok && h5 > h5_sine + 2.0 && upper[2] > upper[0] + 6 &&
+       upper[2] > upper[1] + 6 && upper[3] > upper[1] + 6 &&
+       h3 > -13.0 && h3 < -7.0 && even < -25.0;
+  printf("  triangle: 5th harmonic %.1f dB (sine %.1f); square: 3rd harmonic "
+         "%.1f dB (expected about -9.5), even harmonics %.1f dB  %s\n",
+         h5, h5_sine, h3, even, ok ? "OK" : "FAIL");
+  return ok;
+}
+
+// Wave level: RMS of the VCA words over the first 0.5 s of a C2 note (+1
+// every 1/32 of the Wave knob, against Wave off.
+// Must stay within 1 dB: no dip at the triangle, no jump at the square.
+bool WaveLevelOk(uint8_t engine) {
+  double ref = 0, lo = 0, hi = 0;
+  for (int k = 0; k <= 32; ++k) {
+    uint16_t knob = k == 32 ? 65535 : k * 2048;
+    uint16_t main_layer[4] = { 65535, 65535, 32768, 0 };
+    uint16_t second[4] = { 0, 0, knob, 0 }, lfo[4] = { 0, 0, 0, 0 };
+    VoiceParameters p;
+    ComputeVoiceParameters(engine, 2, main_layer, second, lfo, LFO_TRIANGLE, &p);
+    Voice voice;
+    voice.Init();
+    uint16_t g, f;
+    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+    double sum = 0;
+    const int n = static_cast<int>(0.5 * kFirmwareRate);
+    for (int i = 0; i < n; ++i) {
+      voice.Process(p, i == 0, 0, &g, &f);
+      double v = static_cast<double>(g) - 32767;
+      sum += v * v;
+    }
+    double db = 10 * log10(sum / n);
+    if (k == 0) ref = db;
+    lo = fmin(lo, db - ref);
+    hi = fmax(hi, db - ref);
+  }
+  bool ok = lo > -1.0 && hi < 1.0;
+  printf("Wave level %s, along the knob against off: %+.1f to %+.1f dB  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", lo, hi, ok ? "OK" : "FAIL");
+  return ok;
+}
+
+// Crush (METER + SHAPE 1), read from the voice's own VCA words with snap,
+// distortion off. One hit of C2, 0.1 to 0.6 s. Off: the words
+// change on most samples. Just past off: about 6 kHz. Noon: about 2.1 kHz.
+// Full: about 750 Hz. The level must stay, and within full scale.
+struct CrushResult { double changes, rms_db; int32_t peak; };
+
+CrushResult MeasureCrush(uint8_t engine, uint16_t knob) {
+  uint16_t main_layer[4] = { 40000, 65535, 32768, 0 };
+  uint16_t second[4] = { knob, 0, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, main_layer, second, lfo, LFO_TRIANGLE, &p);
+  Voice voice;
+  voice.Init();
+  uint16_t g, f;
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+  CrushResult r = { 0, 0, 0 };
+  const int a = static_cast<int>(0.1 * kFirmwareRate), b = static_cast<int>(0.6 * kFirmwareRate);
+  int32_t last = 0;
+  double sum = 0;
+  int changes = 0;
+  for (int n = 0; n < 3 * kFirmwareRate; ++n) {
+    voice.Process(p, n == 0, 0, &g, &f);
+    int32_t v = static_cast<int32_t>(g) - 32767;
+    if (abs(v) > r.peak) r.peak = abs(v);
+    if (n >= a && n < b) {
+      if (v != last) ++changes;
+      sum += static_cast<double>(v) * v;
+    }
+    last = v;
+  }
+  r.changes = static_cast<double>(changes) / (b - a);
+  r.rms_db = 10 * log10(sum / (b - a));
+  return r;
+}
+
+bool CrushOk(uint8_t engine) {
+  CrushResult off = MeasureCrush(engine, 0);
+  CrushResult start = MeasureCrush(engine, 700);
+  CrushResult mid = MeasureCrush(engine, 32768);
+  CrushResult full = MeasureCrush(engine, 65535);
+  uint16_t main_layer[4] = { 40000, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(engine, 0, main_layer, zero, zero, LFO_TRIANGLE, &p);
+  double hz[3] = { start.changes * kFirmwareRate, mid.changes * kFirmwareRate,
+                   full.changes * kFirmwareRate };
+  const double expected[3] = { 6000 * pow(2, -3 * 700 / 65535.0), 6000 * pow(2, -1.5), 750 };
+  bool ok = p.crush_increment == 0 && off.changes > 0.9 &&
+            full.peak <= 32767 && mid.peak <= 32767 && start.peak <= 32767;
+  for (int i = 0; i < 3; ++i) ok = ok && fabs(hz[i] / expected[i] - 1) < 0.05;
+  ok = ok && fabs(mid.rms_db - off.rms_db) < 1.0 && fabs(full.rms_db - off.rms_db) < 1.0;
+  printf("Crush %s (just past off / noon / full): sample rate %.0f / %.0f / %.0f Hz "
+         "(expected %.0f / %.0f / %.0f), level %+.1f / %+.1f dB  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", hz[0], hz[1], hz[2], expected[0], expected[1],
+         expected[2], mid.rms_db - off.rms_db, full.rms_db - off.rms_db, ok ? "OK" : "FAIL");
   return ok;
 }
 
@@ -479,8 +647,8 @@ double PeakToPeak(const std::vector<float>& v, size_t start, size_t length) {
 }
 
 bool RetriggerOk(uint8_t engine, uint16_t decay) {
-  Patch patch = { engine, 1, { decay, 32768, 32768, 19660 },
-                  { 9830, 16384, 22938, 0 } };
+  Patch patch = { engine, 2, { decay, 32768, 32768, 19660 },
+                  { 0, 16384, 0, 0 } };
   std::vector<Step> line = { {0}, {0}, {12}, {0}, {7}, {0}, {10}, {12} };
   const double bpm = 120.0;  // 125 ms per step
   Result r = Render(patch, line, bpm, 1);
@@ -565,8 +733,8 @@ double JumpLargest(const Patch& patch, Control control) {
 }
 
 bool KnobJumpOk(uint8_t engine, int knob, const char* name, int32_t from, int32_t to) {
-  Patch patch = { engine, 1, { 65535, 32768, 32768, 19661 },
-                  { 9830, 16384, 22938, 0 }, { 49152, 0, 0, 0 } };
+  Patch patch = { engine, 2, { 65535, 32768, 32768, 19661 },
+                  { 0, 16384, 0, 0 }, { 49152, 0, 0, 0 } };
   jump_knob = knob;
   jump_from = from;
   jump_to = to;
@@ -576,6 +744,13 @@ bool KnobJumpOk(uint8_t engine, int knob, const char* name, int32_t from, int32_
   *JumpValue(&end) = to;
   double after = JumpLargest(end, NULL);
   double reference = fmax(before, after);
+  // The settings the glide passes through count too: the folded wave, half
+  // way along the wave knob, is spikier than both ends.
+  for (int i = 1; i < 12; ++i) {
+    Patch mid = patch;
+    *JumpValue(&mid) = from + (to - from) * i / 12;
+    reference = fmax(reference, JumpLargest(mid, NULL));
+  }
   jump_glide = false;
   double instant = JumpLargest(patch, JumpControl);
   jump_glide = true;
@@ -585,6 +760,31 @@ bool KnobJumpOk(uint8_t engine, int knob, const char* name, int32_t from, int32_
          "glide %.3f V  %s\n", engine == ENGINE_BT ? "BT" : "LT", name,
          (from * 100 + 32767) / 65535, (to * 100 + 32767) / 65535, reference,
          instant, glide, ok ? "OK" : "FAIL");
+  return ok;
+}
+
+// Snap off (snap 0): no click noise and no pitch blip for either engine, and
+// the largest one-sample jump in the first 3 ms of a hit (AC-coupled) must be
+// smaller than with the 0.4 ms snap.
+bool SnapOffOk() {
+  bool ok = true;
+  for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
+    uint16_t main_layer[4] = { 9146, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+    VoiceParameters p;
+    ComputeVoiceParameters(engine, 0, main_layer, zero, zero, LFO_TRIANGLE, &p);
+    ok = ok && p.snap_noise == 0 && p.snap_depth == 0;
+    double jump[2];
+    for (uint8_t snap = 0; snap < 2; ++snap) {
+      Patch patch = { engine, snap, { 9146, 65535, 32768, 0 }, { 0, 0, 0, 0 } };
+      std::vector<Step> note(1, Step{12});
+      Result r = Render(patch, note, 30.0, 1);
+      std::vector<double> y = HighPass(r.raw);
+      jump[snap] = LargestJump(y, 0, static_cast<size_t>(0.003 * kHostRate));
+    }
+    ok = ok && jump[0] < jump[1];
+    printf("Snap off %s: largest jump in the first 3 ms %.3f V (0.4 ms snap: %.3f V)\n",
+           engine == ENGINE_BT ? "BT" : "LT", jump[0], jump[1]);
+  }
   return ok;
 }
 
@@ -608,10 +808,10 @@ double AttackJumpVolts(const Patch& patch) {
 // Power-up: VCA word at 0 for the first second (Ui::CheckSetup reads LEVEL
 // MOD 1 there), then a rise of one step per sample to 32767, never faster.
 bool PowerUpOk() {
-  uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
-  uint16_t second[4] = { 9830, 16384, 22938, 0 }, lfo[4] = { 0, 0, 0, 0 };
+  uint16_t main_layer[4] = { 9146, 40632, 32768, 19661 };
+  uint16_t second[4] = { 0, 16384, 0, 0 }, lfo[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
-  ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
+  ComputeVoiceParameters(ENGINE_BT, 2, main_layer, second, lfo, LFO_TRIANGLE, &p);
   Voice voice;
   voice.Init();
   uint16_t g, f, prev = 0;
@@ -627,12 +827,10 @@ bool PowerUpOk() {
 
 int main() {
   int failures = 0;
-  Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
-               { 9830, 16384, 22938, 0 } };
+  Patch bt = { ENGINE_BT, 2, { 9146, 40632, 32768, 19661 },
+               { 0, 16384, 0, 0 } };
   Patch lt = bt;
   lt.engine = ENGINE_LT;
-  Patch bt_oct = bt;
-  bt_oct.second_layer[1] = 39321;  // +1 octave at 60 %
 
   // "Roller" pattern from the browser page (V/oct in semitones).
   std::vector<Step> roller = {
@@ -642,7 +840,6 @@ int main() {
   struct { const char* name; Patch patch; } cases[] = {
     { "build/tomline_bt.wav", bt },
     { "build/tomline_lt.wav", lt },
-    { "build/tomline_bt_oct.wav", bt_oct },
   };
   for (auto& c : cases) {
     Result r = Render(c.patch, roller, 122.0, 4);
@@ -658,9 +855,9 @@ int main() {
   quiet.snap = 0;
   quiet.main_layer[1] = 0;      // tone fully closed
   quiet.main_layer[3] = 0;      // no distortion
-  quiet.second_layer[0] = 0;    // no noise
+  quiet.second_layer[0] = 0;    // no crush
   struct { const char* name; Patch patch; } hits[] = {
-    { "BT default", bt }, { "LT default", lt }, { "BT tone closed, snap 0", quiet } };
+    { "BT default", bt }, { "LT default", lt }, { "BT tone closed, snap off", quiet } };
   for (auto& h : hits) {
     double jump = AttackJumpVolts(h.patch);
     bool ok = fabs(jump) < 0.25;  // the old moving lift: about 2.4 V
@@ -716,6 +913,11 @@ int main() {
   for (uint8_t engine = 0; engine < 2; ++engine) {
     failures += !DistortionOk(engine);
   }
+  for (uint8_t engine = 0; engine < 2; ++engine) {
+    failures += !WaveOk(engine);
+    failures += !WaveLevelOk(engine);
+    failures += !CrushOk(engine);
+  }
 
   printf("\nTone fully closed vs fully open, RMS over a note (must be >= -6 dB):\n");
   for (int e = 0; e < 2; ++e) {
@@ -729,6 +931,9 @@ int main() {
     printf("\n");
   }
 
+  bool snap_ok = SnapOffOk();
+  printf("Snap off: no click noise, no pitch blip: %s\n", snap_ok ? "OK" : "FAIL");
+  failures += !snap_ok;
   printf("Retrigger click, largest one-sample jump in the 1 ms after a note:\n");
   const uint16_t decays[3] = { 32768, 49152, 65535 };
   for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
@@ -740,7 +945,7 @@ int main() {
   printf("Knob jump click, largest one-sample jump in the 100 ms after it:\n");
   struct { int knob; const char* name; } jumps[] = {
     { 0, "decay" }, { 1, "tone" }, { 2, "tune" }, { 3, "distortion" },
-    { 4, "noise" }, { 5, "+1 octave" }, { 7, "glide" },
+    { 4, "crush" }, { 6, "wave" }, { 7, "glide" },
     { 9, "LFO depth" } };
   for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
     for (auto& j : jumps) {
@@ -755,7 +960,7 @@ int main() {
   failures += !power_ok;
 
   bool mix_ok = MixScalingOk();
-  printf("Loud output mix (noise 100 %%, hard hit): %s\n",
+  printf("Loud output mix (82000, beyond the real 50000): %s\n",
          mix_ok ? "clips correctly  OK" : "wraps around  FAIL (32-bit overflow)");
   failures += !mix_ok;
   return failures ? 1 : 0;

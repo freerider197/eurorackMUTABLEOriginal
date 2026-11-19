@@ -115,6 +115,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
         <button id="play" class="play" type="button"><svg viewBox="0 0 14 14" aria-hidden="true"><path id="playIcon" d="M2 1 L13 7 L2 13 Z" fill="currentColor"/></svg><span id="playTxt">Play</span></button>
         <label class="sl" for="bpm">TEMPO <input id="bpm" type="range" min="60" max="180" step="1" value="122"><output id="bpmv">122</output></label>
         <label class="sl" for="master">VOLUME <input id="master" type="range" min="0" max="1" step="0.01" value="0.75"></label>
+        <button class="btn" type="button" id="fn2lock" aria-pressed="false" title="For a mouse: keeps FN 2 held, so the knobs set the LFO. Click again (or click FN 2) to let go">Hold FN 2 · LFO</button>
         <div class="lcd" aria-live="polite"><span id="lcdk">ENGINE</span><span id="lcdv">BT · bass tom</span></div>
       </div>
 
@@ -144,7 +145,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
       <div class="card keys">
         <div class="head">
           <h2>Keys</h2>
-          <span class="hint">A–K on your keyboard, Z / X for octave, Space to play, hold Shift for METER, L for FN 2 (LFO)</span>
+          <span class="hint">A–K on your keyboard, Z / X for octave, Space to play, hold Shift for METER, L for FN 2 (LFO). Mouse only: tap METER to latch it, or use Hold FN 2 above</span>
           <div class="oct push"><button class="btn" type="button" id="kod" aria-label="Octave down">−</button><output id="koct">C2</output><button class="btn" type="button" id="kou" aria-label="Octave up">+</button></div>
         </div>
         <div id="piano" class="piano"></div>
@@ -165,12 +166,12 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
         <div class="tbl"><table>
           <thead><tr><th>Control</th><th>Job</th><th>With METER</th></tr></thead>
           <tbody>
-            <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Noise level</td></tr>
-            <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
-            <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Not used</td></tr>
+            <tr><td>SHAPE 1</td><td>Decay, 95 ms to 2.5 s</td><td>Crush: fully left = off, then the sample rate from 6 kHz down to 750 Hz (ring tones and grit)</td></tr>
+            <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock</td><td>Not used</td></tr>
+            <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Wave: fully left = sine, then triangle, folded sine, and square at fully right</td></tr>
             <tr><td>MOD 2</td><td>Soft distortion: fully left = clean, turning up drives the sound into a soft clipper (up to +12 dB). The loud start of each hit saturates, the quiet tail stays clean</td><td>Glide (fully left = off)</td></tr>
             <tr><td>FN 1</td><td>Engine: BT or LT</td><td>—</td></tr>
-            <tr><td>FN 2</td><td>Tap: snap 0–3, attack click of 0.4, 1.5, 4 or 10 ms</td><td>—</td></tr>
+            <tr><td>FN 2</td><td>Tap: snap, the attack click: off, 0.4, 1.5 or 4 ms</td><td>—</td></tr>
             <tr><td>FN 2 held</td><td>Pitch LFO (or hold L): SHAPE 1 speed 0.05–20 Hz, MOD 1 depth up to ±12 st (fully left = off). Tap METER: triangle / ramp up. Tap FN 1: restarts on each trigger (default) / free running. LEDs red, the wave LED pulses, the third right LED lit = free running</td><td>—</td></tr>
             <tr><td>METER</td><td>Tap to latch the second row, or hold Shift</td><td>—</td></tr>
             <tr><td>LEVEL MOD 1</td><td>Keep fully counter-clockwise. Turned up, it adds a DC offset <span class="an">analog</span></td><td>—</td></tr>
@@ -223,6 +224,7 @@ function oneMinusExpQ31(tau) {
 function decayQ31(tau) { return 2147483647 - oneMinusExpQ31(tau); }
 const q16 = x => Math.trunc(F(x * 65536));
 const q15 = x => Math.trunc(F(x * 32767));
+const mix32768 = x => Math.trunc(F((x < 0 ? F(0) : (x > 1 ? F(1) : x)) * F(32768)));  // parameters.cc Mix
 function amountOffset(value) {  // streams/meta_parameters.h
   if (value < 32768) {
     let v = 32767 - value;
@@ -231,15 +233,31 @@ function amountOffset(value) {  // streams/meta_parameters.h
   }
   return { amount: 65535 - ((value - 32768) << 1), offset: (value - 32768) << 1 };
 }
+// parameters.cc: level along the Wave knob (dB), evened out by wave_gain.
+const WAVE_LEVEL_DB = [0.00, -0.30, -0.60, -1.00, -1.30, -1.70, -1.25, -0.60, -0.30,
+  -0.55, -1.70, -2.65, -1.30, -0.10, 0.80, 1.60, 2.25].map(F);
+function waveGain(wave) {
+  const pos = F(wave * F(16));
+  let i = Math.trunc(pos); if (i > 15) i = 15;
+  const level = F(WAVE_LEVEL_DB[i] + F(F(WAVE_LEVEL_DB[i + 1] - WAVE_LEVEL_DB[i]) * F(pos - i)));
+  return Math.trunc(F(fExp2(F(-level * F(0.1660964))) * F(4096)));
+}
+// parameters.cc Crush: sample rate 6 kHz (just past off) -> 750 Hz.
+function crushParams(crush) {
+  if (crush < F(0.01)) return { crushInc: 0 };
+  return { crushInc: Math.trunc(F(fExp2(F(crush * F(-3))) * F(F(F(6000) / K_SR_F) * F(2147483520)))) };
+}
 function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0, lfoFree = 0) {
   const bt = engine === 0;
   const decay = F(main[0] / F(65535)), tune = F(main[2] / F(65535)), distortion = F(main[3] / F(65535));
-  const noise = F(second[0] / F(65535)), octave = F(second[1] / F(65535));
-  const glide = F(second[3] / F(65535));
-  const tau = F(F(0.015) * fExp2(F(decay * F(7.38082))));
-  let noiseTau = F(tau * F(0.35));
-  if (noiseTau > F(0.25)) noiseTau = F(0.25);
-  const snapTau = [F(0.0004), F(0.0015), F(0.004), F(0.010)][snap];
+  const crush = F(second[0] / F(65535));  // second[1] unused (was the +1 octave)
+  const glide = F(second[3] / F(65535)), wave = F(second[2] / F(65535));
+  const w3 = wave < F(0.01) ? F(0) : F(wave * F(3));
+  let fold = F(w3 - F(1));
+  if (fold < F(0)) fold = F(0);
+  if (fold > F(1)) fold = F(1);
+  const tau = F(F(0.095) * fExp2(F(decay * F(4.717857))));
+  const snapTau = [F(0.0004), F(0.0004), F(0.0015), F(0.004)][snap];  // snap 0 = off
   const harmonic = F(bt ? 0.1 : 0.3);
   const tone = amountOffset(main[1]);
   const lfoSpeed = F(lfo[0] / F(65535)), lfoDepth = F(lfo[1] / F(65535));
@@ -248,20 +266,21 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
     engine,
     amp: decayQ31(tau),
     partialC: decayQ31(F(tau * F(0.3))),
-    noiseC: decayQ31(noiseTau),
     snapC: decayQ31(snapTau),
     glideK: glide < F(0.01) ? 0 : oneMinusExpQ31(F(F(0.004) + F(F(glide * glide) * F(0.5)))),
     tune: q16(F(F(12) + F(F(tune - F(0.5)) * F(24)))),
-    snapDepth: q16(F(bt ? 30 : 15)),
-    octave: q15(octave),
+    snapDepth: snap ? q16(F(bt ? 30 : 15)) : 0,
     harmonic: q15(harmonic),
-    norm: q15(F(F(1) / F(F(F(1) + F(F(0.6) * harmonic)) + F(F(0.55) * octave)))),
-    noiseLevel: q15(F(noise * F(bt ? 0.6 : 1.0))),
-    snapNoise: q15(F(bt ? 0.5 : 0.3)),
-    k1: bt ? 7058 : 12996,
-    k2: bt ? 1928 : 3889,
+    norm: q15(F(F(1) / F(F(1) + F(F(0.6) * harmonic)))),
+    snapNoise: snap ? q15(F(bt ? 0.5 : 0.3)) : 0,
     drive: bt ? 4915 : 4300,
     distortion: distortion < F(0.01) ? 0 : Math.trunc(F(F(F(1) + F(F(F(3) * distortion) * distortion)) * F(F(4096) / F(1.5)))),
+    waveTri: mix32768(w3),
+    waveFold: mix32768(fold),
+    foldGain: Math.trunc(F(F(F(1) + fold) * F(4096))),
+    waveSquare: mix32768(F(w3 - F(2))),
+    waveGain: waveGain(wave),
+    ...crushParams(crush),
     toneAmount: tone.amount,
     toneOffset: tone.offset,
     lfoInc: Math.trunc(F(lfoHz * F(F(4294967296) / K_SR_F))),
@@ -313,6 +332,18 @@ function softClip(x) {
   const cube = Math.imul(Math.imul(x, x) >> 15, x) >> 15;
   return clip15((3 * x - cube) >> 1);
 }
+// voice.cc Wave (METER + SHAPE 2): sine -> triangle -> folded sine -> square.
+function wave(p, phase, sin) {
+  const u = ((phase + 0x40000000) >>> 0) >>> 16;
+  const tri = clip15(32768 - (u < 32768 ? 32768 - u : u - 32768) * 2);
+  let y = sin + (Math.imul(tri - sin, p.waveTri) >> 15);
+  if (p.waveFold) {
+    const v = Math.imul(sin, p.foldGain) >> 12;  // sine folding
+    y += Math.imul(sine((v << 15) >>> 0) - y, p.waveFold) >> 15;
+  }
+  if (p.waveSquare) y += Math.imul(softClip(sin << 2) - y, p.waveSquare) >> 15;
+  return y;
+}
 // Voice::LfoWave: -32768 .. 32767. Shape 0 triangle, 1 ramp up.
 function lfoWave(phase, shape) {
   if (shape === 1) return (phase >>> 16) - 32768;
@@ -325,8 +356,9 @@ const lfoStart = shape => shape === 1 ? 0x80000000 : 0x40000000;
 class TomlineVoice {
   constructor() {
     this.semitones = 0; this.gliding = false; this.phase = 0; this.pphase = 0; this.lfoPhase = 0;
-    this.amp = 0; this.attack = K_UNITY; this.snap = 0; this.noise = 0; this.partial = 0;
-    this.lift = 0; this.hold = K_POWER_UP_HOLD; this.lastMix = 0; this.tail = 0; this.fade = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
+    this.amp = 0; this.attack = K_UNITY; this.snap = 0; this.partial = 0;
+    this.lift = 0; this.hold = K_POWER_UP_HOLD; this.lastMix = 0; this.tail = 0; this.fade = 0; this.rng = 0x21f3a5c1;
+    this.crushPhase = 0; this.crushHold = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
   // pitch: semitones above C1, Q16 (as Ui::Pitch). Outputs gainWord (0..65535)
@@ -335,7 +367,8 @@ class TomlineVoice {
     if (trigger) {
       this.gliding = p.glideK !== 0 && this.amp > (K_UNITY >> 6);
       this.amp = K_UNITY; this.attack = 0; this.snap = K_UNITY;
-      this.noise = K_UNITY; this.partial = K_UNITY; this.phase = 0; this.pphase = 0;
+      this.partial = K_UNITY; this.phase = 0; this.pphase = 0;
+      this.crushPhase = 0xffffffff;  // crush: take a sample right away
       this.tail = this.lastMix; this.fade = 32767;  // old note fades out over 1.5 ms
       if (!p.lfoFree) this.lfoPhase = lfoStart(p.lfoShape);
     }
@@ -350,7 +383,6 @@ class TomlineVoice {
     }
     this.amp = mul31(this.amp, p.amp);
     this.snap = mul31(this.snap, p.snapC);
-    this.noise = mul31(this.noise, p.noiseC);
     this.partial = mul31(this.partial, p.partialC);
     if (this.attack < K_UNITY) { this.attack += K_ATTACK_STEP; if (this.attack > K_UNITY) this.attack = K_UNITY; }
     const env = mul45(this.amp, this.attack);
@@ -370,20 +402,22 @@ class TomlineVoice {
       const level = Math.floor(p.harmonic * this.partial / 1073741824);
       x += Math.imul(sine(this.pphase), level) >> 15;
     }
-    x += Math.imul(octave, p.octave) >> 15;
     x = Math.floor(x * p.norm / 32768);
     x = softClip(Math.imul(x, p.drive) >> 12);
+    if (p.waveTri) x = clip15(Math.imul(x + Math.floor((wave(p, this.phase, fundamental) - fundamental) * p.norm / 32768), p.waveGain) >> 12);
     this.rng = (Math.imul(this.rng, 1664525) + 1013904223) >>> 0;
     const white = ((this.rng >>> 16) << 16) >> 16;
-    this.lp1 += Math.imul(white - this.lp1, p.k1) >> 15;
-    this.lp2 += Math.imul(this.lp1 - this.lp2, p.k2) >> 15;
-    const band = clip15((this.lp1 - this.lp2) << 1);
-    const noiseEnv = mul45(this.noise, this.attack), snapEnv = mul45(this.snap, this.attack);
+    const snapEnv = mul45(this.snap, this.attack);
     let v = Math.imul(x, env) >> 15;
-    v += Math.imul(Math.imul(p.noiseLevel, noiseEnv) >> 15, band) >> 15;
     v += Math.imul(Math.imul(p.snapNoise, snapEnv) >> 15, white) >> 15;
     if (p.distortion) v = softClip(Math.imul(v, p.distortion) >> 12);  // MOD 2 soft distortion
     v = clip15(Math.floor(v * 31130 / 32768));
+    if (p.crushInc) {  // Crush: sample and hold at a lower rate
+      const before = this.crushPhase;
+      this.crushPhase = (this.crushPhase + p.crushInc * 2) >>> 0;
+      if (this.crushPhase < before) this.crushHold = v;
+      v = this.crushHold;
+    }
     if (this.fade > 0) {
       this.fade -= 683; if (this.fade < 0) this.fade = 0;
       v = clip15(v + (Math.imul(this.tail, this.fade) >> 15));
@@ -407,7 +441,7 @@ class TomlineVoice {
 class Engine {
   constructor(sr) {
     this.sr = sr;
-    this.k = { engine: 0, snap: 1, main: [29491, 40632, 32768, 19661], second: [9830, 16384, 22938, 0],
+    this.k = { engine: 0, snap: 2, main: [9146, 40632, 32768, 19661], second: [0, 0, 0, 0],
       lfo: [32768, 0, 0, 0], lfoShape: 0, lfoFree: 0, level1: 0, curve1: 1, ideal: false, kick: false, master: 0.75, bpm: 122, playing: false };
     this.p = computeParams(0, 1, this.k.main, this.k.second);
     this.voice = new TomlineVoice();
@@ -521,20 +555,20 @@ class Engine {
 const NN = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const nname = n => NN[((n % 12) + 12) % 12] + (2 + Math.floor(n / 12));  // n = semitones of V/oct; TUNE at noon
 const ENG = ['BT · bass tom', 'LT · low tom'];
-const DEFV = { main: [29491, 40632, 32768, 19661], second: [9830, 16384, 22938, 0], lfo: [32768, 0, 0, 0] };
+const DEFV = { main: [9146, 40632, 32768, 19661], second: [0, 0, 0, 0], lfo: [32768, 0, 0, 0] };
 const mk = a => a.map(([n, on]) => ({ n, on: !!on }));
 const PATS = [
   mk([[12,1],[12,0],[12,1],[24,1],[12,0],[15,1],[12,1],[10,1],[12,1],[12,0],[12,1],[19,1],[17,1],[15,1],[12,0],[10,1]]),
   mk([[12,1],[12,0],[12,0],[10,1],[12,0],[12,1],[12,0],[7,1],[12,1],[12,0],[15,1],[12,0],[14,1],[12,0],[10,1],[7,1]]),
   mk([[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,0],[12,1],[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[7,1],[10,1]])
 ];
-const S = { k: { engine: 0, snap: 1, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
+const S = { k: { engine: 0, snap: 2, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
   ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
   warn: false };
-try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { Object.assign(S.k, j.k); S.pat = j.pat; } } catch (e) {}
+try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { if (!j.wave && j.k.second) j.k.second[2] = 0; /* saved before the wave: start at sine */ if (!j.crush && j.k.second) j.k.second[0] = 0; /* was the noise level: crush starts off */ if (!j.snap && typeof j.k.snap === 'number') j.k.snap = j.k.snap >= 2 ? 3 : j.k.snap + 1; /* old 0.4/1.5/4/10 ms: one step up */ Object.assign(S.k, j.k); S.pat = j.pat; } } catch (e) {}
 S.k.ideal = false; delete S.k.in1;
 let saveT = 0;
-function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('tomline-fw-v1', JSON.stringify({ k: S.k, pat: S.pat })); } catch (e) {} }, 300); }
+function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('tomline-fw-v1', JSON.stringify({ k: S.k, pat: S.pat, wave: 1, crush: 1, snap: 1 })); } catch (e) {} }, 300); }
 
 /* ===================== audio ===================== */
 let ctx = null, node = null, post = () => {}, starting = null, playing = false;
@@ -648,10 +682,10 @@ ${pbtn('b1',228,140,'FN 1: engine')}${pbtn('b2',333,140,'FN 2: snap')}
 ${t(30,156,'−','pl','style="font-size:26px;font-weight:500"')}${t(168,156,'+','pl','style="font-size:24px;font-weight:500"')}
 ${t(394,156,'−','pl','style="font-size:26px;font-weight:500"')}${t(532,156,'+','pl','style="font-size:24px;font-weight:500"')}
 ${KN.slice(0, 6).map(bigKnob).join('')}
-${t(98,302,'SHAPE','pl','style="font-size:25px"')}${sub(98,322,'DECAY','NOISE')}
-${t(462,302,'SHAPE','pl','style="font-size:25px"')}${sub(462,322,'TUNE','—')}
+${t(98,302,'SHAPE','pl','style="font-size:25px"')}${sub(98,322,'DECAY','CRUSH')}
+${t(462,302,'SHAPE','pl','style="font-size:25px"')}${sub(462,322,'TUNE','WAVE')}
 ${modIcons(98)}${modIcons(462)}
-${t(98,519,'MOD','pl','style="font-size:25px"')}${sub(98,537,'TONE','+1 OCT')}
+${t(98,519,'MOD','pl','style="font-size:25px"')}${sub(98,537,'TONE','—')}
 ${t(462,519,'MOD','pl','style="font-size:25px"')}${sub(462,537,'DRIVE','GLIDE')}
 ${[207,257,311,363].map((y, i) => led('L' + i, 228, y) + led('R' + i, 333, y)).join('')}
 ${['BT','LT','!','TRG'].map((s, i) => `<g transform="translate(280 ${[207,257,311,363][i]})"><circle r="17" fill="#5f6269"/><text text-anchor="middle" dy="4.2" style="font-family:var(--f-display);font-weight:700;font-size:${s.length > 2 ? 10.5 : 12.5}px;fill:#fff;letter-spacing:.3px">${s}</text></g>`).join('')}
@@ -678,16 +712,16 @@ ${JK.map(jack).join('')}
 <text x="281" y="1166" text-anchor="middle" class="sub" style="font-size:15px;letter-spacing:1.5px">STREAMS ALT FIRMWARE · BROWSER MODEL</text>`;
 
 /* ===================== knob behavior ===================== */
-const tauOf = v => 0.015 * Math.pow(2, v * 7.38082);
+const tauOf = v => 0.095 * Math.pow(2, v * 4.717857);
 const pct = v => Math.round(v * 100) + '%';
 const META = {
   'main0': { n: 'DECAY', f: v => Math.round(tauOf(v) * 1000) + ' ms' },
   'main1': { n: 'TONE', f: v => pct(v) + (v < 0.5 ? ' · envelope' : ' · envelope + open') },
   'main2': { n: 'TUNE', f: v => { const s = (v - 0.5) * 24; return (s >= 0 ? '+' : '') + s.toFixed(1) + ' st'; } },
   'main3': { n: 'DRIVE', f: v => v < 0.01 ? 'off · clean' : '+' + (20 * Math.log10(1 + 3 * v * v)).toFixed(1) + ' dB soft distortion' },
-  'second0': { n: 'NOISE', f: v => pct(v) },
-  'second1': { n: '+1 OCT', f: v => pct(v) },
-  'second2': { n: 'SHAPE 2', f: () => 'not used on the second row' },
+  'second0': { n: 'CRUSH', f: v => v < 0.01 ? 'off' : Math.round(6000 * Math.pow(2, -3 * v)) + ' Hz' },
+  'second1': { n: 'MOD 1', f: () => 'not used on the second row' },
+  'second2': { n: 'WAVE', f: v => v < 0.01 ? 'sine' : v < 1 / 3 ? 'sine → triangle' : v < 2 / 3 ? 'triangle → folded' : v < 0.99 ? 'folded → square' : 'square' },
   'second3': { n: 'GLIDE', f: v => v < 0.01 ? 'off' : Math.round((0.004 + v * v * 0.5) * 1000) + ' ms' },
   'lfo0': { n: 'LFO SPEED', f: v => { const hz = 0.05 * Math.pow(400, v); return (hz < 1 ? hz.toFixed(2) : hz.toFixed(1)) + ' Hz'; } },
   'lfo1': { n: 'LFO DEPTH', f: v => v < 0.01 ? 'off' : '±' + (v * v * 12).toFixed(2) + ' st' },
@@ -758,7 +792,7 @@ function drawLeds() {
   paint(document.getElementById('L2'), S.warn && blink ? '#ff4a3d' : null);
   paint(document.getElementById('L3'), trigOn ? '#6be07b' : null);
   if (S.layer === 2) { if (!lfoRaf) { lfoUiT = 0; lfoRaf = requestAnimationFrame(lfoLed); } }
-  else for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), (3 - i) <= S.k.snap ? on : null);
+  else for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), (3 - i) < S.k.snap ? on : null);
   svg.classList.toggle('shift', S.layer === 1);
   svg.classList.toggle('lfo', S.layer === 2);
 }
@@ -776,15 +810,16 @@ function press(id, fn) {
 let comboing = false;
 function combo() { comboing = true; lcd('FN 1 + FN 2', 'V/oct calibration: runs on the module (1 V, then 3 V)'); }
 // FN 1 tapped while FN 2 is held: LFO restart on trigger / free running.
-document.getElementById('b1').addEventListener('pointerdown', () => { S.fn1WithFn2 = S.fn2; if (S.fn2) S.fn2Used = true; });
+document.getElementById('b1').addEventListener('pointerdown', () => { S.fn1WithFn2 = S.fn2 || S.fn2Lock; if (S.fn1WithFn2) S.fn2Used = true; });
 press('b1', () => {
   if (S.fn1WithFn2) { S.fn1WithFn2 = false; setK('lfoFree', S.k.lfoFree ? 0 : 1); drawLeds(); lcd('LFO', S.k.lfoFree ? 'free running' : 'restarts on each trigger'); return; }
   setK('engine', (S.k.engine + 1) % 2); drawLeds(); drawKnobs(); lcd('ENGINE', ENG[S.k.engine]); });
 // FN 2: tap = snap. Held (or L held on the keyboard) = LFO layer; a knob or
 // METER used meanwhile cancels the snap step, as in ui.cc.
 press('b2', () => {
+  if (S.fn2Lock) { S.fn2 = false; setFn2Lock(false); return; }  // a click on FN 2 lets go of the hold
   const used = S.fn2Used; S.fn2 = false; setLayer();
-  if (!used) { setK('snap', (S.k.snap + 1) % 4); drawLeds(); lcd('SNAP', S.k.snap + ' of 3 · ' + [0.4, 1.5, 4, 10][S.k.snap] + ' ms click'); }
+  if (!used) { setK('snap', (S.k.snap + 1) % 4); drawLeds(); lcd('SNAP', ['off · no click', '0.4 ms click', '1.5 ms click', '4 ms click'][S.k.snap]); }
 });
 {
   const b2 = document.getElementById('b2');
@@ -792,13 +827,18 @@ press('b2', () => {
   const off = () => { if (S.fn2) { S.fn2 = false; setLayer(); } };
   b2.addEventListener('pointerup', off); b2.addEventListener('pointerleave', off); b2.addEventListener('pointercancel', off);
 }
+// Hold FN 2 button (for a mouse): FN 2 stays held until clicked again.
+S.fn2Lock = false;
+const fn2LockBtn = document.getElementById('fn2lock');
+function setFn2Lock(on) { S.fn2Lock = on; S.fn2Used = true; fn2LockBtn.setAttribute('aria-pressed', on); setLayer(); }
+fn2LockBtn.addEventListener('click', () => setFn2Lock(!S.fn2Lock));
 function setLayer() {
-  const l = S.fn2 ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
+  const l = (S.fn2 || S.fn2Lock) ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
   if (l === 2) lcd('LFO · FN 2 held', 'SHAPE 1 speed, MOD 1 depth · tap METER: ' + (S.k.lfoShape ? 'ramp up' : 'triangle') + ' · tap FN 1: ' + (S.k.lfoFree ? 'free running' : 'restart on trigger'));
-  else lcd('METER', l ? 'second row: noise, +1 oct, —, glide' : 'main row: decay, tone, tune, drive');
+  else lcd('METER', l ? 'second row: crush, —, wave, glide' : 'main row: decay, tone, tune, drive');
 }
 function nextLfoShape() { setK('lfoShape', (S.k.lfoShape + 1) % 2); S.fn2Used = true; drawLeds(); lcd('LFO WAVE', S.k.lfoShape ? 'ramp up' : 'triangle'); }
-press('meter', () => { if (S.fn2) { nextLfoShape(); return; } S.latched = !S.latched; setLayer(); });
+press('meter', () => { if (S.fn2 || S.fn2Lock) { nextLfoShape(); return; } S.latched = !S.latched; setLayer(); });
 JK.forEach(j => {
   const g = document.getElementById('j-' + j.id);
   const act = () => {

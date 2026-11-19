@@ -43,20 +43,21 @@ struct VoiceParameters {
   int32_t engine;
   int32_t amp_coefficient;      // Q31 per-sample decay multiplier
   int32_t partial_coefficient;  // Q31
-  int32_t noise_coefficient;    // Q31
   int32_t snap_coefficient;     // Q31
   int32_t glide_k;              // Q31, 0 = no glide
   int32_t tune;                 // semitones, Q16
   int32_t snap_depth;           // semitones, Q16
-  int32_t octave_level;         // Q15
   int32_t harmonic_level;       // Q15 (2nd harmonic of BT, partial of LT)
   int32_t normalization;        // Q15
-  int32_t noise_level;          // Q15
   int32_t snap_noise;           // Q15
-  int32_t noise_k1;             // Q15 one-pole coefficient
-  int32_t noise_k2;             // Q15 one-pole coefficient
   int32_t drive;                // Q12 pre-gain into the soft clipper
   int32_t distortion;           // Q12 gain into the output soft clipper, 0 = off
+  int32_t wave_tri;             // Q15 (32768 = full), sine -> triangle, 0 = plain sine
+  int32_t wave_fold;            // Q15, triangle -> folded sine
+  int32_t fold_gain;            // Q12, 1 to 2: how far the top folds back
+  int32_t wave_square;          // Q15, folded -> square
+  int32_t wave_gain;            // Q12, evens out the level along the Wave knob
+  int32_t crush_increment;      // Q31 sample-and-hold rate / 31088 Hz, 0 = off
   int32_t tone_amount;          // 0..65535, as streams/meta_parameters.h
   int32_t tone_offset;          // 0..65535
   int32_t lfo_increment;        // pitch LFO phase increment per sample
@@ -110,8 +111,8 @@ class Voice {
     return x;
   }
 
-  // 0.95 * v, clipped to +/-32767. 64-bit: with noise at 100 % on a hard hit,
-  // the mix can reach about 82000, and 82000 * 31130 overflows 32 bits.
+  // 0.95 * v, clipped to +/-32767. 64-bit, so that a mix of any size clips
+  // instead of wrapping around (82000 * 31130 overflows 32 bits).
   static inline int32_t ScaleMix(int32_t v) {
     int32_t scaled = static_cast<int32_t>(static_cast<int64_t>(v) * 31130 >> 15);
     CLIP(scaled);
@@ -130,7 +131,6 @@ class Voice {
   int32_t amp_;       // Q30
   int32_t attack_;    // Q30
   int32_t snap_;      // Q30
-  int32_t noise_;     // Q30
   int32_t partial_;   // Q30
   int32_t lift_;      // VCA word the wave swings around
   int32_t hold_;      // power-up samples left at 0 V
@@ -139,8 +139,8 @@ class Voice {
   int32_t fade_;      // Q15, tail level, 0 = no tail
 
   uint32_t rng_state_;
-  int32_t noise_lp1_;
-  int32_t noise_lp2_;
+  uint32_t crush_phase_;  // sample-and-hold clock, a new sample on each wrap
+  int32_t crush_hold_;    // the held sample
 
   DISALLOW_COPY_AND_ASSIGN(Voice);
 };
