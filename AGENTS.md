@@ -103,4 +103,7 @@ Keep it short. Use exactly these sections:
 ## Notes
 
 - After a change to controls, setup or flashing, update `tomline/README.md` (control map, Flashing, Tests "Last run").
+- Cheat sheets for the owner are pictures, not tables: the panel with unused controls greyed out and the used knobs and buttons
+  highlighted and labelled with what they do, one view per layer. Current one: https://claude.ai/artifact/U51rhAbef4VycZWjVJHTs3;
+  update it after every control change.
 - Hand over a new `.wav` with the flashing steps from `tomline/README.md` ("Flashing") every time, even if not asked.
