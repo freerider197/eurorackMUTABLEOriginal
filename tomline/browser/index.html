@@ -173,12 +173,12 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
           <thead><tr><th>Control</th><th>Job</th><th>With METER</th></tr></thead>
           <tbody>
             <tr><td>SHAPE 1</td><td>Decay, 15 ms to 2.5 s</td><td>Noise level</td></tr>
-            <tr><td>MOD 1</td><td>Tone: filter envelope. Closed at 7 o'clock, most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
-            <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Sweep time</td></tr>
-            <tr><td>MOD 2</td><td>Sweep depth: pitch drop on each hit</td><td>Glide (fully left = off)</td></tr>
+            <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock</td><td>+1 octave level</td></tr>
+            <tr><td>SHAPE 2</td><td>Tune, ±12 semitones (noon: 0 V = C2)</td><td>Sweep time: how fast the pitch falls back to the note</td></tr>
+            <tr><td>MOD 2</td><td>Sweep amount: 808/909-style pitch envelope. Each hit starts on the note, rises by this amount in 1 ms, then falls back</td><td>Glide (fully left = off)</td></tr>
             <tr><td>FN 1</td><td>Engine: BT or LT</td><td>—</td></tr>
             <tr><td>FN 2</td><td>Tap: snap 0–3, attack click of 0.4, 1.5, 4 or 10 ms</td><td>—</td></tr>
-            <tr><td>FN 2 held</td><td>Pitch LFO (or hold L): SHAPE 1 speed 0.05–20 Hz, MOD 1 depth up to ±12 st (fully left = off). Tap METER: triangle / ramp up. LEDs red, the wave LED pulses</td><td>—</td></tr>
+            <tr><td>FN 2 held</td><td>Pitch LFO (or hold L): SHAPE 1 speed 0.05–20 Hz, MOD 1 depth up to ±12 st (fully left = off). Tap METER: triangle / ramp up. Tap FN 1: restarts on each trigger (default) / free running. LEDs red, the wave LED pulses, the third right LED lit = free running</td><td>—</td></tr>
             <tr><td>METER</td><td>Tap to latch the second row, or hold Shift</td><td>—</td></tr>
             <tr><td>LEVEL MOD 1</td><td>Keep fully counter-clockwise. Turned up, it adds a DC offset <span class="an">analog</span></td><td>—</td></tr>
             <tr><td>Curve 1</td><td>Keep fully clockwise (LIN). Toward EXP, it bends the wave <span class="an">analog</span></td><td>—</td></tr>
@@ -238,7 +238,7 @@ function amountOffset(value) {  // streams/meta_parameters.h
   }
   return { amount: 65535 - ((value - 32768) << 1), offset: (value - 32768) << 1 };
 }
-function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0) {
+function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0, lfoFree = 0) {
   const bt = engine === 0;
   const decay = F(main[0] / F(65535)), tune = F(main[2] / F(65535)), sweep = F(main[3] / F(65535));
   const noise = F(second[0] / F(65535)), octave = F(second[1] / F(65535));
@@ -276,12 +276,15 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
     lfoInc: Math.trunc(F(lfoHz * F(F(4294967296) / K_SR_F))),
     lfoDepth: lfoDepth < F(0.01) ? 0 : q16(F(F(lfoDepth * lfoDepth) * F(12))),
     lfoShape: lfoShape === 1 ? 1 : 0,
+    lfoFree: lfoFree ? 1 : 0,
     tauSeconds: tau
   };
 }
 
 // --- voice.cc ---
-const K_UNITY = 1073741824, K_ATTACK_STEP = 86343000, K_MAX_INC = 1932735283, K_PARTIAL = 104399;
+const K_UNITY = 1073741824, K_ATTACK_STEP = 86343000, K_MAX_INC = 1932735283, K_PARTIAL = 104399, K_TONE_FLOOR = 25277;
+const K_SWEEP_ATTACK_STEP = K_UNITY / 32;  // 32 samples = 1.03 ms
+const K_LIFT = 32767, K_POWER_UP_HOLD = 31088;  // kLift, kPowerUpHold
 // floor(a * c / 2^31), a >= 0, c in [0, 2^31): exact.
 function mul31(a, c) {
   const ch = Math.floor(c / 65536), cl = c - ch * 65536;
@@ -320,12 +323,14 @@ function lfoWave(phase, shape) {
   const t = phase < 0x80000000 ? phase : (~phase) >>> 0;
   return (t >>> 15) - 32768;
 }
+// Voice::LfoStart: where a trigger restarts the LFO (mid-wave, going up).
+const lfoStart = shape => shape === 1 ? 0x80000000 : 0x40000000;
 
 class TomlineVoice {
   constructor() {
     this.semitones = 0; this.gliding = false; this.phase = 0; this.pphase = 0; this.lfoPhase = 0;
-    this.amp = 0; this.attack = K_UNITY; this.sweep = 0; this.snap = 0; this.noise = 0; this.partial = 0;
-    this.bias = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
+    this.amp = 0; this.attack = K_UNITY; this.sweep = 0; this.sweepRising = false; this.snap = 0; this.noise = 0; this.partial = 0;
+    this.lift = 0; this.hold = K_POWER_UP_HOLD; this.lastMix = 0; this.tail = 0; this.fade = 0; this.rng = 0x21f3a5c1; this.lp1 = 0; this.lp2 = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
   // pitch: semitones above C1, Q16 (as Ui::Pitch). Outputs gainWord (0..65535)
@@ -333,8 +338,10 @@ class TomlineVoice {
   process(p, trigger, pitch) {
     if (trigger) {
       this.gliding = p.glideK !== 0 && this.amp > (K_UNITY >> 6);
-      this.amp = K_UNITY; this.attack = 0; this.sweep = K_UNITY; this.snap = K_UNITY;
+      this.amp = K_UNITY; this.attack = 0; this.sweep = 0; this.sweepRising = true; this.snap = K_UNITY;
       this.noise = K_UNITY; this.partial = K_UNITY; this.phase = 0; this.pphase = 0;
+      this.tail = this.lastMix; this.fade = 32767;  // old note fades out over 1.5 ms
+      if (!p.lfoFree) this.lfoPhase = lfoStart(p.lfoShape);
     }
     const target = (pitch + p.tune) | 0;
     if (this.gliding) {
@@ -346,7 +353,13 @@ class TomlineVoice {
       this.semitones = target;
     }
     this.amp = mul31(this.amp, p.amp);
-    this.sweep = mul31(this.sweep, p.sweepC);
+    // Pitch envelope: 1.03 ms rise from the root, then decay back to the root.
+    if (!this.sweepRising) {
+      this.sweep = mul31(this.sweep, p.sweepC);
+    } else if (!trigger) {
+      this.sweep += K_SWEEP_ATTACK_STEP;
+      if (this.sweep >= K_UNITY) { this.sweep = K_UNITY; this.sweepRising = false; }
+    }
     this.snap = mul31(this.snap, p.snapC);
     this.noise = mul31(this.noise, p.noiseC);
     this.partial = mul31(this.partial, p.partialC);
@@ -380,16 +393,23 @@ class TomlineVoice {
     this.lp1 += Math.imul(white - this.lp1, p.k1) >> 15;
     this.lp2 += Math.imul(this.lp1 - this.lp2, p.k2) >> 15;
     const band = clip15((this.lp1 - this.lp2) << 1);
-    const noiseEnv = this.noise >> 15, snapEnv = this.snap >> 15;
+    const noiseEnv = mul45(this.noise, this.attack), snapEnv = mul45(this.snap, this.attack);
     let v = Math.imul(x, env) >> 15;
     v += Math.imul(Math.imul(p.noiseLevel, noiseEnv) >> 15, band) >> 15;
     v += Math.imul(Math.imul(p.snapNoise, snapEnv) >> 15, white) >> 15;
     v = clip15(Math.floor(v * 31130 / 32768));
-    const magnitude = v < 0 ? -v : v, decayed = mul31(this.bias, p.amp);
-    this.bias = magnitude > decayed ? magnitude : decayed;
-    let g = this.bias + v;
+    if (this.fade > 0) {
+      this.fade -= 683; if (this.fade < 0) this.fade = 0;
+      v = clip15(v + (Math.imul(this.tail, this.fade) >> 15));
+    }
+    this.lastMix = v;
+    // Fixed lift: 1 s at 0 V after power-up, then +1 per sample to mid scale.
+    if (this.hold > 0) this.hold--; else if (this.lift < K_LIFT) this.lift++;
+    let g = this.lift + v;
     g = g < 0 ? 0 : (g > 65535 ? 65535 : g);
     let f = p.toneOffset + (Math.imul(env, p.toneAmount) >> 15);
+    const lowest = K_TONE_FLOOR + (((s >> 4) * 329) >> 12);  // floor just above the pitch
+    if (f < lowest) f = lowest;
     f = f < 0 ? 0 : (f > 65535 ? 65535 : f);
     this.gainWord = g; this.freqWord = f; this.v = v / 32767; this.env = env / 32767;
     this.gain = g / 32767; this.freq = f;
@@ -402,7 +422,7 @@ class Engine {
   constructor(sr) {
     this.sr = sr;
     this.k = { engine: 0, snap: 1, main: [29491, 40632, 32768, 19661], second: [9830, 16384, 22938, 0],
-      lfo: [32768, 0, 0, 0], lfoShape: 0, level1: 0, curve1: 1, ideal: false, kick: false, master: 0.75, bpm: 122, playing: false };
+      lfo: [32768, 0, 0, 0], lfoShape: 0, lfoFree: 0, level1: 0, curve1: 1, ideal: false, kick: false, master: 0.75, bpm: 122, playing: false };
     this.p = computeParams(0, 1, this.k.main, this.k.second);
     this.voice = new TomlineVoice();
     this.pat = []; this.pos = -1; this.spc = 0;
@@ -410,6 +430,10 @@ class Engine {
     this.fwAcc = 1; this.pwmFiltered = 65535;
     this.d1 = 0; this.d2 = 0; this.f1 = 0; this.f2 = 0; this.pwmV = 3.3;
     this.kph = 0; this.kam = 0; this.kpe = 0; this.dx = 0; this.dy = 0;
+    // The module has been on for a while: past the power-up (1 s at 0 V, then
+    // the lift's rise), with OUT 1 and the audio input settled at the lift.
+    this.voice.lift = K_LIFT; this.voice.hold = 0;
+    this.d1 = this.d2 = 1; this.f1 = this.f2 = 3.33; this.dx = 10 * Math.tanh(3.33 / 10);
     this.idle = 0; this.idleOpen = 0; this.mid = 0; this.midClosed = 0; this.checkCount = 0;
     this.levelWarn = false; this.curveWarn = false;
     this.sc = new Float32Array(512); this.si = -1; this.sd = 0;
@@ -419,7 +443,7 @@ class Engine {
     if (m.t === 'k') {
       if (m.k === 'main' || m.k === 'second' || m.k === 'lfo') this.k[m.k][m.i] = m.v; else this.k[m.k] = m.v;
       if (m.k === 'playing' && m.v) { this.pos = -1; this.spc = 1e9; }
-      this.p = computeParams(this.k.engine, this.k.snap, this.k.main, this.k.second, this.k.lfo, this.k.lfoShape);
+      this.p = computeParams(this.k.engine, this.k.snap, this.k.main, this.k.second, this.k.lfo, this.k.lfoShape, this.k.lfoFree);
     } else if (m.t === 'pat') {
       this.pat = m.v;
     } else if (m.t === 'note') {
@@ -518,8 +542,8 @@ const PATS = [
   mk([[12,1],[12,0],[12,0],[10,1],[12,0],[12,1],[12,0],[7,1],[12,1],[12,0],[15,1],[12,0],[14,1],[12,0],[10,1],[7,1]]),
   mk([[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,0],[12,1],[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[7,1],[10,1]])
 ];
-const S = { k: { engine: 0, snap: 1, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
-  ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, koct: 0,
+const S = { k: { engine: 0, snap: 1, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
+  ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
   warn: false };
 try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { Object.assign(S.k, j.k); S.pat = j.pat; } } catch (e) {}
 S.k.ideal = false; delete S.k.in1;
@@ -535,7 +559,7 @@ function onMsg(m) {
   else if (m.t === 'leds') { S.warn = m.warn; drawLeds(); }
 }
 function syncAll() {
-  for (const key of ['engine','snap','lfoShape','level1','curve1','ideal','kick','master','bpm']) post({ t: 'k', k: key, v: S.k[key] });
+  for (const key of ['engine','snap','lfoShape','lfoFree','level1','curve1','ideal','kick','master','bpm']) post({ t: 'k', k: key, v: S.k[key] });
   for (let i = 0; i < 4; i++) { for (const key of ['main', 'second', 'lfo']) post({ t: 'k', k: key, i, v: S.k[key][i] }); }
   post({ t: 'pat', v: S.pat });
 }
@@ -674,7 +698,7 @@ const META = {
   'main0': { n: 'DECAY', f: v => Math.round(tauOf(v) * 1000) + ' ms' },
   'main1': { n: 'TONE', f: v => pct(v) + (v < 0.5 ? ' · envelope' : ' · envelope + open') },
   'main2': { n: 'TUNE', f: v => { const s = (v - 0.5) * 24; return (s >= 0 ? '+' : '') + s.toFixed(1) + ' st'; } },
-  'main3': { n: 'SWEEP', f: v => (v * (S.k.engine === 0 ? 12 : 24)).toFixed(1) + ' st drop' },
+  'main3': { n: 'SWEEP', f: v => '+' + (v * (S.k.engine === 0 ? 12 : 24)).toFixed(1) + ' st pitch envelope' },
   'second0': { n: 'NOISE', f: v => pct(v) },
   'second1': { n: '+1 OCT', f: v => pct(v) },
   'second2': { n: 'SWEEP TIME', f: v => Math.round((0.006 + v * v * 0.3) * 1000 * (S.k.engine === 0 ? 0.6 : 1)) + ' ms' },
@@ -737,7 +761,7 @@ function lfoLed(t) {
   const hz = 0.05 * Math.pow(400, S.k.lfo[0] / 65535);
   lfoUiPhase = (lfoUiPhase + hz * Math.min(0.1, (t - (lfoUiT || t)) / 1000)) % 1; lfoUiT = t;
   const w = lfoWave(Math.floor(lfoUiPhase * 4294967296) >>> 0, S.k.lfoShape);
-  for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), i === S.k.lfoShape ? redAt((w + 32768) / 65535) : null);
+  for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), i === S.k.lfoShape ? redAt((w + 32768) / 65535) : (i === 2 && S.k.lfoFree ? '#ff4a3d' : null));
   lfoRaf = requestAnimationFrame(lfoLed);
 }
 function drawLeds() {
@@ -753,7 +777,7 @@ function drawLeds() {
   svg.classList.toggle('lfo', S.layer === 2);
 }
 setInterval(() => { if (S.warn) drawLeds(); }, 128);
-function blinkTrig() { trigOn = true; paint(document.getElementById('L3'), '#6be07b'); clearTimeout(trigT); trigT = setTimeout(() => { trigOn = false; paint(document.getElementById('L3'), null); }, 25); }
+function blinkTrig() { if (!S.k.lfoFree) lfoUiPhase = lfoStart(S.k.lfoShape) / 4294967296; trigOn = true; paint(document.getElementById('L3'), '#6be07b'); clearTimeout(trigT); trigT = setTimeout(() => { trigOn = false; paint(document.getElementById('L3'), null); }, 25); }
 const held = { b1: false, b2: false };
 function press(id, fn) {
   const g = document.getElementById(id);
@@ -765,7 +789,11 @@ function press(id, fn) {
 }
 let comboing = false;
 function combo() { comboing = true; lcd('FN 1 + FN 2', 'V/oct calibration: runs on the module (1 V, then 3 V)'); }
-press('b1', () => { setK('engine', (S.k.engine + 1) % 2); drawLeds(); drawKnobs(); lcd('ENGINE', ENG[S.k.engine]); });
+// FN 1 tapped while FN 2 is held: LFO restart on trigger / free running.
+document.getElementById('b1').addEventListener('pointerdown', () => { S.fn1WithFn2 = S.fn2; if (S.fn2) S.fn2Used = true; });
+press('b1', () => {
+  if (S.fn1WithFn2) { S.fn1WithFn2 = false; setK('lfoFree', S.k.lfoFree ? 0 : 1); drawLeds(); lcd('LFO', S.k.lfoFree ? 'free running' : 'restarts on each trigger'); return; }
+  setK('engine', (S.k.engine + 1) % 2); drawLeds(); drawKnobs(); lcd('ENGINE', ENG[S.k.engine]); });
 // FN 2: tap = snap. Held (or L held on the keyboard) = LFO layer; a knob or
 // METER used meanwhile cancels the snap step, as in ui.cc.
 press('b2', () => {
@@ -780,7 +808,7 @@ press('b2', () => {
 }
 function setLayer() {
   const l = S.fn2 ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
-  if (l === 2) lcd('LFO · FN 2 held', 'SHAPE 1 speed, MOD 1 depth · tap METER: ' + (S.k.lfoShape ? 'ramp up' : 'triangle'));
+  if (l === 2) lcd('LFO · FN 2 held', 'SHAPE 1 speed, MOD 1 depth · tap METER: ' + (S.k.lfoShape ? 'ramp up' : 'triangle') + ' · tap FN 1: ' + (S.k.lfoFree ? 'free running' : 'restart on trigger'));
   else lcd('METER', l ? 'second row: noise, +1 oct, sweep time, glide' : 'main row: decay, tone, tune, sweep');
 }
 function nextLfoShape() { setK('lfoShape', (S.k.lfoShape + 1) % 2); S.fn2Used = true; drawLeds(); lcd('LFO WAVE', S.k.lfoShape ? 'ramp up' : 'triangle'); }

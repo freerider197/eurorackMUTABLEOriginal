@@ -6,12 +6,17 @@
 //   MOD 1     tone (filter env)   | with METER: +1 octave    | FN 2 held: LFO depth
 //   SHAPE 2   tune, +/-12 st (C2) | with METER: sweep time   |
 //   MOD 2     sweep depth         | with METER: glide        |
-//   FN 1      engine: BT / LT
+//   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
+//             each trigger (default) / free running.
 //   FN 2      tap: snap 0..3. Hold: LFO layer (the pitch LFO).
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
-//             Hold 1 s without turning a knob: stock offset calibration.
+//             Hold 3 s without turning a knob: stock offset calibration.
 //             Tapped while FN 2 is held: LFO wave, triangle / ramp up.
 //   FN 1+FN 2 held 1 s: V/oct calibration (1 V, then 3 V into EXCITE 2).
+//
+// A button tap only does its job if no knob was turned and no other button
+// was pressed while it was down. Knobs keep their value when a page opens
+// and only take the knob position once turned (see pickup.h).
 
 #ifndef TOMLINE_UI_H_
 #define TOMLINE_UI_H_
@@ -24,6 +29,7 @@
 #include "streams/drivers/switches.h"
 
 #include "tomline/parameters.h"
+#include "tomline/pickup.h"
 #include "tomline/voice.h"
 
 namespace tomline {
@@ -54,7 +60,7 @@ struct Settings {
   uint8_t engine;
   uint8_t snap;
   uint8_t lfo_shape;
-  uint8_t padding;
+  uint8_t lfo_free;  // 0 = LFO restarts on each trigger (was padding, so 0)
   uint16_t second_layer[KNOB_LAST];
   int32_t voct_offset;  // EXCITE 2 counts at 0 V
   int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
@@ -120,8 +126,9 @@ class Ui {
   void OnButtonReleased(uint8_t button, uint32_t duration);
   void OnButtonsCombo();
   void ReadKnobs();
-  void SetLayer(uint8_t layer);
-  void UpdateLayer();
+  void HoldKnobs();
+  void UpdateLayer(bool hold_knobs);
+  void SettingsChanged();
   uint16_t* LayerValues(uint8_t layer);
   void ComputeParameters();
   void CheckSetup();
@@ -144,14 +151,18 @@ class Ui {
 
   int32_t pot_[KNOB_LAST];          // filtered positions
   uint16_t main_layer_[KNOB_LAST];
-  bool caught_[3][KNOB_LAST];
-  bool above_[3][KNOB_LAST];
+  Pickup pickup_[KNOB_LAST];        // for the page that is open
+  int32_t press_pot_[KNOB_LAST];    // positions at the last button press
+  int32_t calibration_pot_[2];      // SHAPE 1 / 2 in offset calibration
+  uint32_t knob_time_;
+  int32_t press_settle_;           // ms before press_pot_ is taken
   uint8_t layer_;  // 0 main, 1 second (METER), 2 LFO (FN 2 held)
   bool second_layer_latched_;
-  bool knob_moved_while_meter_held_;
   bool meter_held_;
   bool fn2_held_;
-  bool fn2_used_;  // a knob or METER was used while FN 2 was held: no snap
+  bool fn1_with_fn2_;  // FN 1 pressed while FN 2 held: its tap toggles free run
+  bool down_[BUTTON_LAST];
+  bool used_[BUTTON_LAST];  // a knob or another button was used meanwhile
 
   uint32_t press_time_[BUTTON_LAST];
   bool long_press_handled_[BUTTON_LAST];

@@ -19,7 +19,7 @@ int main() {
   const int32_t kCountsPerVolt = 3972;
   const int32_t kVoctK = 12 * 65536 * 256 / kCountsPerVolt;
   struct Case { const char* path; uint8_t engine; uint8_t snap; uint16_t main[4]; uint16_t second[4];
-                uint16_t lfo[4]; uint8_t lfo_shape; };
+                uint16_t lfo[4]; uint8_t lfo_shape; bool lfo_free; };
   Case cases[] = {
     { "build/tomline_words_bt.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 9830, 16384, 22938, 0 } },
     { "build/tomline_words_lt.bin", ENGINE_LT, 1, { 29491, 40632, 32768, 19661 }, { 9830, 16384, 22938, 0 } },
@@ -29,10 +29,14 @@ int main() {
       { 50000, 40000, 0, 0 }, LFO_TRIANGLE },
     { "build/tomline_words_lfo_ramp.bin", ENGINE_LT, 2, { 40000, 30000, 20000, 0 }, { 0, 30000, 40000, 0 },
       { 20000, 65535, 0, 0 }, LFO_RAMP_UP },
+    { "build/tomline_words_lfo_tri_free.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 9830, 16384, 22938, 30000 },
+      { 50000, 40000, 0, 0 }, LFO_TRIANGLE, true },
+    { "build/tomline_words_lfo_ramp_free.bin", ENGINE_LT, 2, { 40000, 30000, 20000, 0 }, { 0, 30000, 40000, 0 },
+      { 20000, 65535, 0, 0 }, LFO_RAMP_UP, true },
   };
   for (const Case& c : cases) {
     VoiceParameters p;
-    ComputeVoiceParameters(c.engine, c.snap, c.main, c.second, c.lfo, c.lfo_shape, &p);
+    ComputeVoiceParameters(c.engine, c.snap, c.main, c.second, c.lfo, c.lfo_shape, &p, c.lfo_free);
     Voice voice;
     voice.Init();
     double samples_per_step = kSampleRate * 60.0 / 122.0 / 4.0;

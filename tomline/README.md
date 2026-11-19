@@ -35,7 +35,7 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 |---|---|
 | EXCITE 1 | Trigger (on above about 1.7 V, off below 0.85 V, stock thresholds) |
 | EXCITE 2 | V/oct. 0 V = C2 (65.4 Hz) with SHAPE 2 (Tune) at noon |
-| OUT 1 | The sound, 0 V to about +6.7 V (see "Offset") |
+| OUT 1 | The sound, swinging around +3.33 V (0 V to about +6.7 V, see "Offset"). Use an AC-coupled input (Erica Black Quad VCA2: IN 1–3, not IN 4) |
 | IN 1 | Not used, leave empty |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
 | LEVEL MOD 1 (big magenta knob) | **Fully counter-clockwise** |
@@ -49,27 +49,38 @@ blinks red.
 | Control | Job | Hold METER (or tap METER to latch) |
 |---|---|---|
 | SHAPE 1 | Decay, 15 ms to 2.5 s | Noise level |
-| MOD 1 | Tone: filter envelope. Closed at 7 o'clock, most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
-| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time |
-| MOD 2 | Sweep depth: pitch drop on each hit (up to 12 st on BT, 24 st on LT) | Glide between notes (fully CCW = off) |
+| MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
+| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time: how fast the pitch falls back to the note (decay time constant about 4 to 180 ms on BT, 6 to 300 ms on LT) |
+| MOD 2 | Sweep amount: 808/909-style pitch envelope. Each hit starts on the note, jumps up by this amount in 1 ms (up to 12 st on BT, 24 st on LT), then falls back to the note | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button), tap | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
 | FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones). SHAPE 2 and MOD 2 do nothing here | |
 | FN 2 held + tap METER | LFO wave: triangle / ramp up | |
+| FN 2 held + tap FN 1 | LFO restarts on each trigger (default) / free running | |
 | METER, tap | Latch / unlatch the second layer | |
-| METER, hold 1 s without turning a knob | Stock offset calibration (see Calibration) | |
+| METER, hold 3 s without turning a knob | Stock offset calibration (see Calibration) | |
 | FN 1 + FN 2, hold 1 s | V/oct calibration | |
 
-Second-layer and LFO knobs use pick-up: a value only moves once the knob
-passes it, so switching layers never makes a parameter jump. Turning a knob
-or tapping METER while FN 2 is held does not change snap. The LFO always goes
-to pitch, runs freely (a trigger does not restart it) and is added after the
-glide.
+Pick-up, on every page: when a page opens, each value stays where it was
+until you turn its knob. Then the value goes to the knob position (a quick
+40 ms glide, so it never clicks) and follows the knob. A knob that already
+sits on its value follows it straight away. The knobs are read while all
+LEDs are off (each page lights other LEDs, which shifted every knob reading
+and made all values jump on a page change), so the LEDs are a quarter dimmer
+than before, and readings settle for 50 ms after a page change before a turn
+counts. A button tap only does its job if
+no knob was turned and no other button was pressed while it was down (the
+FN 2 + METER and FN 2 + FN 1 taps are their own gestures): turning a knob
+while holding METER or FN 2 never latches, calibrates or changes snap. The LFO
+always goes to pitch and is added after the glide. By default every trigger
+restarts it at the middle of its wave (no pitch jump, going up), so each hit
+gets the same pitch movement; free running, it ignores triggers.
 
-Engine, snap, the four second-layer values, LFO speed, depth and wave, and the
+Engine, snap, the four second-layer values, LFO speed, depth, wave and free run, and the
 V/oct calibration are saved to flash 2 s after the last change. Settings saved
 by an older Tomline (before the LFO) are read once: engine, snap, second-layer
-values and V/oct calibration carry over, and the LFO starts off.
+values and V/oct calibration carry over, and the LFO starts off. Settings saved
+before the free-run option read as "restart on trigger".
 
 ## LEDs
 
@@ -77,19 +88,27 @@ values and V/oct calibration carry over, and the LFO starts off.
 |---|---|
 | Left column, top | BT engine |
 | Left column, 2nd | LT engine |
-| Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, or trimmer 1 not at LIN) |
+| Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, checked in the first second after power-up, or trimmer 1 not at LIN) |
 | Left column, bottom | Flashes green on each trigger |
 | Right column | Snap amount, from the bottom (1 LED = snap 0, 4 LEDs = snap 3) |
 | Engine and snap LEDs amber instead of green | Second layer active |
 | FN 2 held: engine LED red, right column top (triangle) or 2nd (ramp up) pulsing red | LFO layer; the pulse follows the LFO, so the speed shows even at zero depth |
+| FN 2 held: right column 3rd LED red | LFO free running (off = restarts on each trigger) |
 
 ## Offset
 
 The VCA can only scale a fixed positive source (+3.33 V when IN 1 is empty),
 so OUT 1 can't go below 0 V while a note sounds. Firmware can't remove that.
-Tomline lifts the wave by its own peak level, so OUT 1 rests at 0 V between
-notes and the lift falls with the decay. What remains is a low bump that
-follows each hit: AC-coupled inputs remove it, DC-coupled ones pass it on.
+Tomline writes the wave on top of a fixed lift: OUT 1 sits at +3.33 V and
+the wave swings around it, so nothing jumps when a note starts. (Up to 0.4,
+the lift followed each note's peak and OUT 1's average level jumped by about
+2.4 V on every hit: a click that Tone, snap and sweep could not remove.)
+AC-coupled inputs remove the steady 3.33 V. A DC-coupled input passes it on,
+and a VCA after it turns every change of its gain (a sidechain duck) into a
+thump.
+
+At power-up OUT 1 stays at 0 V for 1 s (the LEVEL MOD 1 check needs the VCA
+at zero), then rises slowly to 3.33 V over about 1 s.
 
 ## Flashing (audio bootloader, unchanged)
 
@@ -97,7 +116,7 @@ From the Streams manual: connect your audio interface output to channel 1's
 **EXCITE** input. Power on the system with channel 1's function button (FN 1)
 held: the four left LEDs blink orange. Set channel 1's **SHAPE** knob to its
 middle position. Turn speakers off and silence other sounds on the computer,
-then play `release/tomline-0.2.wav`. On red blinking, press FN 1 to retry and
+then play `release/tomline-0.4.wav`. On red blinking, press FN 1 to retry and
 adjust the level with SHAPE 1 (best with 2 green and 1 orange LED lit on the
 right).
 
@@ -117,7 +136,7 @@ saved). FN 1 cancels.
 
 **Offsets (only if the module bleeds).** Same as the stock procedure: set both
 response trimmers to LIN, patch cables into all 6 inputs with the other ends
-unplugged, hold METER for 1 s. Then patch an oscillator into IN 1, monitor OUT
+unplugged, hold METER for 3 s. Then patch an oscillator into IN 1, monitor OUT
 1 and turn SHAPE 1 until the bleed just disappears; same for channel 2 with
 SHAPE 2. Press any button to save.
 
@@ -166,7 +185,19 @@ it):
 make -f tomline/makefile TOOLCHAIN_PATH=/usr/ wav
 ```
 
-Output: `build/tomline/tomline.bin` and `build/tomline/tomline.wav`. The
+Output: `build/tomline/tomline.bin` and `build/tomline/tomline.wav`.
+The makefile links with `tomline/tomline.ld`: the same flash layout as
+stmlib's Streams script, but a 4 KB stack instead of 512 bytes. Version 0.2
+froze when knobs were turned: the knob maths (software floating point) plus
+both interrupts needed 564 bytes, ran past the 512-byte stack and hit a fault.
+Check the stack after every firmware change:
+
+```
+python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
+```
+
+Last run: worst case 580 bytes (main loop 316, SysTick 100, audio interrupt
+164), 4096 reserved, 3516 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -189,19 +220,52 @@ g++ -O2 -I. -o build/tomline_render tomline/test/render.cc tomline/voice.cc toml
 ```
 
 It also checks the tune range, that glide lands on the target note, the LFO
-knob maths and wave shapes, the pitch of both LFO waves at full depth, that the
+knob maths and wave shapes, the pitch of both LFO waves at full depth (restarting and free running),
+that a trigger restarts the LFO only when not free running, that the
 LFO at zero depth leaves the sound unchanged, and that a very loud mix (noise
-at 100 %, hard hit) clips instead of wrapping around. It exits
+at 100 %, hard hit) clips instead of wrapping around, and that Tone fully
+closed keeps each note within 6 dB of Tone fully open (BT and LT, 0 to 4 V).
+It also checks that OUT 1 rests at 3.33 V, that its average level doesn't jump
+on a hit, and the power-up (0 V for 1 s, then a slow rise). It exits
 with an error if a check fails.
 
-Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
-notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
+Last run: OUT 1 between 0.000 V and 6.66 V, back to 3.330 V after the
+notes. Attack jump (average over 100 ms after a hit minus before): BT -0.04 V,
+LT -0.02 V, BT with Tone closed and snap 0 +0.11 V (the moving lift of 0.4:
++2.3 to +2.4 V). Power-up: OK. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
 range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
-depth, 0.2-1.2 s: triangle -10.30 st, ramp up -11.14 st (0.02 st from the
-expected value). LFO at zero depth: unchanged. Loud mix: clips correctly.
+depth, 0.2-1.2 s, restart on trigger: triangle +1.71 st, ramp up +0.86 st; free
+running: triangle -10.30 st, ramp up -11.14 st (all within 0.03 st of the
+expected value). LFO restart on every trigger / free run: OK. LFO at zero depth:
+unchanged. Pitch envelope, BT and LT: on
+the note at the hit, peak +12 st (BT) / +24 st (LT) at 1.03 ms, back on the
+note (0.000 cents) after 3 s, and a retrigger 10 ms in starts again from the
+note. Tone closed vs open: BT -4.5 to -4.6 dB, LT -4.4 to -4.6 dB at every
+voltage (-2.6 dB with the moving lift, whose bump passed the closed filter;
+-25 dB before the floor). Retrigger: worst one-sample jump BT 0.35 V, LT
+0.37 V, 1.1 x a note from silence (0.32 / 0.34 V); with the moving lift
+0.45 / 0.36 V against 0.51 / 0.42 V. Loud mix: clips
+correctly. Knob jump, end to end in the middle of a note (9 values, BT and
+LT): with the 40 ms glide no one-sample jump is bigger than the note's own;
+an instant jump of +1 octave would click at 0.80 V against the note's 0.10 V.
 
-`tomline/test/words.cc` dumps the firmware's VCA and filter words for six
-patches (BT, LT, glide, everything at maximum, LFO triangle, LFO ramp up), and
+`tomline/test/panel.cc` runs the firmware's own `ui.cc` on a computer, with
+stand-ins for the drivers in `tomline/test/stub/`, and plays knob and button
+moves: pick-up on page changes, METER, FN 1 and FN 2 taps and holds with knobs
+turned, two buttons at once, offset and V/oct calibration, flash saves, and
+LEDs that shift the knob readings (a model of the effect seen on the module):
+
+```
+g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tomline/voice.cc tomline/parameters.cc
+./build/tomline_panel
+```
+
+Last run: all 43 checks OK. Without the LEDs-off reading, the model moves
+untouched values on page changes; with it, nothing moves.
+
+`tomline/test/words.cc` dumps the firmware's VCA and filter words for eight
+patches (BT, LT, glide, everything at maximum, LFO triangle and ramp up, each
+restarting and free running), and
 `tomline/test/compare_browser.js` runs the browser port on the same input:
 
 ```
@@ -210,7 +274,7 @@ g++ -O2 -I. -o build/tomline_words tomline/test/words.cc tomline/voice.cc tomlin
 node tomline/test/compare_browser.js
 ```
 
-Last run: identical in all six cases (244,627 samples each, zero
+Last run: identical in all eight cases (244,627 samples each, zero
 difference).
 
 ## Files
@@ -225,5 +289,7 @@ difference).
 | `tables.h` | Sine and 2^x tables, generated by `tools/make_tables.py` |
 | `browser/tomline.html` | Browser model (page body of the shared online version) |
 | `browser/index.html` | Standalone browser model, made by `tools/make_standalone.py` |
-| `test/render.cc` | Renders the voice with an analog model to WAV, checks levels, pitch, glide |
+| `pickup.h` | Knob pick-up and the 40 ms glide to the knob (pure code, tested on a computer) |
+| `test/render.cc` | Renders the voice with an analog model to WAV, checks levels, pitch, glide, knob jump clicks |
+| `test/panel.cc`, `test/stub/` | Runs `ui.cc` on a computer: pick-up, buttons, calibration entry, saves |
 | `test/words.cc`, `test/compare_browser.js` | Check the browser model against the firmware |

@@ -22,6 +22,10 @@ RESOURCES      = streams/resources
 
 include stmlib/makefile.inc
 
+# Own linker script: same flash layout as stmlib's, 4 KB stack instead of 512
+# bytes (see tomline/tomline.ld).
+LINKER_SCRIPT = tomline/tomline.ld
+
 # Firmware update file for the Streams audio bootloader (same parameters as
 # streams/makefile).
 wav:  $(TARGET_BIN)

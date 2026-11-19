@@ -14,6 +14,19 @@ const int32_t kAttackStep = 86343000;
 const uint32_t kMaxIncrement = 1932735283UL;
 // 1.593: inharmonic partial of the low tom, Q16.
 const uint32_t kPartialRatio = 104399;
+// Pitch envelope attack: 32 samples = 1.03 ms linear rise from the root.
+const int32_t kSweepAttackStep = kUnity / 32;
+// Lowest filter word at C1: a cutoff of 1.25 x 32.7 Hz, a third above.
+const int32_t kToneFloor = 25277;
+// On retrigger the old note fades out over 48 samples (1.5 ms).
+const int32_t kFadeStep = 683;
+// Mid scale of the VCA word: OUT 1 rests at about 3.33 V.
+const int32_t kLift = 32767;
+// Power-up: 1 s with the VCA word at zero, so Ui::CheckSetup can read LEVEL
+// MOD 1 (it needs > 4096 samples at zero in one 0.5 s window). The lift then
+// rises by one step per sample (about 1 s), slow enough that an AC-coupled
+// input downstream does not thump.
+const int32_t kPowerUpHold = 31088;
 
 static inline int32_t Sine(uint32_t phase) {
   uint32_t index = phase >> 22;
@@ -61,10 +74,15 @@ void Voice::Init() {
   amp_ = 0;
   attack_ = kUnity;
   sweep_ = 0;
+  sweep_rising_ = false;
   snap_ = 0;
   noise_ = 0;
   partial_ = 0;
-  bias_ = 0;
+  lift_ = 0;
+  hold_ = kPowerUpHold;
+  last_mix_ = 0;
+  tail_ = 0;
+  fade_ = 0;
   rng_state_ = 0x21f3a5c1;
   noise_lp1_ = 0;
   noise_lp2_ = 0;
@@ -81,12 +99,20 @@ void Voice::Process(
     gliding_ = p.glide_k != 0 && amp_ > (kUnity >> 6);
     amp_ = kUnity;
     attack_ = 0;
-    sweep_ = kUnity;
+    sweep_ = 0;  // the pitch envelope starts from the root
+    sweep_rising_ = true;
     snap_ = kUnity;
     noise_ = kUnity;
     partial_ = kUnity;
     phase_ = 0;
     partial_phase_ = 0;
+    // The new note starts at once; the old one fades out instead of
+    // dropping to zero in one sample (a click).
+    tail_ = last_mix_;
+    fade_ = 32767;
+    if (!p.lfo_free) {
+      lfo_phase_ = LfoStart(p.lfo_shape);
+    }
   }
 
   // Pitch.
@@ -107,7 +133,18 @@ void Voice::Process(
 
   // Envelopes.
   amp_ = Decay(amp_, p.amp_coefficient);
-  sweep_ = Decay(sweep_, p.sweep_coefficient);
+  // Pitch envelope, 808/909 style: a short fixed rise from the root to
+  // root + sweep depth (none on the hit sample itself), then a decay back to
+  // exactly the root.
+  if (!sweep_rising_) {
+    sweep_ = Decay(sweep_, p.sweep_coefficient);
+  } else if (!trigger) {
+    sweep_ += kSweepAttackStep;
+    if (sweep_ >= kUnity) {
+      sweep_ = kUnity;
+      sweep_rising_ = false;
+    }
+  }
   snap_ = Decay(snap_, p.snap_coefficient);
   noise_ = Decay(noise_, p.noise_coefficient);
   partial_ = Decay(partial_, p.partial_coefficient);
@@ -129,7 +166,7 @@ void Voice::Process(
   }
 
   // Oscillators.
-  s += static_cast<int32_t>(static_cast<int64_t>(p.sweep_depth) * sweep_ >> 30);
+  s += sweep_offset(p);
   s += static_cast<int32_t>(static_cast<int64_t>(p.snap_depth) * snap_ >> 30);
   uint32_t increment = SemitonesToIncrement(s);
   phase_ += increment;
@@ -164,26 +201,50 @@ void Voice::Process(
   noise_lp2_ += (noise_lp1_ - noise_lp2_) * p.noise_k2 >> 15;
   int32_t band = (noise_lp1_ - noise_lp2_) << 1;
   CLIP(band);
-  int32_t noise_env = noise_ >> 15;
-  int32_t snap_env = snap_ >> 15;
+  // Noise and snap share the tone's 0.4 ms attack, so a retrigger through an
+  // already open Tone filter does not click.
+  int32_t noise_env = static_cast<int32_t>(
+      static_cast<int64_t>(noise_) * attack_ >> 45);
+  int32_t snap_env = static_cast<int32_t>(
+      static_cast<int64_t>(snap_) * attack_ >> 45);
 
   int32_t v = x * env >> 15;
   v += (p.noise_level * noise_env >> 15) * band >> 15;
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
   v = ScaleMix(v);
+  if (fade_ > 0) {
+    fade_ -= kFadeStep;
+    if (fade_ < 0) {
+      fade_ = 0;
+    }
+    v += tail_ * fade_ >> 15;
+    CLIP(v);
+  }
+  last_mix_ = v;
 
-  // Lift the wave by its own peak level so the VCA word never goes below
-  // zero. The lift decays with the amplitude envelope, so OUT 1 goes back to
-  // 0 V when the note dies out.
-  int32_t magnitude = v < 0 ? -v : v;
-  int32_t decayed = Decay(bias_, p.amp_coefficient);
-  bias_ = magnitude > decayed ? magnitude : decayed;
-  int32_t g = bias_ + v;
+  // Write the wave on top of a fixed lift, so the VCA word stays above zero.
+  // A lift that follows each note jumps at every hit: a low-frequency step
+  // that the Tone filter can't remove, heard as a click.
+  if (hold_ > 0) {
+    --hold_;
+  } else if (lift_ < kLift) {
+    ++lift_;
+  }
+  int32_t g = lift_ + v;
   CONSTRAIN(g, 0, 65535);
   *gain = g;
 
   // Filter: same amount/offset scheme as the stock envelope mode.
   int32_t f = p.tone_offset + (env * p.tone_amount >> 15);
+  // Never close below a cutoff just above the pitch the oscillator plays
+  // (note, sweep, snap and LFO), so Tone fully left darkens the note but
+  // does not silence it. With cutoff = 48 kHz * 2^(-16.6 * (1 - f / 65535))
+  // the word is linear in semitones: 329 per semitone (Q16 pitch >> 4,
+  // then >> 12), up from kToneFloor at C1.
+  int32_t lowest = kToneFloor + ((s >> 4) * 329 >> 12);
+  if (f < lowest) {
+    f = lowest;
+  }
   CONSTRAIN(f, 0, 65535);
   *frequency = f;
 }

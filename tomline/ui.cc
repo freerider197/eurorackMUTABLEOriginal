@@ -24,7 +24,7 @@ Storage<0x801fc00, 4> settings_storage;
 
 const uint32_t kSettingsMagic = 0x4e4c4d54;  // "TMLN"
 const uint32_t kLongPress = 1000;            // ms, as the stock firmware
-const int32_t kPickupWindow = 1024;
+const uint32_t kCalibrationHold = 3000;      // ms of METER for the offsets
 // EXCITE inputs: x0.2 inverting buffer into a 3.3 V ADC, 16-bit left aligned.
 // 65536 * 0.2 / 3.3 = 3972 counts per volt.
 const int32_t kCountsPerVolt = 3972;
@@ -56,7 +56,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     settings_.engine = ENGINE_BT;
     settings_.snap = 1;
     settings_.lfo_shape = LFO_TRIANGLE;
-    settings_.padding = 0;
+    settings_.lfo_free = 0;
     copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
          &settings_.second_layer[0]);
     settings_.voct_offset = 0;
@@ -82,6 +82,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
   if (settings_.snap > 3) settings_.snap = 1;
   if (settings_.lfo_shape >= LFO_SHAPE_LAST) settings_.lfo_shape = LFO_TRIANGLE;
+  if (settings_.lfo_free > 1) settings_.lfo_free = 0;
 
   // The ADC scans one pot per ms: read all four before starting.
   for (uint8_t i = 0; i < 8; ++i) {
@@ -91,22 +92,23 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
     pot_[i] = adc_->pot(i);
     main_layer_[i] = pot_[i];
-    caught_[0][i] = true;
-    caught_[1][i] = false;
-    above_[1][i] = pot_[i] > settings_.second_layer[i];
-    caught_[2][i] = false;
-    above_[2][i] = pot_[i] > settings_.lfo_layer[i];
+    press_pot_[i] = pot_[i];
   }
+  calibration_pot_[0] = calibration_pot_[1] = 0;
   fill(&press_time_[0], &press_time_[BUTTON_LAST], 0);
   fill(&long_press_handled_[0], &long_press_handled_[BUTTON_LAST], false);
+  fill(&down_[0], &down_[BUTTON_LAST], false);
+  fill(&used_[0], &used_[BUTTON_LAST], false);
   combo_handled_ = false;
   event_read_ = event_write_ = 0;
   layer_ = 0;
+  HoldKnobs();
+  knob_time_ = 0;
+  press_settle_ = 0;
   second_layer_latched_ = false;
-  knob_moved_while_meter_held_ = false;
   meter_held_ = false;
   fn2_held_ = false;
-  fn2_used_ = false;
+  fn1_with_fn2_ = false;
 
   mode_ = UI_MODE_NORMAL;
   settings_dirty_ = false;
@@ -162,9 +164,17 @@ void Ui::Poll() {
     if (!press_time_[BUTTON_FN_1] && !press_time_[BUTTON_FN_2]) {
       combo_handled_ = false;
     }
+    // The knobs are read with every LED off and no LED data on the wires:
+    // each page lights other LEDs, and that shifted all the knob readings
+    // at once. LEDs are off 1 tick in 4 (a quarter dimmer).
+    leds_.Clear();
+    leds_.Write();
     adc_->ScanPots();
     uint8_t i = adc_->last_read_pot();
     pot_[i] += (adc_->pot(i) - pot_[i]) >> 2;
+  } else {
+    PaintLeds();
+    leds_.Write();
   }
   if (trigger_flash_) {
     --trigger_flash_;
@@ -172,8 +182,6 @@ void Ui::Poll() {
   if (feedback_timer_) {
     --feedback_timer_;
   }
-  PaintLeds();
-  leds_.Write();
 }
 
 // Buttons are only detected in the SysTick interrupt; everything they do
@@ -190,15 +198,26 @@ void Ui::PushEvent(uint8_t button, uint32_t duration, bool ignored) {
 }
 
 void Ui::HandleEvents() {
+  bool was_calibrating = mode_ != UI_MODE_NORMAL;
   while (event_read_ != event_write_) {
     ButtonEvent e = events_[event_read_];
     event_read_ = (event_read_ + 1) % kNumEvents;
     if (e.button == BUTTON_LAST) {
       OnButtonsCombo();
     } else if (e.duration == 0) {
+      // Two buttons down at once: neither tap does its own job.
+      used_[e.button] = false;
+      for (uint8_t i = 0; i < BUTTON_LAST; ++i) {
+        if (i != e.button && down_[i]) {
+          used_[i] = used_[e.button] = true;
+        }
+      }
+      down_[e.button] = true;
+      press_settle_ = kPickupSettle;
       long_press_handled_[e.button] = false;
       OnButtonPressed(e.button);
     } else {
+      down_[e.button] = false;
       if (!e.ignored) {
         OnButtonReleased(e.button, e.duration);
       }
@@ -206,7 +225,9 @@ void Ui::HandleEvents() {
       if (e.button == BUTTON_METER) meter_held_ = false;
     }
   }
-  UpdateLayer();
+  // Back from a calibration: the knobs were used for something else, so
+  // every value waits for its knob to be turned again.
+  UpdateLayer(was_calibrating && mode_ == UI_MODE_NORMAL);
 }
 
 void Ui::OnButtonPressed(uint8_t button) {
@@ -216,28 +237,25 @@ void Ui::OnButtonPressed(uint8_t button) {
     mode_ = UI_MODE_NORMAL;
     offset_calibration_shown_ = 0;
     long_press_handled_[button] = true;  // swallow the release
-    for (uint8_t i = 0; i < KNOB_LAST; ++i) {
-      main_layer_[i] = pot_[i];  // SHAPE 1/2 were used to null the VCAs
-    }
-    parameters_dirty_ = true;
     return;
   }
   if (mode_ != UI_MODE_NORMAL) {
     return;
   }
-  if (button == BUTTON_FN_2) {
+  if (button == BUTTON_FN_1) {
+    // Acted on at the release, so pressing FN 1 + FN 2 for the V/oct
+    // calibration (its release is ignored) does not also toggle it.
+    fn1_with_fn2_ = fn2_held_;  // FN 2's own tap is cancelled (used_)
+  } else if (button == BUTTON_FN_2) {
     fn2_held_ = true;
-    fn2_used_ = false;
   } else if (button == BUTTON_METER) {
     if (fn2_held_) {
       // FN 2 held + METER: next LFO wave. METER's release does nothing.
       settings_.lfo_shape = (settings_.lfo_shape + 1) % LFO_SHAPE_LAST;
-      settings_dirty_ = true;
+      SettingsChanged();
       parameters_dirty_ = true;
-      fn2_used_ = true;
       long_press_handled_[button] = true;
     } else {
-      knob_moved_while_meter_held_ = false;
       meter_held_ = true;
     }
   }
@@ -282,31 +300,42 @@ void Ui::OnButtonReleased(uint8_t button, uint32_t duration) {
 
   switch (button) {
     case BUTTON_FN_1:
-      if (short_press) {
+      if (fn1_with_fn2_) {
+        // Tapped while FN 2 was held: LFO restart on trigger / free running.
+        if (short_press) {
+          settings_.lfo_free = !settings_.lfo_free;
+          SettingsChanged();
+          parameters_dirty_ = true;
+        }
+      } else if (short_press && !used_[button]) {
         settings_.engine = (settings_.engine + 1) % ENGINE_LAST;
-        settings_dirty_ = true;
+        SettingsChanged();
         parameters_dirty_ = true;
       }
       break;
 
     case BUTTON_FN_2:
-      if (short_press && !fn2_used_) {
+      if (short_press && !used_[button]) {
         settings_.snap = (settings_.snap + 1) & 3;
-        settings_dirty_ = true;
+        SettingsChanged();
         parameters_dirty_ = true;
       }
       break;
 
     case BUTTON_METER:
-      if (!knob_moved_while_meter_held_) {
+      if (!used_[button]) {
         if (short_press) {
           second_layer_latched_ = !second_layer_latched_;
-        } else if (cv_scaler_->can_calibrate()) {
+        } else if (duration >= kCalibrationHold &&
+                   cv_scaler_->can_calibrate()) {
           // Stock offset calibration: all inputs patched with cables whose
-          // other end is left unplugged.
+          // other end is left unplugged. SHAPE 1 / 2 only change the VCA
+          // offsets once they are turned.
           cv_scaler_->CaptureAdcOffsets();
           mode_ = UI_MODE_OFFSET_CALIBRATION;
           offset_calibration_shown_ = 0;
+          calibration_pot_[0] = pot_[KNOB_SHAPE_1];
+          calibration_pot_[1] = pot_[KNOB_SHAPE_2];
         }
       }
       break;
@@ -328,7 +357,7 @@ uint16_t* Ui::LayerValues(uint8_t layer) {
 }
 
 // FN 2 held wins over METER; METER held or latched wins over the main layer.
-void Ui::UpdateLayer() {
+void Ui::UpdateLayer(bool hold_knobs) {
   if (mode_ != UI_MODE_NORMAL) {
     return;
   }
@@ -338,51 +367,51 @@ void Ui::UpdateLayer() {
   } else if (meter_held_ || second_layer_latched_) {
     layer = 1;
   }
-  SetLayer(layer);
+  if (layer != layer_ || hold_knobs) {
+    layer_ = layer;
+    HoldKnobs();
+  }
 }
 
-void Ui::SetLayer(uint8_t layer) {
-  if (layer == layer_) {
-    return;
-  }
-  layer_ = layer;
-  const uint16_t* values = LayerValues(layer);
+// A page opens: every value stays where it is until its knob is turned.
+void Ui::HoldKnobs() {
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
-    int32_t value = values[i];
-    caught_[layer][i] = Abs(pot_[i] - value) < kPickupWindow;
-    above_[layer][i] = pot_[i] > value;
+    pickup_[i].Hold(pot_[i]);
   }
+}
+
+void Ui::SettingsChanged() {
+  settings_dirty_ = true;
+  settings_change_time_ = system_clock.milliseconds();
 }
 
 // --- Main loop ---------------------------------------------------------------
 
 void Ui::ReadKnobs() {
-  uint8_t layer = layer_;
-  uint16_t* values = LayerValues(layer);
+  uint32_t now = system_clock.milliseconds();
+  int32_t elapsed = now - knob_time_;
+  knob_time_ = now;
+
+  // A knob turned while a button is down cancels that button's tap. The
+  // positions are taken once the readings have settled after the press.
+  if (press_settle_ > 0) {
+    press_settle_ -= elapsed;
+    copy(&pot_[0], &pot_[KNOB_LAST], &press_pot_[0]);
+  }
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
-    int32_t position = pot_[i];
-    uint16_t* value = &values[i];
-    if (!caught_[layer][i]) {
-      // Pick-up: the stored value only follows the knob once the knob has
-      // reached it, so switching layers never makes a parameter jump.
-      bool above = position > *value;
-      if (above != above_[layer][i] || Abs(position - *value) < kPickupWindow) {
-        caught_[layer][i] = true;
+    if (Pickup::Distance(pot_[i], press_pot_[i]) > kPickupMove) {
+      for (uint8_t b = 0; b < BUTTON_LAST; ++b) {
+        if (down_[b]) used_[b] = true;
       }
-      above_[layer][i] = above;
     }
-    if (caught_[layer][i] && Abs(position - *value) > 64) {
-      *value = position;
+  }
+
+  uint16_t* values = LayerValues(layer_);
+  for (uint8_t i = 0; i < KNOB_LAST; ++i) {
+    if (pickup_[i].Follow(pot_[i], elapsed, &values[i])) {
       parameters_dirty_ = true;
-      if (layer) {
-        settings_dirty_ = true;
-        settings_change_time_ = system_clock.milliseconds();
-      }
-      if (press_time_[BUTTON_METER]) {
-        knob_moved_while_meter_held_ = true;
-      }
-      if (layer == 2) {
-        fn2_used_ = true;
+      if (layer_) {
+        SettingsChanged();
       }
     }
   }
@@ -392,7 +421,7 @@ void Ui::ComputeParameters() {
   VoiceParameters n;
   ComputeVoiceParameters(
       settings_.engine, settings_.snap, main_layer_, settings_.second_layer,
-      settings_.lfo_layer, settings_.lfo_shape, &n);
+      settings_.lfo_layer, settings_.lfo_shape, &n, settings_.lfo_free != 0);
   // Copy field by field: each 32-bit store is atomic for the interrupt.
   volatile int32_t* dst = reinterpret_cast<volatile int32_t*>(&parameters_);
   const int32_t* src = reinterpret_cast<const int32_t*>(&n);
@@ -431,8 +460,8 @@ void Ui::DoEvents() {
       int32_t position = pot_[channel * 2];
       int32_t min = kDefaultOffset >> 1;
       int32_t max = 3 * min + 256;
-      if (Abs(position - main_layer_[channel * 2]) > 256) {
-        main_layer_[channel * 2] = position;
+      if (Abs(position - calibration_pot_[channel]) > 256) {
+        calibration_pot_[channel] = position;
         cv_scaler_->set_dac_offset(channel, min + ((max - min) * position >> 16));
         offset_calibration_shown_ |= 1 << channel;
       }
@@ -527,10 +556,14 @@ void Ui::PaintLeds() {
   }
   if (layer_ == 2) {
     // Right column: top LED = triangle, second = ramp up. It pulses with
-    // the LFO, so its speed is visible even with the depth at zero.
+    // the LFO, so its speed is visible even with the depth at zero. Third
+    // LED on = free running (off = restarts on each trigger).
     int32_t wave = Voice::LfoWave(lfo_phase_, settings_.lfo_shape);
     uint8_t brightness = static_cast<uint8_t>((wave + 32768) >> 8);
     leds_.set(4 + settings_.lfo_shape, brightness, 0);
+    if (settings_.lfo_free) {
+      leds_.set(6, 255, 0);
+    }
     return;
   }
   for (uint8_t row = 0; row < 4; ++row) {
