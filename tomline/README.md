@@ -97,7 +97,7 @@ From the Streams manual: connect your audio interface output to channel 1's
 **EXCITE** input. Power on the system with channel 1's function button (FN 1)
 held: the four left LEDs blink orange. Set channel 1's **SHAPE** knob to its
 middle position. Turn speakers off and silence other sounds on the computer,
-then play `release/tomline-0.2.wav`. On red blinking, press FN 1 to retry and
+then play `release/tomline-0.3.wav`. On red blinking, press FN 1 to retry and
 adjust the level with SHAPE 1 (best with 2 green and 1 orange LED lit on the
 right).
 
@@ -166,7 +166,19 @@ it):
 make -f tomline/makefile TOOLCHAIN_PATH=/usr/ wav
 ```
 
-Output: `build/tomline/tomline.bin` and `build/tomline/tomline.wav`. The
+Output: `build/tomline/tomline.bin` and `build/tomline/tomline.wav`.
+The makefile links with `tomline/tomline.ld`: the same flash layout as
+stmlib's Streams script, but a 4 KB stack instead of 512 bytes. Version 0.2
+froze when knobs were turned: the knob maths (software floating point) plus
+both interrupts needed 564 bytes, ran past the 512-byte stack and hit a fault.
+Check the stack after every firmware change:
+
+```
+python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
+```
+
+Last run: worst case 564 bytes (main loop 300, SysTick 100, audio interrupt
+164), 4096 reserved, 3532 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
