@@ -159,8 +159,13 @@ g++ -O2 -I. -o build/tomline_render tomline/test/render.cc tomline/voice.cc toml
 ./build/tomline_render
 ```
 
+It also checks that glide lands on the target note and that a very loud
+mix (noise at 100 %, hard hit) clips instead of wrapping around. It exits
+with an error if a check fails.
+
 Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
-notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C1, C2, C3, C4.
+notes. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C1, C2, C3, C4. Glide
+C2 to C3: -0.06 cents. Loud mix: clips correctly.
 
 ## Files
 
