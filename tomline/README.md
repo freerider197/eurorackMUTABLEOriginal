@@ -64,7 +64,11 @@ blinks red.
 Pick-up, on every page: when a page opens, each value stays where it was
 until you turn its knob. Then the value goes to the knob position (a quick
 40 ms glide, so it never clicks) and follows the knob. A knob that already
-sits on its value follows it straight away. A button tap only does its job if
+sits on its value follows it straight away. The knobs are read while all
+LEDs are off (each page lights other LEDs, which shifted every knob reading
+and made all values jump on a page change), so the LEDs are a quarter dimmer
+than before, and readings settle for 50 ms after a page change before a turn
+counts. A button tap only does its job if
 no knob was turned and no other button was pressed while it was down (the
 FN 2 + METER and FN 2 + FN 1 taps are their own gestures): turning a knob
 while holding METER or FN 2 never latches, calibrates or changes snap. The LFO
@@ -234,14 +238,16 @@ an instant jump of +1 octave would click at 0.80 V against the note's 0.10 V.
 `tomline/test/panel.cc` runs the firmware's own `ui.cc` on a computer, with
 stand-ins for the drivers in `tomline/test/stub/`, and plays knob and button
 moves: pick-up on page changes, METER, FN 1 and FN 2 taps and holds with knobs
-turned, two buttons at once, offset and V/oct calibration, flash saves:
+turned, two buttons at once, offset and V/oct calibration, flash saves, and
+LEDs that shift the knob readings (a model of the effect seen on the module):
 
 ```
 g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tomline/voice.cc tomline/parameters.cc
 ./build/tomline_panel
 ```
 
-Last run: all 39 checks OK.
+Last run: all 43 checks OK. Without the LEDs-off reading, the model moves
+untouched values on page changes; with it, nothing moves.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for eight
 patches (BT, LT, glide, everything at maximum, LFO triangle and ramp up, each

@@ -155,6 +155,7 @@ class Ui {
   int32_t press_pot_[KNOB_LAST];    // positions at the last button press
   int32_t calibration_pot_[2];      // SHAPE 1 / 2 in offset calibration
   uint32_t knob_time_;
+  int32_t press_settle_;           // ms before press_pot_ is taken
   uint8_t layer_;  // 0 main, 1 second (METER), 2 LFO (FN 2 held)
   bool second_layer_latched_;
   bool meter_held_;

@@ -2,10 +2,11 @@
 // run it on a computer.
 //
 // When a page opens, each knob keeps its stored value until the knob is
-// actually turned (by more than kPickupMove). Then the value goes to the
-// knob position and follows it. The value moves at most kPickupSlew per ms,
-// so a big jump is a quick 40 ms glide instead of a click. A knob that
-// already sits on its value follows it straight away.
+// actually turned (by more than kPickupMove from where it was once the
+// readings settled, kPickupSettle after the page opened). Then the value
+// goes to the knob position and follows it. The value moves at most
+// kPickupSlew per ms, so a big jump is a quick 40 ms glide instead of a
+// click. A knob that already sits on its value follows it straight away.
 
 #ifndef TOMLINE_PICKUP_H_
 #define TOMLINE_PICKUP_H_
@@ -14,19 +15,21 @@
 
 namespace tomline {
 
-const int32_t kPickupMove = 512;     // knob travel that counts as turned (0.8 %)
+const int32_t kPickupMove = 1024;    // knob travel that counts as turned (1.6 %)
+const int32_t kPickupSettle = 50;    // ms after a page change or button press
 const int32_t kPickupNoise = 64;     // smaller changes are ADC noise
 const int32_t kPickupSlew = 1638;    // per ms: the full range in 40 ms
 const int32_t kPickupMaxElapsed = 2;  // ms, after a stall (flash write)
 
 class Pickup {
  public:
-  Pickup() : anchor_(0), active_(true) { }
+  Pickup() : anchor_(0), settle_(0), active_(true) { }
 
-  // Called when a page opens: keep `value` until the knob moves.
-  void Hold(int32_t position, int32_t value) {
+  // Called when a page opens: keep the value until the knob moves.
+  void Hold(int32_t position) {
     anchor_ = position;
-    active_ = Distance(position, value) <= 2 * kPickupNoise;
+    settle_ = kPickupSettle;
+    active_ = false;
   }
 
   inline bool active() const { return active_; }
@@ -34,6 +37,17 @@ class Pickup {
   // Moves *value toward the knob position. `elapsed` is the time since the
   // last call, in ms. Returns true if *value changed.
   bool Follow(int32_t position, int32_t elapsed, uint16_t* value) {
+    if (elapsed > kPickupMaxElapsed) elapsed = kPickupMaxElapsed;
+    if (settle_ > 0) {
+      // Readings still settling (the LEDs just changed): only note where
+      // the knob is.
+      settle_ -= elapsed;
+      anchor_ = position;
+      if (settle_ <= 0) {
+        active_ = Distance(position, *value) <= 2 * kPickupNoise;
+      }
+      return false;
+    }
     if (!active_) {
       if (Distance(position, anchor_) <= kPickupMove) {
         return false;
@@ -44,7 +58,6 @@ class Pickup {
     if (Distance(position, *value) <= kPickupNoise) {
       return false;
     }
-    if (elapsed > kPickupMaxElapsed) elapsed = kPickupMaxElapsed;
     int32_t step = kPickupSlew * elapsed;
     if (error > step) error = step;
     if (error < -step) error = -step;
@@ -61,6 +74,7 @@ class Pickup {
 
  private:
   int32_t anchor_;
+  int32_t settle_;
   bool active_;
 };
 

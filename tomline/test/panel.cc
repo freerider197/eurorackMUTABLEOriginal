@@ -27,6 +27,8 @@ namespace streams {
 int32_t sim_knob[4];
 bool sim_button[3];
 int32_t sim_noise = 0;
+int sim_leds_lit = 0;
+int32_t sim_led_shift = 0;
 bool sim_can_calibrate = true;  // nothing patched, or V/oct under 1 V
 int sim_offset_captures = 0, sim_calibration_saves = 0, sim_vca_offset_changes = 0;
 int32_t SimNoise() {
@@ -117,11 +119,46 @@ int main() {
   Start();
   SetNoise(5000);
   Turn(S1, 5000 + 400, 100);
-  Check(Decay() == 32768, "a nudge under 0.8 % does not count as turning");
+  Check(Decay() == 32768, "a nudge under 1.6 % does not count as turning");
   Turn(S1, 20000, 300);
   Check(Near(Decay(), 20000), "SHAPE 1 turned up: decay jumps to the knob, no dead zone");
   Turn(S1, 25000, 300);
   Check(Near(Decay(), 25000), "  ... then follows it");
+
+  printf("LEDs that shift the knob readings (300 counts per lit colour)\n");
+  sim_led_shift = 300;
+  Start();
+  SetNoise(5000);
+  Turn(M1, 50000, 400);  // decay at noon, tone at 50000, knobs elsewhere
+  {
+    uint16_t main_before[4], second_before[4];
+    std::copy(&ui->main_layer_[0], &ui->main_layer_[4], &main_before[0]);
+    std::copy(&ui->settings_.second_layer[0], &ui->settings_.second_layer[4],
+              &second_before[0]);
+    bool still = true;
+    for (int i = 0; i < 4; ++i) {
+      Tap(BUTTON_METER);  // second page, amber
+      Ms(500);
+      Tap(BUTTON_METER);  // main page, green
+      Ms(500);
+      Down(BUTTON_FN_2);  // LFO page, red
+      Ms(500);
+      Up(BUTTON_FN_2);
+      Ms(500);
+    }
+    for (int k = 0; k < 4; ++k) {
+      still = still && ui->main_layer_[k] == main_before[k] &&
+              ui->settings_.second_layer[k] == second_before[k];
+    }
+    Check(still, "page changes back and forth, knobs untouched: no value moves");
+    Check(ui->settings_.snap == 1, "  ... and FN 2 holds did not step snap");
+  }
+  Tap(BUTTON_METER);
+  Check(ui->second_layer_latched_, "METER tap still latches");
+  Tap(BUTTON_METER);
+  Turn(S1, 20000, 300);
+  Check(Near(Decay(), 20000), "SHAPE 1 turned: decay goes to the knob");
+  sim_led_shift = 0;
 
   printf("No click: the jump is a quick glide\n");
   Start();

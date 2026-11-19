@@ -492,18 +492,20 @@ uint16_t* JumpValue(Patch* patch) {
   return &patch->lfo_layer[jump_knob - 8];
 }
 
+// The page opens 100 ms before the jump, with the knob at the far end.
+const int64_t kPageAt = kJumpAt - static_cast<int64_t>(0.1 * kFirmwareRate);
+
 bool JumpControl(int64_t n, Patch* patch) {
   uint16_t* value = JumpValue(patch);
-  if (n == kJumpAt) {
-    if (!jump_glide) {
-      *value = jump_to;
-      return true;
-    }
-    jump_pickup.Hold(jump_from, *value);
+  if (!jump_glide) {
+    if (n != kJumpAt) return false;
+    *value = jump_to;
+    return true;
   }
-  // Main loop: once per ms.
-  if (jump_glide && n >= kJumpAt && n % 31 == 0) {
-    return jump_pickup.Follow(jump_to, 1, value);
+  if (n == kPageAt) jump_pickup.Hold(jump_from);
+  // Main loop: once per ms. The knob is turned at kJumpAt.
+  if (n >= kPageAt && n % 31 == 0) {
+    return jump_pickup.Follow(n < kJumpAt ? jump_from : jump_to, 1, value);
   }
   return false;
 }

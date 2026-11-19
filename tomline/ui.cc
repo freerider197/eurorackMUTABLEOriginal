@@ -104,6 +104,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   layer_ = 0;
   HoldKnobs();
   knob_time_ = 0;
+  press_settle_ = 0;
   second_layer_latched_ = false;
   meter_held_ = false;
   fn2_held_ = false;
@@ -163,9 +164,17 @@ void Ui::Poll() {
     if (!press_time_[BUTTON_FN_1] && !press_time_[BUTTON_FN_2]) {
       combo_handled_ = false;
     }
+    // The knobs are read with every LED off and no LED data on the wires:
+    // each page lights other LEDs, and that shifted all the knob readings
+    // at once. LEDs are off 1 tick in 4 (a quarter dimmer).
+    leds_.Clear();
+    leds_.Write();
     adc_->ScanPots();
     uint8_t i = adc_->last_read_pot();
     pot_[i] += (adc_->pot(i) - pot_[i]) >> 2;
+  } else {
+    PaintLeds();
+    leds_.Write();
   }
   if (trigger_flash_) {
     --trigger_flash_;
@@ -173,8 +182,6 @@ void Ui::Poll() {
   if (feedback_timer_) {
     --feedback_timer_;
   }
-  PaintLeds();
-  leds_.Write();
 }
 
 // Buttons are only detected in the SysTick interrupt; everything they do
@@ -206,7 +213,7 @@ void Ui::HandleEvents() {
         }
       }
       down_[e.button] = true;
-      copy(&pot_[0], &pot_[KNOB_LAST], &press_pot_[0]);
+      press_settle_ = kPickupSettle;
       long_press_handled_[e.button] = false;
       OnButtonPressed(e.button);
     } else {
@@ -368,9 +375,8 @@ void Ui::UpdateLayer(bool hold_knobs) {
 
 // A page opens: every value stays where it is until its knob is turned.
 void Ui::HoldKnobs() {
-  const uint16_t* values = LayerValues(layer_);
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
-    pickup_[i].Hold(pot_[i], values[i]);
+    pickup_[i].Hold(pot_[i]);
   }
 }
 
@@ -386,7 +392,12 @@ void Ui::ReadKnobs() {
   int32_t elapsed = now - knob_time_;
   knob_time_ = now;
 
-  // A knob turned while a button is down cancels that button's tap.
+  // A knob turned while a button is down cancels that button's tap. The
+  // positions are taken once the readings have settled after the press.
+  if (press_settle_ > 0) {
+    press_settle_ -= elapsed;
+    copy(&pot_[0], &pot_[KNOB_LAST], &press_pot_[0]);
+  }
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
     if (Pickup::Distance(pot_[i], press_pot_[i]) > kPickupMove) {
       for (uint8_t b = 0; b < BUTTON_LAST; ++b) {
