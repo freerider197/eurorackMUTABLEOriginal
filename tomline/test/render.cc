@@ -73,6 +73,14 @@ Result Render(const Patch& start, const std::vector<Step>& steps, double bpm,
                          patch.lfo_free);
   Voice voice;
   voice.Init();
+  // Skip the power-up (1 s at 0 V, then the lift rises over about 1 s), with
+  // the LFO held so it still starts at its lowest point.
+  {
+    VoiceParameters warm = p;
+    warm.lfo_increment = 0;
+    uint16_t g, f;
+    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(warm, false, 0, &g, &f);
+  }
   Result r;
   r.min_v = 1e9;
   r.max_v = -1e9;
@@ -80,6 +88,8 @@ Result Render(const Patch& start, const std::vector<Step>& steps, double bpm,
   int64_t total = static_cast<int64_t>(samples_per_step * steps.size() * repeats);
   total += static_cast<int64_t>(kFirmwareRate);  // 1 s tail
   OnePole dac1, dac2, f1, f2, pwm_rc;
+  dac1.y = dac2.y = 1.0;  // settled at the lift: word 32767
+  f1.y = f2.y = 3.33;     // OUT 1 at rest
   int32_t pwm_filtered = 0;
   double tick = 0.0;
   uint16_t gain = 0, frequency = 0;
@@ -136,7 +146,8 @@ void WriteWav(const char* path, const std::vector<float>& volts, bool ac) {
   // 48 kHz, 16-bit. AC-coupled version for listening: 3 Hz high-pass, like
   // an audio interface input. 10 V = full scale.
   std::vector<int16_t> pcm;
-  double x1 = 0, y1 = 0, r = 1.0 - 2 * M_PI * 3.0 / kHostRate;
+  double x1 = ac && !volts.empty() ? volts[0] : 0, y1 = 0;
+  double r = 1.0 - 2 * M_PI * 3.0 / kHostRate;
   for (size_t i = 0; i + 1 < volts.size(); i += 2) {
     double v = 0;
     for (int k = 0; k < 2; ++k) {
@@ -176,7 +187,7 @@ double MeasurePitch(const Patch& base, int note) {
   double mean = 0;
   for (size_t i = a; i < b; ++i) mean += r.raw[i];
   mean /= (b - a);
-  // Remove the slowly decaying lift with a moving average over one period.
+  // Remove the lift with a moving average over one period.
   int crossings = 0;
   double first = -1, last = -1;
   double prev = 0;
@@ -384,7 +395,7 @@ bool PitchEnvelopeOk(uint8_t engine) {
 double NoteRms(Patch patch, int note) {
   std::vector<Step> steps = { {-1}, {note} };
   Result r = Render(patch, steps, 15.0, 1);  // 1 s per step
-  double x1 = 0, y1 = 0, k = 1.0 - 2 * M_PI * 3.0 / kHostRate, sum = 0;
+  double x1 = r.raw[0], y1 = 0, k = 1.0 - 2 * M_PI * 3.0 / kHostRate, sum = 0;
   size_t n = static_cast<size_t>(kHostRate);
   for (size_t i = 0; i < 2 * n; ++i) {
     double y = r.raw[i] - x1 + k * y1;
@@ -407,11 +418,13 @@ double ToneClosedDb(Patch patch, int note) {
 // 50 / 75 / 100 %, so each note is still loud when the next one starts.
 // OUT 1 goes through a 3 Hz high-pass, like an audio input. Measures the
 // largest one-sample jump in the 1 ms after each trigger: the first note
-// (from silence) against the worst retrigger. Also checks that from 5 ms on,
-// each note's peak-to-peak swing is within 5 % of the same note played alone (no stacking).
+// (from silence) against the worst retrigger, within 20 %. Also checks that
+// from 5 ms on, each note's peak-to-peak swing is within 5 % of the same note
+// played alone (no stacking).
 std::vector<double> HighPass(const std::vector<float>& volts) {
   std::vector<double> out(volts.size());
-  double x1 = 0, y1 = 0, r = 1.0 - 2 * M_PI * 3.0 / kHostRate;
+  double x1 = volts.empty() ? 0 : volts[0], y1 = 0;
+  double r = 1.0 - 2 * M_PI * 3.0 / kHostRate;
   for (size_t i = 0; i < volts.size(); ++i) {
     double y = volts[i] - x1 + r * y1;
     x1 = volts[i]; y1 = y;
@@ -464,7 +477,11 @@ bool RetriggerOk(uint8_t engine, uint16_t decay) {
     worst_level = fmax(worst_level, level);
     level_ok = level_ok && level < 0.05;
   }
-  bool ok = worst <= from_silence && level_ok;
+  // From silence the new note starts alone; on a retrigger the old note's
+  // 1.5 ms fade adds its own slope, about 10 % more at full decay. Until the
+  // fixed lift, the from-silence figure also held the lift's jump (BT 0.51 V,
+  // retrigger 0.45 V), so the limit was x1.0; now BT is 0.32 V / 0.35 V.
+  bool ok = worst <= from_silence * 1.2 && level_ok;
   printf("  %s decay %3d %%: from silence %.3f V, worst retrigger %.3f V (x%.1f), "
          "level after 5 ms within %.1f %%  %s\n",
          engine == ENGINE_BT ? "BT" : "LT", (decay * 100 + 32767) / 65535,
@@ -543,6 +560,43 @@ bool KnobJumpOk(uint8_t engine, int knob, const char* name, int32_t from, int32_
   return ok;
 }
 
+// Attack jump: the average of OUT 1 over the 100 ms after a hit, minus the
+// average over the 100 ms before it. A lift that follows each note makes this
+// about 2.4 V, a step the Tone filter can't remove (heard as a click on every
+// hit). A plain decaying sine gives about 0.1 V on its own.
+double AttackJumpVolts(const Patch& patch) {
+  std::vector<Step> steps = { {-1}, {-1}, {-1}, {-1}, {0} };
+  Result r = Render(patch, steps, 120.0, 1);  // hit at 0.5 s
+  size_t hit = static_cast<size_t>(0.5 * kHostRate);
+  size_t w = static_cast<size_t>(0.1 * kHostRate);
+  double before = 0, after = 0;
+  for (size_t i = 0; i < w; ++i) {
+    before += r.raw[hit - w + i];
+    after += r.raw[hit + i];
+  }
+  return (after - before) / w;
+}
+
+// Power-up: VCA word at 0 for the first second (Ui::CheckSetup reads LEVEL
+// MOD 1 there), then a rise of one step per sample to 32767, never faster.
+bool PowerUpOk() {
+  uint16_t main_layer[4] = { 29491, 40632, 32768, 19661 };
+  uint16_t second[4] = { 9830, 16384, 22938, 0 }, lfo[4] = { 0, 0, 0, 0 };
+  VoiceParameters p;
+  ComputeVoiceParameters(ENGINE_BT, 1, main_layer, second, lfo, LFO_TRIANGLE, &p);
+  Voice voice;
+  voice.Init();
+  uint16_t g, f, prev = 0;
+  bool ok = true;
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) {
+    voice.Process(p, false, 0, &g, &f);
+    if (i < 31088) ok = ok && g == 0;
+    ok = ok && g >= prev && g - prev <= 1;
+    prev = g;
+  }
+  return ok && g == 32767;
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -565,8 +619,25 @@ int main() {
   for (auto& c : cases) {
     Result r = Render(c.patch, roller, 122.0, 4);
     WriteWav(c.name, r.raw, true);
-    printf("%-28s OUT 1 min %.3f V  max %.2f V  after the tail %.4f V\n",
-           c.name, r.min_v, r.max_v, r.rest_v);
+    bool rest_ok = fabs(r.rest_v - 3.33) < 0.01;
+    printf("%-28s OUT 1 min %.3f V  max %.2f V  after the tail %.4f V  %s\n",
+           c.name, r.min_v, r.max_v, r.rest_v, rest_ok ? "OK" : "FAIL");
+    failures += !rest_ok;
+  }
+
+  printf("\nAttack jump (average OUT 1, 100 ms after a hit minus 100 ms before):\n");
+  Patch quiet = bt;
+  quiet.snap = 0;
+  quiet.main_layer[1] = 0;      // tone fully closed
+  quiet.main_layer[3] = 0;      // no sweep
+  quiet.second_layer[0] = 0;    // no noise
+  struct { const char* name; Patch patch; } hits[] = {
+    { "BT default", bt }, { "LT default", lt }, { "BT tone closed, snap 0", quiet } };
+  for (auto& h : hits) {
+    double jump = AttackJumpVolts(h.patch);
+    bool ok = fabs(jump) < 0.25;  // the old moving lift: about 2.4 V
+    printf("  %-26s %+.3f V  %s\n", h.name, jump, ok ? "OK" : "FAIL (click on every hit)");
+    failures += !ok;
   }
 
   printf("\nPitch at the default V/oct scale (0 V = C2), BT, tune centered:\n");
@@ -649,6 +720,11 @@ int main() {
       failures += !KnobJumpOk(engine, j.knob, j.name, 65535, 0);
     }
   }
+
+  bool power_ok = PowerUpOk();
+  printf("Power-up: OUT 1 at 0 V for 1 s, then a slow rise to 3.33 V: %s\n",
+         power_ok ? "OK" : "FAIL");
+  failures += !power_ok;
 
   bool mix_ok = MixScalingOk();
   printf("Loud output mix (noise 100 %%, hard hit): %s\n",
