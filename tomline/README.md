@@ -49,9 +49,9 @@ blinks red.
 | Control | Job | Hold METER (or tap METER to latch) |
 |---|---|---|
 | SHAPE 1 | Decay, 15 ms to 2.5 s | Noise level |
-| MOD 1 | Tone: filter envelope. Closed at 7 o'clock, most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
-| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time |
-| MOD 2 | Sweep depth: pitch drop on each hit (up to 12 st on BT, 24 st on LT) | Glide between notes (fully CCW = off) |
+| MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | +1 octave level |
+| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Sweep time: how fast the pitch falls back to the note (decay time constant about 4 to 180 ms on BT, 6 to 300 ms on LT) |
+| MOD 2 | Sweep amount: 808/909-style pitch envelope. Each hit starts on the note, jumps up by this amount in 1 ms (up to 12 st on BT, 24 st on LT), then falls back to the note | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button), tap | Snap 0–3: length of the attack click (0.4, 1.5, 4, 10 ms) | |
 | FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones). SHAPE 2 and MOD 2 do nothing here | |
@@ -101,7 +101,7 @@ From the Streams manual: connect your audio interface output to channel 1's
 **EXCITE** input. Power on the system with channel 1's function button (FN 1)
 held: the four left LEDs blink orange. Set channel 1's **SHAPE** knob to its
 middle position. Turn speakers off and silence other sounds on the computer,
-then play `release/tomline-0.2.wav`. On red blinking, press FN 1 to retry and
+then play `release/tomline-0.4.wav`. On red blinking, press FN 1 to retry and
 adjust the level with SHAPE 1 (best with 2 green and 1 orange LED lit on the
 right).
 
@@ -170,7 +170,19 @@ it):
 make -f tomline/makefile TOOLCHAIN_PATH=/usr/ wav
 ```
 
-Output: `build/tomline/tomline.bin` and `build/tomline/tomline.wav`. The
+Output: `build/tomline/tomline.bin` and `build/tomline/tomline.wav`.
+The makefile links with `tomline/tomline.ld`: the same flash layout as
+stmlib's Streams script, but a 4 KB stack instead of 512 bytes. Version 0.2
+froze when knobs were turned: the knob maths (software floating point) plus
+both interrupts needed 564 bytes, ran past the 512-byte stack and hit a fault.
+Check the stack after every firmware change:
+
+```
+python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
+```
+
+Last run: worst case 564 bytes (main loop 300, SysTick 100, audio interrupt
+164), 4096 reserved, 3532 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -196,7 +208,8 @@ It also checks the tune range, that glide lands on the target note, the LFO
 knob maths and wave shapes, the pitch of both LFO waves at full depth (restarting and free running),
 that a trigger restarts the LFO only when not free running, that the
 LFO at zero depth leaves the sound unchanged, and that a very loud mix (noise
-at 100 %, hard hit) clips instead of wrapping around. It exits
+at 100 %, hard hit) clips instead of wrapping around, and that Tone fully
+closed keeps each note within 6 dB of Tone fully open (BT and LT, 0 to 4 V). It exits
 with an error if a check fails.
 
 Last run: OUT 1 between 0.000 V and 6.66 V, back to about 0.001 V after the
@@ -205,7 +218,12 @@ range C1 / C2 / C3: OK. Glide C2 to C3: -0.07 cents. LFO knobs: OK. LFO at full
 depth, 0.2-1.2 s, restart on trigger: triangle +1.71 st, ramp up +0.86 st; free
 running: triangle -10.30 st, ramp up -11.14 st (all within 0.03 st of the
 expected value). LFO restart on every trigger / free run: OK. LFO at zero depth:
-unchanged. Loud mix: clips correctly.
+unchanged. Pitch envelope, BT and LT: on
+the note at the hit, peak +12 st (BT) / +24 st (LT) at 1.03 ms, back on the
+note (0.000 cents) after 3 s, and a retrigger 10 ms in starts again from the
+note. Tone closed vs open: BT -2.6 dB, LT -2.3 to
+-2.4 dB at every voltage (was -25 dB before the floor). Loud mix: clips
+correctly.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for eight
 patches (BT, LT, glide, everything at maximum, LFO triangle and ramp up, each

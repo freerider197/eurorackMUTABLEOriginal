@@ -327,6 +327,142 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
          Render(fast, steps, 122.0, 1).raw;
 }
 
+// Pitch envelope (MOD 2 amount, sweep time): on every hit the pitch starts on
+// the root, rises to root + amount in about 1 ms, then decays back onto the
+// root. A retrigger in the middle of the sweep starts again from the root.
+// Reads the voice's own sweep offset, sample by sample, with snap off.
+bool PitchEnvelopeOk(uint8_t engine) {
+  Patch patch = { engine, 0, { 29491, 40632, 32768, 65535 },
+                  { 9830, 16384, 22938, 0 } };
+  VoiceParameters p;
+  ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
+                         patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
+  double amount = p.sweep_depth / 65536.0;
+  Voice voice;
+  voice.Init();
+  uint16_t gain, frequency;
+  const int retrigger = static_cast<int>(0.010 * kFirmwareRate);  // 10 ms
+  const int length = static_cast<int>(3.0 * kFirmwareRate);
+  double at_hit = 0, peak = 0, peak_ms = 0, at_retrigger = 0, peak2 = 0;
+  double settled = 0, before_retrigger = 0;
+  for (int n = 0; n < retrigger + length; ++n) {
+    bool trigger = n == 0 || n == retrigger;
+    voice.Process(p, trigger, 12 << 16, &gain, &frequency);
+    double st = voice.sweep_offset(p) / 65536.0;
+    if (n == 0) at_hit = st;
+    if (n < retrigger && st > peak) { peak = st; peak_ms = n * 1000.0 / kFirmwareRate; }
+    if (n == retrigger - 1) before_retrigger = st;
+    if (n == retrigger) at_retrigger = st;
+    if (n > retrigger && st > peak2) peak2 = st;
+    settled = st;
+  }
+  bool ok = at_hit == 0 && fabs(peak - amount) < 1e-3 && peak_ms > 0.8 &&
+            peak_ms < 1.2 && at_retrigger == 0 && fabs(peak2 - amount) < 1e-3 &&
+            fabs(settled * 100) < 1.0;
+  printf("Pitch envelope %s (amount %.1f st): hit %+.2f st, peak %+.2f st at %.2f ms,"
+         " %.2f st before retrigger, retrigger %+.2f st, peak %+.2f st,"
+         " after 3 s %+.3f cents  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", amount, at_hit, peak, peak_ms,
+         before_retrigger, at_retrigger, peak2, settled * 100, ok ? "OK" : "FAIL");
+  return ok;
+}
+
+// Tone fully closed must not silence the note: RMS of OUT 1 (AC-coupled,
+// 3 Hz high-pass) over the first second of a note, Tone fully CCW against
+// fully CW. Returns the ratio in dB. A 1 s rest first lets the filter
+// control voltage settle from power-up.
+double NoteRms(Patch patch, int note) {
+  std::vector<Step> steps = { {-1}, {note} };
+  Result r = Render(patch, steps, 15.0, 1);  // 1 s per step
+  double x1 = 0, y1 = 0, k = 1.0 - 2 * M_PI * 3.0 / kHostRate, sum = 0;
+  size_t n = static_cast<size_t>(kHostRate);
+  for (size_t i = 0; i < 2 * n; ++i) {
+    double y = r.raw[i] - x1 + k * y1;
+    x1 = r.raw[i]; y1 = y;
+    if (i >= n) sum += y * y;
+  }
+  return sqrt(sum / n);
+}
+
+double ToneClosedDb(Patch patch, int note) {
+  patch.main_layer[1] = 65535;
+  double open = NoteRms(patch, note);
+  patch.main_layer[1] = 0;
+  double closed = NoteRms(patch, note);
+  return 20.0 * log10(closed / open);
+}
+
+
+// Retrigger click. A line of 8 notes, 125 ms apart, with SHAPE 1 (decay) at
+// 50 / 75 / 100 %, so each note is still loud when the next one starts.
+// OUT 1 goes through a 3 Hz high-pass, like an audio input. Measures the
+// largest one-sample jump in the 1 ms after each trigger: the first note
+// (from silence) against the worst retrigger. Also checks that from 5 ms on,
+// each note's peak-to-peak swing is within 5 % of the same note played alone (no stacking).
+std::vector<double> HighPass(const std::vector<float>& volts) {
+  std::vector<double> out(volts.size());
+  double x1 = 0, y1 = 0, r = 1.0 - 2 * M_PI * 3.0 / kHostRate;
+  for (size_t i = 0; i < volts.size(); ++i) {
+    double y = volts[i] - x1 + r * y1;
+    x1 = volts[i]; y1 = y;
+    out[i] = y;
+  }
+  return out;
+}
+
+double LargestJump(const std::vector<double>& y, size_t start, size_t length) {
+  double worst = 0;
+  for (size_t i = start + 1; i < start + length && i < y.size(); ++i) {
+    worst = fmax(worst, fabs(y[i] - y[i - 1]));
+  }
+  return worst;
+}
+
+double PeakToPeak(const std::vector<float>& v, size_t start, size_t length) {
+  double lo = 1e9, hi = -1e9;
+  for (size_t i = start; i < start + length && i < v.size(); ++i) {
+    lo = fmin(lo, v[i]);
+    hi = fmax(hi, v[i]);
+  }
+  return hi - lo;
+}
+
+bool RetriggerOk(uint8_t engine, uint16_t decay) {
+  Patch patch = { engine, 1, { decay, 32768, 32768, 19660 },
+                  { 9830, 16384, 22938, 0 } };
+  std::vector<Step> line = { {0}, {0}, {12}, {0}, {7}, {0}, {10}, {12} };
+  const double bpm = 120.0;  // 125 ms per step
+  Result r = Render(patch, line, bpm, 1);
+  std::vector<double> y = HighPass(r.raw);
+  double samples_per_step = kFirmwareRate * 60.0 / bpm / 4.0;
+  size_t ms = static_cast<size_t>(kHostRate / 1000.0);
+  double from_silence = 0, worst = 0, worst_level = 0;
+  bool level_ok = true;
+  for (size_t k = 0; k < line.size(); ++k) {
+    // Host sample of the first output of the trigger sample.
+    int64_t n = static_cast<int64_t>(ceil(k * samples_per_step));
+    size_t start = static_cast<size_t>(floor(n * kHostRate / kFirmwareRate));
+    double jump = LargestJump(y, start, ms);
+    if (k == 0) from_silence = jump; else worst = fmax(worst, jump);
+    // Same note alone.
+    std::vector<Step> alone(1, line[k]);
+    Result ra = Render(patch, alone, bpm, 1);
+    size_t length = static_cast<size_t>(samples_per_step * kHostRate / kFirmwareRate) - 6 * ms;
+    double a = PeakToPeak(ra.raw, 5 * ms, length);
+    double b = PeakToPeak(r.raw, start + 5 * ms, length);
+    double level = fabs(b / a - 1.0);
+    worst_level = fmax(worst_level, level);
+    level_ok = level_ok && level < 0.05;
+  }
+  bool ok = worst <= from_silence && level_ok;
+  printf("  %s decay %3d %%: from silence %.3f V, worst retrigger %.3f V (x%.1f), "
+         "level after 5 ms within %.1f %%  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", (decay * 100 + 32767) / 65535,
+         from_silence, worst, worst / from_silence, worst_level * 100,
+         ok ? "OK" : "FAIL");
+  return ok;
+}
+
 int main() {
   int failures = 0;
   Patch bt = { ENGINE_BT, 1, { 29491, 40632, 32768, 19661 },
@@ -397,6 +533,30 @@ int main() {
   printf("LFO depth at zero, speed turned: sound unchanged  %s\n",
          lfo_off_ok ? "OK" : "FAIL");
   failures += !lfo_off_ok;
+
+  for (uint8_t engine = 0; engine < 2; ++engine) {
+    failures += !PitchEnvelopeOk(engine);
+  }
+
+  printf("\nTone fully closed vs fully open, RMS over a note (must be >= -6 dB):\n");
+  for (int e = 0; e < 2; ++e) {
+    printf("  %s", e ? "LT" : "BT");
+    for (int v = 0; v <= 4; ++v) {
+      double db = ToneClosedDb(e ? lt : bt, v * 12);
+      bool ok = db >= -6.0;
+      printf("  %d V %+.1f dB%s", v, db, ok ? "" : " FAIL");
+      failures += !ok;
+    }
+    printf("\n");
+  }
+
+  printf("Retrigger click, largest one-sample jump in the 1 ms after a note:\n");
+  const uint16_t decays[3] = { 32768, 49152, 65535 };
+  for (uint8_t engine = 0; engine < ENGINE_LAST; ++engine) {
+    for (uint16_t decay : decays) {
+      failures += !RetriggerOk(engine, decay);
+    }
+  }
 
   bool mix_ok = MixScalingOk();
   printf("Loud output mix (noise 100 %%, hard hit): %s\n",
