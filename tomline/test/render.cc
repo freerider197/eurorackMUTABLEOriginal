@@ -355,8 +355,9 @@ bool LfoOffIsSilent(const std::vector<Step>& steps) {
 // noise off. One hit of C2; over the first 8 cycles, the 3rd
 // harmonic against the fundamental; in the tail (0.45 to 0.55 s, where the
 // note is about 25 dB down), the level against MOD 2 fully CCW. The tail must
-// get the small-signal gain of the drive (1 + 3 x knob^2), the start of the
-// hit must get more 3rd harmonic as the knob goes up.
+// get the small-signal gain of the drive (1 + 3 x knob^2) times the level
+// correction after the clipper, the start of the hit must get more 3rd
+// harmonic as the knob goes up.
 struct DistortionResult { double h3_db, tail_db; int32_t peak; };
 
 DistortionResult MeasureDistortion(uint8_t engine, uint16_t knob) {
@@ -392,11 +393,17 @@ DistortionResult MeasureDistortion(uint8_t engine, uint16_t knob) {
 
 bool DistortionOk(uint8_t engine) {
   const uint16_t knobs[3] = { 0, 32768, 65535 };
-  const double expected_tail[3] = { 0.0, 20 * log10(1.75), 20 * log10(4.0) };
+  double expected_tail[3] = { 0.0, 20 * log10(1.75), 20 * log10(4.0) };
   DistortionResult r[3];
-  for (int i = 0; i < 3; ++i) r[i] = MeasureDistortion(engine, knobs[i]);
-  uint16_t off_layer[4] = { 9146, 65535, 32768, 0 }, zero[4] = { 0, 0, 0, 0 };
+  uint16_t zero[4] = { 0, 0, 0, 0 };
   VoiceParameters p;
+  for (int i = 0; i < 3; ++i) {
+    r[i] = MeasureDistortion(engine, knobs[i]);
+    uint16_t layer[4] = { 9146, 65535, 32768, knobs[i] };
+    ComputeVoiceParameters(engine, 0, layer, zero, zero, LFO_TRIANGLE, &p);
+    if (i) expected_tail[i] += 20 * log10(p.distortion_gain / 4096.0);
+  }
+  uint16_t off_layer[4] = { 9146, 65535, 32768, 0 };
   ComputeVoiceParameters(engine, 0, off_layer, zero, zero, LFO_TRIANGLE, &p);
   bool ok = p.distortion == 0 && r[1].h3_db > r[0].h3_db + 1 &&
             r[2].h3_db > r[1].h3_db + 1 && r[2].h3_db > r[0].h3_db + 5;
@@ -523,6 +530,48 @@ bool WaveLevelOk(uint8_t engine) {
   }
   bool ok = lo > -1.0 && hi < 1.0;
   printf("Wave level %s, along the knob against off: %+.1f to %+.1f dB  %s\n",
+         engine == ENGINE_BT ? "BT" : "LT", lo, hi, ok ? "OK" : "FAIL");
+  return ok;
+}
+
+// Distortion level: RMS of the VCA words over the first 0.3 s of a C2 hit,
+// MOD 2 every 1/32 against fully CCW, for Decay every 1/8 and Wave off /
+// noon / full. Must stay within 1 dB: turning up MOD 2 changes the colour,
+// not the loudness.
+bool DistortionLevelOk(uint8_t engine) {
+  double lo = 0, hi = 0;
+  for (int d = 0; d <= 8; ++d) {
+    for (int w = 0; w < 3; ++w) {
+      double ref = 0;
+      for (int k = 0; k <= 32; ++k) {
+        uint16_t knob = k == 32 ? 65535 : k * 2048;
+        uint16_t main_layer[4] = {
+            static_cast<uint16_t>(d == 8 ? 65535 : d * 8192), 65535, 32768, knob };
+        uint16_t second[4] = {
+            0, 0, static_cast<uint16_t>(w == 2 ? 65535 : w * 32768), 0 };
+        uint16_t lfo[4] = { 0, 0, 0, 0 };
+        VoiceParameters p;
+        ComputeVoiceParameters(engine, 2, main_layer, second, lfo, LFO_TRIANGLE, &p);
+        Voice voice;
+        voice.Init();
+        uint16_t g, f;
+        for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+        double sum = 0;
+        const int n = static_cast<int>(0.3 * kFirmwareRate);
+        for (int i = 0; i < n; ++i) {
+          voice.Process(p, i == 0, 0, &g, &f);
+          double v = static_cast<double>(g) - 32767;
+          sum += v * v;
+        }
+        double db = 10 * log10(sum / n);
+        if (k == 0) ref = db;
+        lo = fmin(lo, db - ref);
+        hi = fmax(hi, db - ref);
+      }
+    }
+  }
+  bool ok = lo > -1.0 && hi < 1.0;
+  printf("Distortion level %s, MOD 2 along the knob against off (all decays, wave off / noon / full): %+.1f to %+.1f dB  %s\n",
          engine == ENGINE_BT ? "BT" : "LT", lo, hi, ok ? "OK" : "FAIL");
   return ok;
 }
@@ -912,6 +961,7 @@ int main() {
 
   for (uint8_t engine = 0; engine < 2; ++engine) {
     failures += !DistortionOk(engine);
+    failures += !DistortionLevelOk(engine);
   }
   for (uint8_t engine = 0; engine < 2; ++engine) {
     failures += !WaveOk(engine);

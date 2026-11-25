@@ -213,9 +213,11 @@ void Voice::Process(
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
   // Soft distortion (MOD 2) on the whole mix, after the envelope: the loud
   // start of a hit saturates, the quiet tail stays clean. |v| < 50000 here,
-  // so v * distortion (at most 10923) fits in 32 bits.
+  // so v * distortion (at most 10923) fits in 32 bits. Then a gain that keeps
+  // the hit as loud as the clean sound (|v| <= 32767, gain < 8192: fits).
   if (p.distortion) {
     v = SoftClip(v * p.distortion >> 12);
+    v = v * p.distortion_gain >> 12;
   }
   v = ScaleMix(v);
   // Crush (METER + SHAPE 1): the mix is sampled at a lower rate and held
