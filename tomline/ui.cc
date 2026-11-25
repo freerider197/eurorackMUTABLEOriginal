@@ -44,15 +44,19 @@ const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
 // there next needs its own flag in the same way. kFlagSnap: snap 0 is off and
 // 1 to 3 are 0.4, 1.5 and 4 ms; older records have 0 to 3 = 0.4, 1.5, 4 and
 // 10 ms, moved up one step (10 ms becomes 4 ms). An older Tomline plays this
-// record's snap one step longer.
+// record's snap one step longer. kFlagTune: LFO-layer SHAPE 2 is the tune
+// (it used to be the main SHAPE 2 knob, unsaved); older records hold an
+// unused leftover there, so tune starts fully down (C1 at 0 V).
 const uint8_t kFlagLfoFree = 0x01;
+const uint8_t kFlagTune = 0x10;
 const uint8_t kFlagSnap = 0x20;
 const uint8_t kFlagCrush = 0x40;
 const uint8_t kFlagWave = 0x80;
 const uint16_t kLfoLayerDefaults[KNOB_LAST] = {
   32768,  // LFO speed 1 Hz
   0,      // LFO depth off
-  0, 0    // unused
+  0,      // tune fully down: 0 V on EXCITE 2 plays C1
+  0       // unused
 };
 
 static inline int32_t Abs(int32_t x) { return x < 0 ? -x : x; }
@@ -70,7 +74,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     settings_.engine = ENGINE_BT;
     settings_.snap = 2;  // 1.5 ms
     settings_.lfo_shape = LFO_TRIANGLE;
-    settings_.flags = kFlagWave | kFlagCrush | kFlagSnap;
+    settings_.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune;
     copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
          &settings_.second_layer[0]);
     settings_.voct_offset = 0;
@@ -104,8 +108,11 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     if (settings_.snap > 3) settings_.snap = 1;
     settings_.snap = settings_.snap >= 2 ? 3 : settings_.snap + 1;
   }
+  if (!(settings_.flags & kFlagTune)) {
+    settings_.lfo_layer[KNOB_SHAPE_2] = kLfoLayerDefaults[KNOB_SHAPE_2];
+  }
   settings_.flags = (settings_.flags & kFlagLfoFree) | kFlagWave | kFlagCrush |
-      kFlagSnap;
+      kFlagSnap | kFlagTune;
   if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
   if (settings_.snap > 3) settings_.snap = 2;
   if (settings_.lfo_shape >= LFO_SHAPE_LAST) settings_.lfo_shape = LFO_TRIANGLE;
@@ -376,10 +383,13 @@ void Ui::OnButtonsCombo() {
   }
 }
 
-uint16_t* Ui::LayerValues(uint8_t layer) {
-  if (layer == 1) return settings_.second_layer;
-  if (layer == 2) return settings_.lfo_layer;
-  return main_layer_;
+// The value a knob sets on a page. Main page SHAPE 2 is the LFO depth, the
+// same value as FN 2 + MOD 1. Tune is FN 2 + SHAPE 2 (lfo_layer slot 2).
+uint16_t* Ui::KnobValue(uint8_t layer, uint8_t knob) {
+  if (layer == 1) return &settings_.second_layer[knob];
+  if (layer == 2) return &settings_.lfo_layer[knob];
+  if (knob == KNOB_SHAPE_2) return &settings_.lfo_layer[KNOB_MOD_1];
+  return &main_layer_[knob];
 }
 
 // FN 2 held wins over METER; METER held or latched wins over the main layer.
@@ -432,11 +442,11 @@ void Ui::ReadKnobs() {
     }
   }
 
-  uint16_t* values = LayerValues(layer_);
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
-    if (pickup_[i].Follow(pot_[i], elapsed, &values[i])) {
+    uint16_t* value = KnobValue(layer_, i);
+    if (pickup_[i].Follow(pot_[i], elapsed, value)) {
       parameters_dirty_ = true;
-      if (layer_) {
+      if (layer_ || i == KNOB_SHAPE_2) {  // saved values
         SettingsChanged();
       }
     }
@@ -445,8 +455,13 @@ void Ui::ReadKnobs() {
 
 void Ui::ComputeParameters() {
   VoiceParameters n;
+  // The voice reads tune from main SHAPE 2's slot; it is saved in the LFO
+  // layer now (FN 2 + SHAPE 2).
+  uint16_t main_layer[KNOB_LAST];
+  copy(&main_layer_[0], &main_layer_[KNOB_LAST], &main_layer[0]);
+  main_layer[KNOB_SHAPE_2] = settings_.lfo_layer[KNOB_SHAPE_2];
   ComputeVoiceParameters(
-      settings_.engine, settings_.snap, main_layer_, settings_.second_layer,
+      settings_.engine, settings_.snap, main_layer, settings_.second_layer,
       settings_.lfo_layer, settings_.lfo_shape, &n,
       (settings_.flags & kFlagLfoFree) != 0);
   // Copy field by field: each 32-bit store is atomic for the interrupt.

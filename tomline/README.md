@@ -36,7 +36,7 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 | Jack / control | Setting |
 |---|---|
 | EXCITE 1 | Trigger (on above about 1.7 V, off below 0.85 V, stock thresholds) |
-| EXCITE 2 | V/oct. 0 V = C2 (65.4 Hz) with SHAPE 2 (Tune) at noon |
+| EXCITE 2 | V/oct. 0 V = C1 (32.7 Hz) with Tune (FN 2 + SHAPE 2) fully down, the default; C2 at noon |
 | OUT 1 | The sound, swinging around +3.33 V (0 V to about +6.7 V, see "Offset"). Use an AC-coupled input (Erica Black Quad VCA2: IN 1–3, not IN 4) |
 | IN 1 | Not used, leave empty |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
@@ -52,11 +52,11 @@ blinks red.
 |---|---|---|
 | SHAPE 1 | Decay, 95 ms to 2.5 s | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | Not used (was the +1 octave; free for something new) |
-| SHAPE 2 | Tune, ±12 semitones. Noon = C2 at 0 V; the knob alone covers C1 to C3 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change |
-| MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer | Glide between notes (fully CCW = off) |
+| SHAPE 2 | LFO amount (pitch LFO depth): the same value as FN 2 + MOD 1, either knob sets it. Fully CCW = off | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change |
+| MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Glide between notes (fully CCW = off) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | |
-| FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones). SHAPE 2 and MOD 2 do nothing here | |
+| FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones), SHAPE 2 = Tune (±12 semitones; fully CCW = C1 at 0 V, noon = C2, saved, so a bump on the main page can't detune it). MOD 2 does nothing here | |
 | FN 2 held + tap METER | LFO wave: triangle / ramp up | |
 | FN 2 held + tap FN 1 | LFO restarts on each trigger (default) / free running | |
 | METER, tap | Latch / unlatch the second layer | |
@@ -78,14 +78,15 @@ always goes to pitch and is added after the glide. By default every trigger
 restarts it at the middle of its wave (no pitch jump, going up), so each hit
 gets the same pitch movement; free running, it ignores triggers.
 
-Engine, snap, the second-layer values (crush, wave, glide), LFO speed, depth, wave and free run, and the
+Engine, snap, the second-layer values (crush, wave, glide), LFO speed, depth, wave and free run, Tune, and the
 V/oct calibration are saved to flash 2 s after the last change. Settings saved
 by an older Tomline (before the LFO) are read once: engine, snap, second-layer
 values and V/oct calibration carry over, and the LFO starts off. Settings saved
 before the free-run option read as "restart on trigger". Settings saved before
 the wave start with the wave at sine (that slot held an unused old value);
 everything else carries over. Settings saved before Crush start with Crush
-off (that slot was the noise level; the noise is gone). A snap saved before
+off (that slot was the noise level; the noise is gone). Settings saved
+before Tune moved to FN 2 start with Tune fully down (C1 at 0 V). A snap saved before
 "off" existed keeps its length (10 ms becomes 4 ms). Going back to an older
 Tomline keeps all settings except free run, which reads as "restart on
 trigger", and plays the snap one step longer.
@@ -208,8 +209,8 @@ Check the stack after every firmware change:
 python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
 ```
 
-Last run: worst case 556 bytes (main loop 300, SysTick 100, audio interrupt
-156), 4096 reserved, 3540 to spare. The
+Last run: worst case 580 bytes (main loop 324, SysTick 100, audio interrupt
+156), 4096 reserved, 3516 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -240,13 +241,14 @@ closed keeps each note within 6 dB of Tone fully open (BT and LT, 0 to 4 V),
 and the Wave stages (sine, triangle, folded, square): the fundamental stays
 within 6 dB, the triangle has its 5th harmonic, the fold adds bright
 harmonics, the square has odd harmonics, and the level stays within 1 dB,
+that MOD 2 keeps the hit's level within 1 dB at every Decay and Wave,
 and Crush: the sample rate just past off, at noon and at full, and that the
 level stays, and that snap off has no click noise or pitch blip.
 It also checks that OUT 1 rests at 3.33 V, that its average level doesn't jump
 on a hit, and the power-up (0 V for 1 s, then a slow rise). It exits
 with an error if a check fails.
 
-Last run: OUT 1 between 0.02 V and 6.65 V, back to 3.330 V after the
+Last run: OUT 1 between 0.30 V and 6.49 V, back to 3.330 V after the
 notes. Attack jump (average over 100 ms after a hit minus before): BT -0.04 V,
 LT +0.05 V, BT with Tone closed and snap off +0.11 V (the moving lift of 0.4:
 +2.3 to +2.4 V). Power-up: OK. Pitch at 0, 1, 2 and 3 V within 0.1 cent of C2, C3, C4, C5. Tune
@@ -255,8 +257,10 @@ depth, 0.2-1.2 s, restart on trigger: triangle +1.71 st, ramp up +0.86 st; free
 running: triangle -10.30 st, ramp up -11.14 st (all within 0.03 st of the
 expected value). LFO restart on every trigger / free run: OK. LFO at zero depth:
 unchanged. Distortion (MOD 2 off / noon / full), 3rd harmonic at the start
-of a hit: BT -17.3 / -14.4 / -10.7 dB, LT -21.8 / -17.2 / -11.5 dB; the quiet
-tail +0.0 / +4.9 / +12.0 dB, as designed. Wave (sine / triangle / folded /
+of a hit: BT -16.8 / -14.1 / -10.6 dB, LT -21.6 / -17.1 / -11.4 dB; the quiet
+tail +0.0 / +1.8 / +6.0 dB against the hit, as designed. Hit level (first
+0.3 s) along MOD 2, every Decay and Wave: BT -0.9 to +0.3 dB, LT -0.7 to +1.0 dB
+(before the level correction: up to +6.6 dB). Wave (sine / triangle / folded /
 square), fundamental: BT +0.0 / -0.2 / -3.3 / -0.6 dB; level along the knob:
 BT -0.5 to +0.1 dB, LT -0.1 to +0.2 dB (without the level matching: about
 -1.7 to +1.6 dB); triangle 5th harmonic 1 s into a long note BT -36.1 dB (sine
@@ -280,7 +284,7 @@ Wave, is spikier than both ends).
 stand-ins for the drivers in `tomline/test/stub/`, and plays knob and button
 moves: pick-up on page changes, METER, FN 1 and FN 2 taps and holds with knobs
 turned, two buttons at once, offset and V/oct calibration, flash saves, older
-saved settings (the wave starts at sine), and
+saved settings (the wave starts at sine, tune at C1), SHAPE 2 as LFO amount and FN 2 + SHAPE 2 as tune, and
 LEDs that shift the knob readings (a model of the effect seen on the module):
 
 ```
@@ -288,7 +292,7 @@ g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tom
 ./build/tomline_panel
 ```
 
-Last run: all 52 checks OK. Without the LEDs-off reading, the model moves
+Last run: all 62 checks OK. Without the LEDs-off reading, the model moves
 untouched values on page changes; with it, nothing moves.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for 13

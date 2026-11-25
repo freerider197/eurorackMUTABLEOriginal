@@ -313,6 +313,34 @@ int main() {
   Tap(BUTTON_FN_1);
   Check(ui->mode_ == UI_MODE_NORMAL, "  ... FN 1 cancels it");
 
+  printf("SHAPE 2: LFO depth; FN 2 + SHAPE 2: tune\n");
+  Start();
+  Check(ui->settings_.lfo_layer[S2] == 0, "new module: tune fully down (C1 at 0 V)");
+  Check(ui->settings_.lfo_layer[M1] == 0, "  ... LFO depth off, SHAPE 2 at noon untouched");
+  stmlib::sim_settings_saves = 0;
+  Turn(S2, 50000, 400);
+  Ms(2500);
+  Check(Near(ui->settings_.lfo_layer[M1], 50000) && stmlib::sim_settings_saves == 1,
+        "SHAPE 2 turned: LFO depth follows, saved");
+  Down(BUTTON_FN_2);
+  Turn(M1, 20000, 400);
+  Up(BUTTON_FN_2);
+  Check(Near(ui->settings_.lfo_layer[M1], 20000), "FN 2 + MOD 1 sets the same LFO depth");
+  Ms(300);
+  Check(Near(ui->settings_.lfo_layer[M1], 20000), "  ... kept on the main page until SHAPE 2 is turned");
+  Down(BUTTON_FN_2);
+  Turn(S2, 10000, 400);
+  Up(BUTTON_FN_2);
+  Check(Near(ui->settings_.lfo_layer[S2], 10000) && Near(ui->settings_.lfo_layer[M1], 20000),
+        "FN 2 + SHAPE 2: tune follows, depth unchanged");
+  Ms(300);
+  Check(ui->parameters_.tune == static_cast<int32_t>(
+            (12.0f + (ui->settings_.lfo_layer[S2] / 65535.0f - 0.5f) * 24.0f) * 65536.0f),
+        "  ... the voice plays that tune");
+  Turn(S2, 40000, 400);
+  Check(Near(ui->settings_.lfo_layer[S2], 10000) && Near(ui->settings_.lfo_layer[M1], 40000),
+        "SHAPE 2 on the main page: depth moves, tune stays");
+
   printf("Saving\n");
   Start();
   Ms(3000);
@@ -338,7 +366,7 @@ int main() {
   Ms(2500);
   Check(Near(ui->settings_.second_layer[S2], 50000) && stmlib::sim_settings_saves == 1,
         "METER held, SHAPE 2 turned: wave follows the knob, saved");
-  Check(ui->main_layer_[S2] == 32768, "  ... tune unchanged");
+  Check(ui->settings_.lfo_layer[S2] == 0, "  ... tune unchanged");
   Settings old_record;
   memset(&old_record, 0, sizeof(old_record));
   old_record.engine = ENGINE_LT;
@@ -375,6 +403,11 @@ int main() {
   old_record.flags = kFlagWave | kFlagCrush | kFlagSnap;
   Start();
   Check(ui->settings_.snap == 0, "settings saved with snap off: off kept");
+  Check(ui->settings_.lfo_layer[S2] == 0, "  ... saved before tune was saved: tune fully down");
+  old_record.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune;
+  old_record.lfo_layer[S2] = 30000;
+  Start();
+  Check(ui->settings_.lfo_layer[S2] == 30000, "settings saved with a tune: kept");
   stmlib::sim_settings_record = NULL;
 
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);

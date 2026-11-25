@@ -4,7 +4,8 @@
 //
 //   SHAPE 1   decay               | with METER: crush        | FN 2 held: LFO speed
 //   MOD 1     tone (filter env)   | with METER: unused       | FN 2 held: LFO depth
-//   SHAPE 2   tune, +/-12 st (C2) | with METER: wave         |
+//   SHAPE 2   LFO depth (same     | with METER: wave         | FN 2 held: tune,
+//             value as FN 2+MOD 1)|                          |   +/-12 st, saved
 //   MOD 2     soft distortion     | with METER: glide        |
 //   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
 //             each trigger (default) / free running.
@@ -60,11 +61,11 @@ struct Settings {
   uint8_t engine;
   uint8_t snap;
   uint8_t lfo_shape;
-  uint8_t flags;     // kFlagLfoFree, kFlagCrush, kFlagWave (was padding, so 0)
+  uint8_t flags;     // kFlagLfoFree, kFlagTune, kFlagSnap, kFlagCrush, kFlagWave
   uint16_t second_layer[KNOB_LAST];  // crush, unused (was +1 octave), wave, glide
   int32_t voct_offset;  // EXCITE 2 counts at 0 V
   int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
-  uint16_t lfo_layer[KNOB_LAST];  // SHAPE 1 speed, MOD 1 depth; others unused
+  uint16_t lfo_layer[KNOB_LAST];  // SHAPE 1 speed, MOD 1 depth, SHAPE 2 tune
   uint32_t magic;
 };
 
@@ -129,7 +130,7 @@ class Ui {
   void HoldKnobs();
   void UpdateLayer(bool hold_knobs);
   void SettingsChanged();
-  uint16_t* LayerValues(uint8_t layer);
+  uint16_t* KnobValue(uint8_t layer, uint8_t knob);
   void ComputeParameters();
   void CheckSetup();
   void PaintLeds();
