@@ -7,6 +7,7 @@
 //       tomline/voice.cc tomline/parameters.cc; ./build/tomline_panel
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -90,6 +91,45 @@ void Start(int32_t shape_1 = 32768, int seed = 1) {
   stmlib::system_clock.Init();
   ui->Init(&adc, &cv_scaler);
   Ms(100);
+}
+
+// LEVEL 2 model. The CV through LEVEL MOD 2 asks channel 2's VCA for `gain`
+// (1 = unity); the sense line is the 2164 control voltage, 33 mV per dB of
+// attenuation, clamped to 0 .. 3.3 V, read by a 12-bit ADC (16 counts per
+// step) with +/- `noise` counts of noise. Gain 0 = nothing patched: nulled.
+int32_t SenseFor(double gain, int32_t noise = 0) {
+  double counts = gain > 0 ? -20.0 * log10(gain) * 0.033 / 3.3 * 65536 : 65535;
+  int32_t sense = static_cast<int32_t>(counts);
+  if (noise) sense += rand() % (2 * noise + 1) - noise;
+  sense = std::max(0, std::min(65535, sense)) & ~15;
+  return sense;
+}
+
+// n ms of audio-rate samples (8 per SysTick, 32 kHz) with LEVEL 2 at `gain`.
+void Level2(double gain, int ms, int32_t noise = 0) {
+  for (int i = 0; i < ms * 4; ++i) {
+    for (int k = 0; k < 8; ++k) {
+      ui->OnSample(false, 0, 60000, 0, 0, SenseFor(gain, noise));
+    }
+    ui->Poll();
+    ui->DoEvents();
+  }
+}
+
+// The right column as painted now: green and red of each row, top first.
+void RightColumn(uint8_t* green, uint8_t* red) {
+  ui->PaintLeds();
+  for (int row = 0; row < 4; ++row) {
+    green[row] = ui->leds_.green_[4 + row];
+    red[row] = ui->leds_.red_[4 + row];
+  }
+}
+
+bool RightColumnDark() {
+  uint8_t g[4], r[4];
+  RightColumn(g, r);
+  for (int row = 0; row < 4; ++row) if (g[row] || r[row]) return false;
+  return true;
 }
 
 bool Near(int32_t value, int32_t target, int32_t margin = 200) {
@@ -496,6 +536,174 @@ int main() {
   Ms(100);
   Check((ui->settings_.flags & kFlagLfoFree) != (flags & kFlagLfoFree),
         "METER page, FN 1 tap: LFO free run still toggles");
+
+  printf("LEVEL 2 meter (FN 2 held, right column)\n");
+  Start();
+  Check(SenseToLevel(0) == 65536 && SenseToLevel(kSenseCountsPerOctave) == 32768 &&
+        SenseToLevel(2 * kSenseCountsPerOctave) == 16384 && SenseToLevel(65535) == 0,
+        "sense to level: 0 = unity, each 3945 counts halve it, nulled = 0");
+  Down(BUTTON_FN_2);
+  Level2(0, 100);
+  Check(ui->layer_ == 2 && ui->level_2() == 0 && RightColumnDark(),
+        "nothing patched (VCA sense nulled): level 0, right column dark");
+  {
+    // 0 to 5 V, with 5 V asking for unity gain.
+    double worst = 0;
+    bool rising = true;
+    int32_t last = -1;
+    for (int mv = 0; mv <= 5000; mv += 250) {
+      Level2(mv / 5000.0, 30);
+      int32_t level = ui->level_2();
+      worst = std::max(worst, fabs(level / 65536.0 - mv / 5000.0));
+      rising = rising && level > last;
+      last = level;
+    }
+    char text[120];
+    snprintf(text, sizeof(text), "0 to 5 V in 0.25 V steps: rises every step, off by %.2f %% at most",
+             worst * 100);
+    Check(rising && worst < 0.005, text);
+  }
+  {
+    uint8_t g[4], r[4];
+    Level2(0.5, 30);
+    RightColumn(g, r);
+    Check(!g[0] && !g[1] && g[2] == 255 && g[3] == 255 && !r[0],
+          "2.5 V: the bottom two LEDs green, the top two dark");
+    Level2(0.9, 30);
+    RightColumn(g, r);
+    Check(g[1] == 255 && g[2] == 255 && g[3] == 255 && g[0] > 100 && g[0] < 200 && !r[0],
+          "4.5 V: three LEDs, the top one dimmer");
+    Level2(0.1, 30);
+    RightColumn(g, r);
+    Check(!g[0] && !g[1] && !g[2] && g[3] > 70 && g[3] < 120,
+          "0.5 V: the bottom LED dim, the rest dark");
+    Level2(1.2, 30);
+    RightColumn(g, r);
+    Check(r[0] == 255 && g[1] == 255 && g[2] == 255 && g[3] == 255,
+          "too much (past unity, the sense at its clamp): top LED red");
+    Level2(0.94, 30);
+    RightColumn(g, r);
+    Check(!r[0] && g[0] > 150, "  ... just under unity: still green");
+  }
+  {
+    // ADC noise of +/- 3 steps of the 12-bit converter.
+    bool steady = true;
+    for (int i = 0; i < 2 && steady; ++i) {
+      double gain = i ? 0.1 : 0.5;
+      Level2(gain, 30, 48);
+      int32_t low = 1 << 20, high = -1;
+      int low_brightness = 255, high_brightness = 0;
+      for (int t = 0; t < 500; ++t) {
+        Level2(gain, 1, 48);
+        int32_t level = ui->level_2();
+        low = std::min(low, level);
+        high = std::max(high, level);
+        uint8_t g[4], r[4];
+        RightColumn(g, r);
+        int b = i ? g[3] : g[2];
+        low_brightness = std::min(low_brightness, b);
+        high_brightness = std::max(high_brightness, b);
+      }
+      steady = steady && high - low < 328 && high_brightness - low_brightness <= 32;
+    }
+    Check(steady, "ADC noise (+/- 3 steps) at 2.5 V and 0.5 V: moves under 0.5 %, no LED flicker");
+  }
+  {
+    Level2(0, 100);
+    int settle = 0;
+    for (int t = 1; t <= 100 && !settle; ++t) {
+      Level2(1.0 * 0.99, 1);
+      if (ui->level_2() > 65536 * 0.98) settle = t;
+    }
+    char text[120];
+    snprintf(text, sizeof(text), "0 V to 5 V in one step: on the new value in %d ms", settle);
+    Check(settle && settle <= 20, text);
+  }
+  {
+    uint8_t snap = ui->settings_.snap;
+    uint16_t tune = ui->settings_.lfo_layer[KNOB_SHAPE_2];
+    int saves = stmlib::sim_settings_saves;
+    for (int t = 0; t < 2000; t += 50) Level2((t % 1000) / 1000.0, 50);
+    Up(BUTTON_FN_2);
+    Ms(2500);
+    Check(ui->settings_.snap == snap && ui->settings_.lfo_layer[KNOB_SHAPE_2] == tune &&
+          stmlib::sim_settings_saves == saves,
+          "FN 2 held 2 s with a moving CV: snap, tune and saved settings untouched");
+  }
+  {
+    uint8_t g[4], r[4];
+    Level2(0.9, 30);
+    RightColumn(g, r);
+    Check(ui->layer_ == 0 && !g[0] && !g[1] && g[2] && g[3] && !r[0],
+          "main page with 4.5 V on LEVEL 2: right column still shows the snap");
+    Tap(BUTTON_METER);
+    Level2(0.9, 30);
+    RightColumn(g, r);
+    Check(ui->layer_ == 1 && !g[3], "  ... METER page: still the LFO, no meter");
+    Tap(BUTTON_METER);
+    Down(BUTTON_FN_1);
+    Level2(0.9, 30);
+    Check(ui->layer_ == 3 && RightColumnDark(), "  ... FN 1 page: the kick meter only (no kick: dark)");
+    Up(BUTTON_FN_1);
+  }
+
+  printf("Wave CV (LEVEL 2 adds to SHAPE 2)\n");
+  {
+    // The voice's wave fields match ComputeWaveParameters for wave w.
+    auto plays = [](int32_t w) {
+      VoiceParameters n;
+      ComputeWaveParameters(w, &n);
+      const VoiceParameters& p = ui->parameters_;
+      return p.wave_tri == n.wave_tri && p.wave_fold == n.wave_fold &&
+             p.fold_gain == n.fold_gain && p.wave_square == n.wave_square &&
+             p.wave_gain == n.wave_gain;
+    };
+    Start();
+    Level2(0, 100);
+    Check(ui->Wave() == 0 && plays(0), "nothing patched: the wave is the knob's (sine)");
+    Level2(0.5, 50);
+    Check(Near(ui->Wave(), 32768, 400) && plays(ui->Wave()),
+          "knob at sine, 2.5 V: the voice plays the wave half way (folded)");
+    Turn(S2, 20000, 400);
+    Check(Near(ui->settings_.second_layer[S2], 20000) && Near(ui->Wave(), 52768, 500) &&
+          plays(ui->Wave()), "SHAPE 2 turned to 20000: knob plus CV, the knob's value saved");
+    Level2(1.0, 50);
+    Check(ui->Wave() == 65535 && plays(65535) && ui->parameters_.wave_square == 32768,
+          "5 V on top: stops at fully CW (square)");
+    Level2(0, 100);
+    Check(ui->Wave() == ui->settings_.second_layer[S2] && plays(ui->Wave()),
+          "CV back to 0 V: exactly the knob again");
+    int settle = 0;
+    for (int t = 1; t <= 100 && !settle; ++t) {
+      Level2(0.5, 1);
+      if (Near(ui->Wave(), ui->settings_.second_layer[S2] + 32768, 660) && plays(ui->Wave()))
+        settle = t;
+    }
+    char text[120];
+    snprintf(text, sizeof(text), "0 V to 2.5 V in one step: the wave follows in %d ms", settle);
+    Check(settle && settle <= 20, text);
+    {
+      int32_t low = 65535, high = 0;
+      Level2(0.3, 50, 48);  // settle first
+      for (int t = 0; t < 500; ++t) {
+        Level2(0.3, 1, 48);
+        low = std::min<int32_t>(low, ui->Wave());
+        high = std::max<int32_t>(high, ui->Wave());
+      }
+      Check(high - low < 328, "ADC noise (+/- 3 steps) at 1.5 V: the wave moves under 0.5 %");
+    }
+    Ms(3000);
+    int saves = stmlib::sim_settings_saves;
+    uint16_t knob = ui->settings_.second_layer[S2];
+    for (int t = 0; t < 3000; t += 10) Level2((t % 1000) / 1000.0, 10);
+    Ms(3000);
+    Check(stmlib::sim_settings_saves == saves && ui->settings_.second_layer[S2] == knob,
+          "3 s of a moving CV: nothing saved, the knob's value kept");
+    Level2(0.5, 50);
+    Tap(BUTTON_FN_1);  // engine: a full parameter update
+    Check(ui->settings_.engine == ENGINE_LT && plays(ui->Wave()) &&
+          Near(ui->Wave(), knob + 32768, 500), "engine switched with the CV on: the wave keeps the CV");
+  }
 
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);
   return failures ? 1 : 0;

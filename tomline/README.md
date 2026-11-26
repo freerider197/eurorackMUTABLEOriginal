@@ -42,7 +42,10 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 | IN 2 | Optional: kick audio (a copy from a mult) for the sidechain duck. Only listened to, never sent to OUT 1 |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
 | LEVEL MOD 1 (big magenta knob) | **Fully counter-clockwise** |
-| LEVEL 1, LEVEL 2, OUT 2, LEVEL MOD 2, trimmer 2 | Not used |
+| LEVEL 2 | Optional: Wave CV, 0 to +5 V. Adds to SHAPE 2: the knob sets where the wave starts, the CV moves it toward fully CW (square) and it stops there. The FN 2 page meter shows it |
+| LEVEL MOD 2 | How much the LEVEL 2 CV moves the wave. With +5 V, about 2 o'clock = the whole range (the meter just full, not red). **Fully counter-clockwise when LEVEL 2 is empty**: the jack's +10 V normal would move the wave on its own |
+| Channel 2 response trimmer | **Fully clockwise (LIN)**, for the LEVEL 2 CV |
+| LEVEL 1, OUT 2 | Not used |
 
 If LEVEL MOD 1 or the channel 1 trimmer is set wrong, LED 3 of the left column
 blinks red.
@@ -53,12 +56,12 @@ blinks red.
 |---|---|---|
 | SHAPE 1 | Decay, 95 ms to 2.5 s. **FN 2 held: Tune**, ±12 semitones; fully CCW = C1 at 0 V (the default), noon = C2. Saved, so a bump on the main page can't detune it | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve). **FN 2 held: Glide** between notes (fully CCW = off) | Pitch LFO amount (depth): fully CCW = off, up to ±12 semitones |
-| SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change | Pitch sweep. Fully CCW = off (the default); turning up makes each hit start higher, up to +12 semitones at fully CW (+3 at noon), and fall back to the note with a 20 ms time constant, so the held note stays in tune |
+| SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change. A CV on LEVEL 2 adds to it (see the jack table) | Pitch sweep. Fully CCW = off (the default); turning up makes each hit start higher, up to +12 semitones at fully CW (+3 at noon), and fall back to the note with a 20 ms time constant, so the held note stays in tune |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Pitch LFO speed, 0.05 to 20 Hz (1 Hz at noon) |
 | FN 1 (left button), tap | Engine: BT / LT | LFO restarts on each trigger (default) / free running |
 | FN 1, hold | Duck layer, from the main or the METER page: **SHAPE 2 = Duck depth** (fully CCW = off, the default; fully CW = the bass is silent at the kick's peak). **MOD 2 = Release**: counted from each kick hit, the bass is fully back 40 ms later at fully CCW, 180 ms at noon, 0.8 s at fully CW (sooner if the kick is shorter). The kick is patched into IN 2. SHAPE 1 and MOD 1 do nothing here. A tap without a turn still does its job | |
 | FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | LFO wave: triangle / ramp up. FN 2 doesn't open its own page from here |
-| FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. Nothing else (SHAPE 2, MOD 2, FN 1 and METER do nothing here). Everything LFO lives on the METER page | |
+| FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. Nothing else (SHAPE 2, MOD 2, FN 1 and METER do nothing here). Everything LFO lives on the METER page. The right column is the LEVEL 2 meter (see "LEDs"); hold FN 2 longer than 1 s to watch it, or the release counts as a snap tap | |
 | METER, tap | Latch / unlatch the second layer | |
 | METER, hold 3 s without turning a knob | Stock offset calibration (see Calibration) | |
 | FN 1 + FN 2, hold 1 s | V/oct calibration | |
@@ -118,7 +121,7 @@ its defaults), not later changes.
 | Engine and snap LEDs amber instead of green | Second layer active |
 | METER page: right column top (triangle) or 2nd (ramp up) pulsing amber | LFO wave; the pulse follows the LFO, so its speed shows even at zero amount |
 | METER page: right column 3rd LED amber | LFO free running (off = restarts on each trigger) |
-| FN 2 held: engine LED red, right column off | Tune and glide page |
+| FN 2 held: engine LED red, right column a green meter from the bottom | Tune and glide page. The meter shows the Wave CV read on LEVEL 2. No LED = 0 V, more CV = more LEDs, the top one partly lit. All four = the CV moves the wave across its whole range; the top LED red = more than can be read (turn LEVEL MOD 2 down) |
 | FN 1 held: engine LED yellow, right column a red meter from the bottom | Duck page; the meter shows the kick heard on IN 2 (all four = full duck at full depth), even with the depth at zero, so you can check the patch |
 
 ## Offset
@@ -182,7 +185,7 @@ Every row below was read from the code in `streams/` and the schematic
 | VCA control sense | Op-amp output via 1k + BAT54S clamp, PA4 / PA5 | `cv_scaler.raw_gain_sample(0/1)`; above 59000 = VCA closed | `ui.cc` calibration |
 | VCA gain (DAC) | DAC8552 on SPI2 (PB13/PB15/PB12). `dac.Write(0)` = output B = channel 1, `Write(1)` = output A = channel 2. Two RC stages after the DAC (1k/10 nF, 10k/1 nF, about 16 kHz each) | `dac.Write(ch, cv_scaler.ScaleGain(ch, word))` | `drivers/dac.h`, schematic sheet 1 |
 | VCA law | 2164 cell in the control op-amp's feedback. Response trimmer at LIN: gain = word / 32767 (max 2x at 65535). Toward EXP: gain = (word/32767)^n, n up to about 20 | | `gain.h`, schematic IC5B/IC8C |
-| LEVEL input | Current into the same VCA control node through LEVEL MOD. Normalled to +10 V through 24.9k. Not readable directly, only through the sense line | | schematic R34, R32, R60 |
+| LEVEL input | Current into the same VCA control node through LEVEL MOD. Normalled to +10 V through 24.9k. Not readable directly, only through the sense line. LEVEL 2 is read that way (channel 2's VCA word stays at zero): about 33 mV per dB with trimmer 2 at LIN, from the 2164 data. On the module (v17) the meter follows LEVEL MOD 2 and a CV, and +5 V fills it at LEVEL MOD 2 about 2 o'clock | `ui.level_2()`, `SenseToLevel()`, `Ui::Wave()` in `ui.cc` | schematic R34, R32, R60 |
 | Filter | Two cascaded 1-pole low-pass stages built from 2164 cells, no resonance, DC gain 1 | | schematic IC8A/IC8B, IC7 |
 | Filter cutoff | TIM1 CH3 (PA10) / CH4 (PA11), 10-bit PWM at 70 kHz, firmware smoothing 1/16 per sample, then RC 1.2k/680 nF (195 Hz) into the 2164 control pins | `pwm.Write(ch, 65535 - frequency)`: 65535 = open | `drivers/pwm.h`, schematic R4/C6, R5/C7 |
 | OUT 1 / OUT 2 | TL072 through 1k, DC-coupled | | schematic J6 |
@@ -228,8 +231,8 @@ Check the stack after every firmware change:
 python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
 ```
 
-Last run: worst case 620 bytes (main loop 348, SysTick 100, audio interrupt
-172), 4096 reserved, 3476 to spare. The
+Last run: worst case 652 bytes (main loop 380, SysTick 100, audio interrupt
+172), 4096 reserved, 3444 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -260,6 +263,8 @@ closed keeps each note within 6 dB of Tone fully open (BT and LT, 0 to 4 V),
 and the Wave stages (sine, triangle, folded, square): the fundamental stays
 within 6 dB, the triangle has its 5th harmonic, the fold adds bright
 harmonics, the square has odd harmonics, and the level stays within 1 dB,
+that the wave fields ui.cc sends alone when the LEVEL 2 CV moves are the same
+as the full parameter maths gives (256 points along the knob),
 that MOD 2 keeps the hit's level within 1 dB at every Decay and Wave,
 and Crush: the sample rate just past off, at noon and at full, and that the
 level stays, and that snap off has no click noise or pitch blip,
@@ -318,7 +323,8 @@ Wave, is spikier than both ends).
 stand-ins for the drivers in `tomline/test/stub/`, and plays knob and button
 moves: pick-up on page changes, METER, FN 1 and FN 2 taps and holds with knobs
 turned, two buttons at once, offset and V/oct calibration, flash saves, older
-saved settings (the wave starts at sine, tune at C1), the knob map (SHAPE 2 wave; METER + MOD 1 / MOD 2 LFO amount / speed; FN 2 + SHAPE 1 / MOD 1 tune / glide), and
+saved settings (the wave starts at sine, tune at C1), the knob map (SHAPE 2 wave; METER + MOD 1 / MOD 2 LFO amount / speed; FN 2 + SHAPE 1 / MOD 1 tune / glide),
+the LEVEL 2 meter and Wave CV (a model of the sense line: 33 mV per dB, 12-bit ADC, noise), and
 LEDs that shift the knob readings (a model of the effect seen on the module):
 
 ```
@@ -326,8 +332,13 @@ g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tom
 ./build/tomline_panel
 ```
 
-Last run: all 83 checks OK (FN 1 held + SHAPE 2 / MOD 2 set the duck, a
-tap still does its job, records from before the duck carry over). Without the LEDs-off reading, the model moves
+Last run: all 106 checks OK (FN 1 held + SHAPE 2 / MOD 2 set the duck, a
+tap still does its job, records from before the duck carry over; the LEVEL 2
+meter: dark with nothing patched, 0 to 5 V read within 0.33 %, steady with
+ADC noise, settled 14 ms after a step, red past the top, and only on the FN 2
+page; the Wave CV: knob plus CV, stops at fully CW, back to exactly the knob
+at 0 V, follows a step in 13 ms, moves under 0.5 % with ADC noise, never
+saved, kept through an engine switch). Without the LEDs-off reading, the model moves
 untouched values on page changes; with it, nothing moves.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for 16
