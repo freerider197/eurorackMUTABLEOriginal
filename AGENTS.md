@@ -61,6 +61,7 @@ node tomline/test/compare_browser.js
 | `tomline/browser/` | Browser model: `tomline.html` (shared online version), `index.html` (standalone copy) |
 | `tomline/test/words.cc`, `compare_browser.js` | Check the browser model against the firmware |
 | `tomline/release/` | Released `.bin` / `.wav`, plus the stock `streams_1.01_original.wav` to go back |
+| `tomline/VERSIONS.md` | Every build handed to the owner (v01, v02...), its commit and the next free number |
 | `streams/`, `stmlib/`, `stm_audio_bootloader/` | Stock code Tomline builds on |
 | Other module folders | Upstream Mutable Instruments code; not part of this project |
 
@@ -74,8 +75,9 @@ node tomline/test/compare_browser.js
   0x0801FC00. Moving these can brick an update or wipe the owner's calibration.
 - Keep the encoder settings (`-s 48000 -b 12000 -c 6000 -p 256`): the Streams bootloader expects them.
 - Never delete or overwrite `tomline/release/streams_1.01_original.wav`; it is the way back to stock.
-- Only add a new file to `tomline/release/` when the owner asks for a release. Use the next version number; never
-  overwrite an old one.
+- Only add a new file to `tomline/release/` when the owner asks for a release. Release the build the owner tried, under
+  its own build number (`tomline-vNN.wav` / `.bin`, see "Build numbers"); never overwrite an old one. The older
+  `tomline-0.1`–`0.4` files stay as they are.
 - Don't add packages, downloads or network calls without asking.
 
 ## Scope and workflow
@@ -119,5 +121,16 @@ Keep it short. Use exactly these sections:
   highlighted and labelled with what they do, one view per layer. Current one: https://claude.ai/artifact/U51rhAbef4VycZWjVJHTs3;
   update it after every control change.
 - Hand over a new `.wav` with the flashing steps from `tomline/README.md` ("Flashing") every time, even if not asked.
-  Never hand over a plain `tomline.wav`: copy it to `build/tomline/tomline-test-<topic>-<short commit>.wav` and send that,
-  so the owner can tell test builds apart.
+  Name it as in "Build numbers" below.
+
+## Build numbers (the owner's rule)
+
+Every `.wav` you hand over gets the next number: v14, v15, v16... The owner finds the latest by the highest number.
+
+- Take the number from "Next build" in `tomline/VERSIONS.md` on the newest `tomline-firmware`. If the owner gave you a
+  number, use that one instead.
+- Copy `build/tomline/tomline.wav` to `build/tomline/tomline-vNN-<topic>.wav` (e.g. `tomline-v15-gain-staging.wav`) and
+  hand over that. Never put a commit code, date or "test" in the file name: the commit goes in the `VERSIONS.md` row and
+  in your message.
+- In the same PR, add the row to `VERSIONS.md` and raise "Next build" by one. Two sessions at once can pick the same
+  number: if an open PR already claims yours, take the next free one and say so.

@@ -176,8 +176,8 @@ Every row below was read from the code in `streams/` and the schematic
 
 ## Unverified (needs a real module)
 
-Heard on the module by the owner: the soft-distortion build (test file
-`tomline-test-distortion-5d530a7.wav`, merged in #24) flashed and sounded good.
+Heard on the module by the owner: the soft-distortion build (v10,
+`tomline-v10-distortion.wav`, commit 5d530a7, merged in #24) flashed and sounded good.
 Not measured yet:
 
 - Peak output level (about 6.7 V expected, from gain.h and the schematic).
