@@ -11,7 +11,8 @@
 //             trigger (default) / free running.
 //             Held (not on the FN 2 page): duck layer. SHAPE 2 = sidechain
 //             duck depth, MOD 2 = release (the kick goes into IN 2).
-//   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: tune and glide layer.
+//   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: tune and glide layer;
+//             its right column is a meter of the CV read on LEVEL 2 (test).
 //             On the METER page: LFO wave, triangle / ramp up.
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
 //             Hold 3 s without turning a knob: stock offset calibration.
@@ -110,6 +111,10 @@ class Ui {
   inline const VoiceParameters& parameters() const { return parameters_; }
   inline bool calibrating() const { return mode_ == UI_MODE_OFFSET_CALIBRATION; }
 
+  // The gain that the LEVEL 2 CV alone asks of channel 2's VCA, Q16
+  // (65536 = unity, the top of the readable range).
+  int32_t level_2() const;
+
   inline int32_t Pitch(int16_t excite_2) {
     int32_t counts = excite_2;
     if (mode_ >= UI_MODE_VOCT_CALIBRATION_1V) {
@@ -121,10 +126,15 @@ class Ui {
     return pitch_;
   }
 
+  // level_2_sense: channel 2's VCA sense line, which carries the LEVEL 2 CV.
   inline void OnSample(bool trigger, uint16_t gain, uint16_t sense,
-                       uint32_t lfo_phase, int32_t duck_level = 0) {
+                       uint32_t lfo_phase, int32_t duck_level = 0,
+                       uint16_t level_2_sense = 65535) {
     lfo_phase_ = lfo_phase;
     duck_level_ = duck_level;
+    // About 2 ms of smoothing, 8 extra bits.
+    level_2_sense_ += ((static_cast<int32_t>(level_2_sense) << 8) -
+                       level_2_sense_) >> 6;
     if (trigger) {
       trigger_flash_ = 100;  // 25 ms at 4 kHz
     }
@@ -200,6 +210,7 @@ class Ui {
   volatile uint16_t trigger_flash_;
   volatile uint32_t lfo_phase_;
   volatile int32_t duck_level_;  // kick heard on IN 2, 0 .. 32767
+  volatile int32_t level_2_sense_;  // channel 2's VCA sense, smoothed, << 8
   volatile uint32_t idle_samples_;
   volatile uint32_t idle_open_samples_;
   volatile uint32_t mid_samples_;

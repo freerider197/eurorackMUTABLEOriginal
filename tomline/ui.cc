@@ -68,6 +68,28 @@ const uint16_t kDuckLayerDefaults[2] = {
 
 static inline int32_t Abs(int32_t x) { return x < 0 ? -x : x; }
 
+// LEVEL 2 has no ADC input of its own: through LEVEL MOD 2 it adds current to
+// channel 2's VCA control node, and the op-amp there turns the total current
+// into the 2164's control voltage, which the ADC reads on the sense line.
+// Channel 2's VCA word stays at zero (nulled), so the current is the LEVEL 2
+// CV alone. With response trimmer 2 at LIN, the control voltage is the log of
+// the current: 0 V = unity gain, about 33 mV per dB of attenuation (2164
+// data), clamped to 0 .. 3.3 V. 6.02 dB * 33 mV * 65536 / 3.3 V = 3945 counts
+// halve the gain. Nominal: not yet checked on the module.
+const int32_t kSenseCountsPerOctave = 3945;
+// The top of the meter: within about 0.4 dB of unity, where the sense line
+// reaches its clamp and more CV no longer reads.
+const int32_t kLevel2Top = 63000;
+
+// Sense counts to the gain they stand for, Q16 (65536 = unity, at 0 counts).
+int32_t SenseToLevel(int32_t sense) {
+  if (sense <= 0) return 65536;
+  int32_t x = sense * 256 / kSenseCountsPerOctave;  // octaves down, Q8
+  int32_t octaves = x >> 8;
+  if (octaves >= 16) return 0;
+  return lut_exp2_q30[256 - (x & 255)] >> (15 + octaves);
+}
+
 // ----------------------------------------------------------------------------
 
 void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
@@ -173,6 +195,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   fn1_held_ = false;
   fn1_with_fn2_ = false;
   duck_level_ = 0;
+  level_2_sense_ = 65535 << 8;
 
   mode_ = UI_MODE_NORMAL;
   settings_dirty_ = false;
@@ -558,6 +581,10 @@ void Ui::CheckSetup() {
   idle_samples_ = idle_open_samples_ = mid_samples_ = mid_closed_samples_ = 0;
 }
 
+int32_t Ui::level_2() const {
+  return SenseToLevel(level_2_sense_ >> 8);
+}
+
 void Ui::SaveSettings() {
   settings_storage.ParsimoniousSave(settings_, &version_token_);
   settings_dirty_ = false;
@@ -679,7 +706,21 @@ void Ui::PaintLeds() {
     return;
   }
   if (layer_ == 2) {
-    return;  // FN 2 page: tune and glide only, right column off
+    // FN 2 page (tune and glide), right column: a meter of the CV on LEVEL 2,
+    // for the LEVEL 2 test. Green from the bottom, each LED a quarter of the
+    // readable range, the top one partly lit dimmer, in the LED driver's
+    // eighths (31, 63 .. 255). The top LED turns red when the reading is at
+    // the end of its range (unity gain or more).
+    int32_t level = level_2();
+    for (uint8_t row = 0; row < 4; ++row) {
+      int32_t eighths = (level - (3 - row) * 16384 + 1024) >> 11;
+      if (eighths <= 0) continue;
+      leds_.set(4 + row, 0, eighths >= 8 ? 255 : eighths * 32 - 1);
+    }
+    if (level >= kLevel2Top) {
+      leds_.set(4, 255, 0);
+    }
+    return;
   }
   if (layer_ == 3) {
     // Right column: a meter of the kick heard on IN 2, from the bottom, in

@@ -4,7 +4,8 @@
 //
 // Patch: trigger into EXCITE 1, V/oct into EXCITE 2, sound from OUT 1.
 // Set channel 1's response trimmer fully clockwise (LIN) and LEVEL MOD 1
-// fully counter-clockwise. IN 1 is not used.
+// fully counter-clockwise. IN 1 is not used. LEVEL 2 is read (test: a meter
+// on the FN 2 page) through channel 2's VCA sense line.
 
 #include "stmlib/system/system_clock.h"
 
@@ -93,8 +94,9 @@ void Process(uint16_t* cv) {
     DacWrite(1, cv_scaler.ScaleGain(1, 0));
     pwm.Write(1, 65535);
   }
+  // Channel 2's VCA sense: the LEVEL 2 CV (channel 2's VCA word is zero).
   ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0), voice.lfo_phase(),
-              voice.duck_level());
+              voice.duck_level(), cv_scaler.raw_gain_sample(1));
 }
 
 void Init() {
