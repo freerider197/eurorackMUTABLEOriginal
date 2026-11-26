@@ -105,6 +105,21 @@ canvas#scope{display:block;width:100%;height:170px;border-radius:6px;background:
 .pbtn.down .cap{transform:scale(.93)}
 .pbtn .cap{transition:transform .06s}
 @media (prefers-reduced-motion:reduce){.pbtn .cap{transition:none}}
+/* Page guide above the panel: what every control does on the page you're on. */
+.guide{background:var(--surface);border:2px solid var(--pc,var(--line));border-radius:10px;padding:10px;margin-bottom:10px;display:grid;gap:8px}
+.gtabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.gtabs .btn{padding:6px 4px;font-size:13px}
+.gtabs .btn[aria-pressed="true"]{background:var(--pc);border-color:var(--pc);color:#fff}
+.gmsg{font-family:var(--f-mono);font-size:13px;background:#1b2a22;color:#9df2b4;border-radius:6px;padding:6px 9px;min-height:2.6em}
+.gmsg b{display:block;font-size:11px;letter-spacing:1px;opacity:.75;font-weight:400}
+.gmap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.gk{border:1px solid var(--line);border-radius:7px;padding:5px 8px;background:var(--raised);min-width:0}
+.gk .n{font-family:var(--f-display);font-weight:700;font-size:14px;letter-spacing:.4px;color:var(--pc)}
+.gk .w{font-size:11px;letter-spacing:.8px;color:var(--muted);text-transform:uppercase}
+.gk .v{font-size:13px;overflow-wrap:anywhere}
+.gk.off .n,.gk.off .v{color:var(--muted);font-weight:500}
+.gbtns{display:grid;gap:3px;font-size:13px}
+.gbtns b{font-family:var(--f-display);letter-spacing:.3px}
 code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(--line) 45%,transparent);padding:1px 4px;border-radius:4px}
 </style>
 
@@ -115,6 +130,16 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
   </header>
   <main class="grid">
     <section class="rack" aria-label="Module panel">
+      <div class="guide" id="guide" aria-live="polite">
+        <div class="gtabs" role="group" aria-label="Page">
+          <button class="btn" type="button" id="pgN" style="--pc:#178a46">Normal</button>
+          <button class="btn" type="button" id="pgM" style="--pc:#b06800">METER page</button>
+          <button class="btn" type="button" id="pgF" style="--pc:#cf3528">FN 2 held</button>
+        </div>
+        <div class="gmsg"><b id="gk">ENGINE</b><span id="gv">BT · bass tom</span></div>
+        <div class="gmap" id="gmap"></div>
+        <div class="gbtns" id="gbtns"></div>
+      </div>
       <svg id="panel" viewBox="0 0 562 1200" xmlns="http://www.w3.org/2000/svg"></svg>
     </section>
     <section class="side">
@@ -587,8 +612,8 @@ const DEFV = { main: [9146, 40632, 32768, 19661], second: [0, 0, 0, 0], lfo: [32
 const mk = a => a.map(([n, on]) => ({ n, on: !!on }));
 const PATS = [
   mk([[0,1],[0,0],[0,1],[0,1],[0,0],[0,1],[0,1],[0,1],[0,1],[0,0],[0,1],[0,1],[0,1],[0,1],[0,0],[0,1]]),  // all C: 0 V
-  mk([[12,1],[12,0],[12,0],[10,1],[12,0],[12,1],[12,0],[7,1],[12,1],[12,0],[15,1],[12,0],[14,1],[12,0],[10,1],[7,1]]),
-  mk([[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,0],[12,1],[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[7,1],[10,1]])
+  mk([[0,1],[0,0],[0,0],[0,1],[0,0],[0,1],[0,0],[0,1],[0,1],[0,0],[0,1],[0,0],[0,1],[0,0],[0,1],[0,1]]),
+  mk([[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,0],[0,1],[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,1],[0,1]])
 ];
 const S = { k: { engine: 0, snap: 2, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
   ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
@@ -753,7 +778,7 @@ const META = {
   'second2': { n: 'WAVE', f: v => v < 0.01 ? 'sine' : v < 1 / 3 ? 'sine → triangle' : v < 2 / 3 ? 'triangle → folded' : v < 0.99 ? 'folded → square' : 'square' },
   'second3': { n: 'GLIDE', f: v => v < 0.01 ? 'off' : Math.round((0.004 + v * v * 0.5) * 1000) + ' ms' },
   'lfo0': { n: 'LFO SPEED', f: v => { const hz = 0.05 * Math.pow(400, v); return (hz < 1 ? hz.toFixed(2) : hz.toFixed(1)) + ' Hz'; } },
-  'lfo1': { n: 'LFO DEPTH', f: v => v < 0.01 ? 'off' : '±' + (v * v * 12).toFixed(2) + ' st' },
+  'lfo1': { n: 'LFO AMOUNT', f: v => v < 0.01 ? 'off' : '±' + (v * v * 12).toFixed(2) + ' st' },
   'lfo2': { n: 'TUNE', f: v => { const s = (v - 0.5) * 24; return (s >= 0 ? '+' : '') + s.toFixed(1) + ' st · 0 V = ' + ['C1','C#1','D1','D#1','E1','F1','F#1','G1','G#1','A1','A#1','B1','C2','C#2','D2','D#2','E2','F2','F#2','G2','G#2','A2','A#2','B2','C3'][Math.round(v * 24)]; } },
   'level1': { n: 'LEVEL MOD 1', f: v => v < 0.01 ? 'zero · correct' : 'adds a ' + (3.33 * 1.6 * v).toFixed(2) + ' V offset: turn it back to zero' },
   'level2': { n: 'LEVEL MOD 2', f: () => 'not used by Tomline' },
@@ -761,7 +786,34 @@ const META = {
   'curve2': { n: 'CURVE 2', f: () => 'not used by Tomline' }
 };
 const lcdk = document.getElementById('lcdk'), lcdv = document.getElementById('lcdv');
-function lcd(k, v) { lcdk.textContent = k; lcdv.textContent = v; }
+function lcd(k, v) { lcdk.textContent = k; lcdv.textContent = v; const a = document.getElementById('gk'), b = document.getElementById('gv'); if (a) { a.textContent = k; b.textContent = v; } }
+// Page guide: the four knobs (as on the panel) and the buttons, for the page you're on.
+const PAGE = [{ name: 'Normal', c: '#178a46' }, { name: 'METER page', c: '#b06800' }, { name: 'FN 2 held', c: '#cf3528' }];
+const KNAME = { s1: 'SHAPE 1', s2: 'SHAPE 2', m1: 'MOD 1', m2: 'MOD 2' };
+function drawGuide() {
+  const g = document.getElementById('guide'); if (!g) return;
+  const pc = PAGE[S.layer].c; g.style.setProperty('--pc', pc);
+  ['pgN', 'pgM', 'pgF'].forEach((id, i) => document.getElementById(id).setAttribute('aria-pressed', S.layer === i));
+  document.getElementById('gmap').innerHTML = ['s1', 's2', 'm1', 'm2'].map(id => {
+    const k = KN.find(x => x.id === id), tg = target(k), m = META[keyOf(tg)], off = tg[0] === 'none';
+    return `<div class="gk${off ? ' off' : ''}"><div class="w">${KNAME[id]}</div><div class="n">${off ? 'not used' : m.n}</div><div class="v">${off ? '—' : m.f(getV(tg))}</div></div>`;
+  }).join('');
+  const lfoWave = S.k.lfoShape ? 'ramp up' : 'triangle', lfoMode = S.k.lfoFree ? 'free running' : 'restarts on each hit';
+  const rows = S.layer === 2 ? [
+    ['FN 1 click', 'LFO mode, now <u>' + lfoMode + '</u>'],
+    ['METER click', 'LFO wave, now <u>' + lfoWave + '</u>'],
+    ['FN 2', 'release (or click Normal above) to go back']
+  ] : S.layer === 1 ? [
+    ['METER', 'click again (or Normal above) to go back'],
+    ['LFO', lfoWave + ', ' + lfoMode + ' · change both on the FN 2 page']
+  ] : [
+    ['FN 1 click', 'engine, now <u>' + ENG[S.k.engine] + '</u>'],
+    ['FN 2 click', 'snap, now <u>' + ['off', '0.4 ms', '1.5 ms', '4 ms'][S.k.snap] + '</u>'],
+    ['METER click', 'METER page: crush, LFO'],
+    ['Keyboard', 'hold Shift = METER page, hold L = FN 2']
+  ];
+  document.getElementById('gbtns').innerHTML = rows.map(([a, b]) => `<div><b style="color:${pc}">${a}:</b> ${b}</div>`).join('');
+}
 const target = k => (S.layer && k.p[S.layer]) ? k.p[S.layer] : k.p[0];
 const keyOf = tg => tg.length > 1 ? tg[0] + tg[1] : tg[0];
 const getV = tg => tg[0] === 'none' ? 0.5 : tg.length > 1 ? S.k[tg[0]][tg[1]] / 65535 : S.k[tg[0]];
@@ -771,12 +823,12 @@ function drawKnob(k) {
   g.querySelector('.rot').setAttribute('transform', `rotate(${-150 + v * 300})`);
   g.setAttribute('aria-valuenow', Math.round(v * 100)); g.setAttribute('aria-label', m.n); g.setAttribute('aria-valuetext', m.f(v));
 }
-function drawKnobs() { KN.forEach(drawKnob); }
+function drawKnobs() { KN.forEach(drawKnob); drawGuide(); }
 const DEFAULT = { none: 0.5, main: DEFV.main, second: DEFV.second, lfo: DEFV.lfo, level1: 0, level2: 0, curve1: 1, curve2: 1 };
 function setKnob(k, v) {
   v = Math.max(0, Math.min(1, v)); const tg = target(k);
   if (tg[0] === 'none') { lcd(META.none.n, META.none.f()); return; }
-  setV(tg, v); drawKnob(k);
+  setV(tg, v); drawKnob(k); drawGuide();
   if (S.layer === 2) S.fn2Used = true;
   const m = META[keyOf(tg)]; lcd(m.n, m.f(v));
   if (tg[0] === 'level1' || tg[0] === 'curve1') { /* the firmware's setup check updates the LED within 0.5 s */ }
@@ -825,6 +877,7 @@ function drawLeds() {
   else for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), (3 - i) < S.k.snap ? on : null);
   svg.classList.toggle('shift', S.layer === 1);
   svg.classList.toggle('lfo', S.layer === 2);
+  drawGuide();
 }
 setInterval(() => { if (S.warn) drawLeds(); }, 128);
 function blinkTrig() { if (!S.k.lfoFree) lfoUiPhase = lfoStart(S.k.lfoShape) / 4294967296; trigOn = true; paint(document.getElementById('L3'), '#6be07b'); clearTimeout(trigT); trigT = setTimeout(() => { trigOn = false; paint(document.getElementById('L3'), null); }, 25); }
@@ -862,6 +915,9 @@ S.fn2Lock = false;
 const fn2LockBtn = document.getElementById('fn2lock');
 function setFn2Lock(on) { S.fn2Lock = on; S.fn2Used = true; fn2LockBtn.setAttribute('aria-pressed', on); setLayer(); }
 fn2LockBtn.addEventListener('click', () => setFn2Lock(!S.fn2Lock));
+document.getElementById('pgN').addEventListener('click', () => { S.latched = false; if (S.fn2Lock) setFn2Lock(false); else setLayer(); });
+document.getElementById('pgM').addEventListener('click', () => { S.latched = true; if (S.fn2Lock) setFn2Lock(false); else setLayer(); });
+document.getElementById('pgF').addEventListener('click', () => setFn2Lock(true));
 function setLayer() {
   const l = (S.fn2 || S.fn2Lock) ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
   if (l === 2) lcd('FN 2 held', 'SHAPE 1 tune, MOD 1 glide · tap METER: LFO ' + (S.k.lfoShape ? 'ramp up' : 'triangle') + ' · tap FN 1: LFO ' + (S.k.lfoFree ? 'free running' : 'restart on trigger'));
@@ -896,7 +952,7 @@ ed('nd', s => { s.n = Math.max(0, s.n - 1); s.on = true; }); ed('nu', s => { s.n
 ed('od', s => { s.n = Math.max(0, s.n - 12); }); ed('ou', s => { s.n = Math.min(36, s.n + 12); });
 ed('ton', s => { s.on = !s.on; });
 document.querySelectorAll('[data-pat]').forEach(b => b.addEventListener('click', () => { S.pat = PATS[+b.dataset.pat].map(s => ({ ...s })); patChanged(); }));
-document.getElementById('rnd').addEventListener('click', () => { const sc = [0, 3, 5, 7, 10, 12, 15, 19]; S.pat = S.pat.map((_, i) => ({ n: 12 + sc[Math.floor(Math.random() * sc.length)] - (Math.random() < .2 ? 12 : 0), on: i === 0 || Math.random() < .68 })); patChanged(); });
+document.getElementById('rnd').addEventListener('click', () => { const sc = [0, 3, 5, 7, 10, 12, 15, 19]; S.pat = S.pat.map((_, i) => ({ n: 0, on: i === 0 || Math.random() < .68 }));  /* rhythm only: every step stays on C */ void sc; patChanged(); });
 
 async function togglePlay() {
   await startAudio(); playing = !playing; post({ t: 'k', k: 'playing', v: playing });
