@@ -24,6 +24,6 @@ Name a new build `tomline-vNN-<topic>.wav`, with no commit code, date or "test" 
 | v13 | `tomline-v13-sweep-saved.wav` | 26 Nov 08:10 | `14c2177` | Pitch sweep saved with the other settings | `tomline-test-sweep-saved-14c2177.wav` |
 | v14 | `tomline-v14-lfo-amber.wav` | 26 Nov 08:26 | `3f473f4` | LFO wave and free-run buttons and LEDs on the METER page | `tomline-test-lfo-amber-3f473f4.wav` |
 | v15 | `tomline-v15-kick-duck.wav` | 26 Nov | `f9d5dca` | Kick sidechain duck: kick into IN 2, FN 1 held + SHAPE 2 depth, + MOD 2 release (#30) | – |
-| v16 | `tomline-v16-duck-release.wav` | 26 Nov | `e764bfc` | Duck release counted from each kick hit, smooth return (#30) | – |
+| v16 | `tomline-v16-duck-release.wav` | 26 Nov | `e764bfc` | Duck release counted from each kick hit, smooth return (#30) (tried on the module: works, owner likes it) | – |
 
 `release/tomline-0.1.wav` came before v01. "Handed over" is when the file reached the owner's Mac.
