@@ -124,7 +124,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
           <h2>Sequencer</h2>
           <span class="hint">sends a trigger to EXCITE 1 and V/oct to EXCITE 2 (note names include TUNE: FN 2 + SHAPE 1)</span>
           <div class="push" style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn" type="button" data-pat="0">Roller</button>
+            <button class="btn" type="button" data-pat="0">Low C</button>
             <button class="btn" type="button" data-pat="1">Tom walk</button>
             <button class="btn" type="button" data-pat="2">Pulse</button>
             <button class="btn" type="button" id="rnd">Random</button>
@@ -579,17 +579,17 @@ const ENG = ['BT · bass tom', 'LT · low tom'];
 const DEFV = { main: [9146, 40632, 32768, 19661], second: [0, 0, 0, 0], lfo: [32768, 0, 0, 0] };
 const mk = a => a.map(([n, on]) => ({ n, on: !!on }));
 const PATS = [
-  mk([[12,1],[12,0],[12,1],[24,1],[12,0],[15,1],[12,1],[10,1],[12,1],[12,0],[12,1],[19,1],[17,1],[15,1],[12,0],[10,1]]),
+  mk([[0,1],[0,0],[0,1],[0,1],[0,0],[0,1],[0,1],[0,1],[0,1],[0,0],[0,1],[0,1],[0,1],[0,1],[0,0],[0,1]]),  // all C: 0 V
   mk([[12,1],[12,0],[12,0],[10,1],[12,0],[12,1],[12,0],[7,1],[12,1],[12,0],[15,1],[12,0],[14,1],[12,0],[10,1],[7,1]]),
   mk([[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,0],[12,1],[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[7,1],[10,1]])
 ];
 const S = { k: { engine: 0, snap: 2, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
   ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
   warn: false };
-try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { if (!j.wave && j.k.second) j.k.second[2] = 0; /* saved before the wave: start at sine */ if (!j.crush && j.k.second) j.k.second[0] = 0; /* was the noise level: crush starts off */ if (!j.snap && typeof j.k.snap === 'number') j.k.snap = j.k.snap >= 2 ? 3 : j.k.snap + 1; /* old 0.4/1.5/4/10 ms: one step up */ if (!j.tune && j.k.lfo) j.k.lfo[2] = 0; /* tune moved to FN 2 + SHAPE 2: start at C1 */ Object.assign(S.k, j.k); S.pat = j.pat; } } catch (e) {}
+try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { if (!j.wave && j.k.second) j.k.second[2] = 0; /* saved before the wave: start at sine */ if (!j.crush && j.k.second) j.k.second[0] = 0; /* was the noise level: crush starts off */ if (!j.snap && typeof j.k.snap === 'number') j.k.snap = j.k.snap >= 2 ? 3 : j.k.snap + 1; /* old 0.4/1.5/4/10 ms: one step up */ if (!j.tune && j.k.lfo) j.k.lfo[2] = 0; /* tune moved to FN 2 + SHAPE 2: start at C1 */ Object.assign(S.k, j.k); if (j.cpat) S.pat = j.pat; /* patterns saved before the all-C default: back to it */ } } catch (e) {}
 S.k.ideal = false; delete S.k.in1;
 let saveT = 0;
-function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('tomline-fw-v1', JSON.stringify({ k: S.k, pat: S.pat, wave: 1, crush: 1, snap: 1, tune: 1 })); } catch (e) {} }, 300); }
+function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('tomline-fw-v1', JSON.stringify({ k: S.k, pat: S.pat, wave: 1, crush: 1, snap: 1, tune: 1, cpat: 1 })); } catch (e) {} }, 300); }
 
 /* ===================== audio ===================== */
 let ctx = null, node = null, post = () => {}, starting = null, playing = false;
