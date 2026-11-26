@@ -2,14 +2,14 @@
 //
 // Control map (see docs/HARDWARE_MAP.md for where each control is wired):
 //
-//   SHAPE 1   decay               | with METER: crush        | FN 2 held: LFO speed
-//   MOD 1     tone (filter env)   | with METER: unused       | FN 2 held: LFO depth
-//   SHAPE 2   LFO depth (same     | with METER: wave         | FN 2 held: tune,
-//             value as FN 2+MOD 1)|                          |   +/-12 st, saved
-//   MOD 2     soft distortion     | with METER: glide        |
+//   SHAPE 1   decay               | with METER: crush        | FN 2 held: tune,
+//                                 |                          |   +/-12 st, saved
+//   MOD 1     tone (filter env)   | with METER: LFO depth    | FN 2 held: glide
+//   SHAPE 2   wave                | with METER: unused       | FN 2 held: unused
+//   MOD 2     soft distortion     | with METER: LFO speed    | FN 2 held: unused
 //   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
 //             each trigger (default) / free running.
-//   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: LFO layer (pitch LFO).
+//   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: tune and glide layer.
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
 //             Hold 3 s without turning a knob: stock offset calibration.
 //             Tapped while FN 2 is held: LFO wave, triangle / ramp up.

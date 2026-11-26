@@ -24,7 +24,7 @@ filter words as the firmware, sample for sample (`test/compare_browser.js`
 checks this). The analog part after the DAC is modeled from the schematic,
 so levels and cutoff frequencies are estimates. The panel shows the
 firmware's LEDs and setup warnings. With a mouse only: click METER to latch the
-second page, and click **Hold FN 2 · LFO** to keep the LFO page open (click
+second page, and click **Hold FN 2 · Tune** to keep the FN 2 page open (click
 it or FN 2 again to let go).
 
 When `voice.cc` or `parameters.cc` changes, update the block between
@@ -36,7 +36,7 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 | Jack / control | Setting |
 |---|---|
 | EXCITE 1 | Trigger (on above about 1.7 V, off below 0.85 V, stock thresholds) |
-| EXCITE 2 | V/oct. 0 V = C1 (32.7 Hz) with Tune (FN 2 + SHAPE 2) fully down, the default; C2 at noon |
+| EXCITE 2 | V/oct. 0 V = C1 (32.7 Hz) with Tune (FN 2 + SHAPE 1) fully down, the default; C2 at noon |
 | OUT 1 | The sound, swinging around +3.33 V (0 V to about +6.7 V, see "Offset"). Use an AC-coupled input (Erica Black Quad VCA2: IN 1–3, not IN 4) |
 | IN 1 | Not used, leave empty |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
@@ -50,13 +50,13 @@ blinks red.
 
 | Control | Job | Hold METER (or tap METER to latch) |
 |---|---|---|
-| SHAPE 1 | Decay, 95 ms to 2.5 s | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
-| MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve) | Not used (was the +1 octave; free for something new) |
-| SHAPE 2 | LFO amount (pitch LFO depth): the same value as FN 2 + MOD 1, either knob sets it. Fully CCW = off | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change |
-| MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Glide between notes (fully CCW = off) |
+| SHAPE 1 | Decay, 95 ms to 2.5 s. **FN 2 held: Tune**, ±12 semitones; fully CCW = C1 at 0 V (the default), noon = C2. Saved, so a bump on the main page can't detune it | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
+| MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve). **FN 2 held: Glide** between notes (fully CCW = off) | Pitch LFO amount (depth): fully CCW = off, up to ±12 semitones |
+| SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change | Not used (free) |
+| MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Pitch LFO speed, 0.05 to 20 Hz (1 Hz at noon) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | |
-| FN 2, hold | Pitch LFO layer: SHAPE 1 = LFO speed (0.05 to 20 Hz, 1 Hz at noon), MOD 1 = LFO depth (fully CCW = off, up to ±12 semitones), SHAPE 2 = Tune (±12 semitones; fully CCW = C1 at 0 V, noon = C2, saved, so a bump on the main page can't detune it). MOD 2 does nothing here | |
+| FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. SHAPE 2 and MOD 2 do nothing here. The LFO lives on the METER page | |
 | FN 2 held + tap METER | LFO wave: triangle / ramp up | |
 | FN 2 held + tap FN 1 | LFO restarts on each trigger (default) / free running | |
 | METER, tap | Latch / unlatch the second layer | |
@@ -101,7 +101,7 @@ trigger", and plays the snap one step longer.
 | Left column, bottom | Flashes green on each trigger |
 | Right column | Snap, from the bottom: no LED = off, 1 = 0.4 ms, 2 = 1.5 ms, 3 = 4 ms |
 | Engine and snap LEDs amber instead of green | Second layer active |
-| FN 2 held: engine LED red, right column top (triangle) or 2nd (ramp up) pulsing red | LFO layer; the pulse follows the LFO, so the speed shows even at zero depth |
+| FN 2 held: engine LED red, right column top (triangle) or 2nd (ramp up) pulsing red | FN 2 page; the pulse follows the LFO, so its speed shows even at zero depth |
 | FN 2 held: right column 3rd LED red | LFO free running (off = restarts on each trigger) |
 
 ## Offset
@@ -284,7 +284,7 @@ Wave, is spikier than both ends).
 stand-ins for the drivers in `tomline/test/stub/`, and plays knob and button
 moves: pick-up on page changes, METER, FN 1 and FN 2 taps and holds with knobs
 turned, two buttons at once, offset and V/oct calibration, flash saves, older
-saved settings (the wave starts at sine, tune at C1), SHAPE 2 as LFO amount and FN 2 + SHAPE 2 as tune, and
+saved settings (the wave starts at sine, tune at C1), the knob map (SHAPE 2 wave; METER + MOD 1 / MOD 2 LFO amount / speed; FN 2 + SHAPE 1 / MOD 1 tune / glide), and
 LEDs that shift the knob readings (a model of the effect seen on the module):
 
 ```
@@ -292,7 +292,7 @@ g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tom
 ./build/tomline_panel
 ```
 
-Last run: all 62 checks OK. Without the LEDs-off reading, the model moves
+Last run: all 64 checks OK. Without the LEDs-off reading, the model moves
 untouched values on page changes; with it, nothing moves.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for 13

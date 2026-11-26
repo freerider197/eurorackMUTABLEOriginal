@@ -383,12 +383,26 @@ void Ui::OnButtonsCombo() {
   }
 }
 
-// The value a knob sets on a page. Main page SHAPE 2 is the LFO depth, the
-// same value as FN 2 + MOD 1. Tune is FN 2 + SHAPE 2 (lfo_layer slot 2).
+// The value a knob sets on a page, NULL if the knob does nothing there. The
+// values keep their old places in Settings (so saved records carry over);
+// only the knobs that set them moved:
+//   main:  SHAPE 2 = wave (second_layer slot 2)
+//   METER: SHAPE 1 = crush, MOD 1 = LFO depth, MOD 2 = LFO speed
+//   FN 2:  SHAPE 1 = tune (lfo_layer slot 2), MOD 1 = glide (second_layer
+//          slot 3)
 uint16_t* Ui::KnobValue(uint8_t layer, uint8_t knob) {
-  if (layer == 1) return &settings_.second_layer[knob];
-  if (layer == 2) return &settings_.lfo_layer[knob];
-  if (knob == KNOB_SHAPE_2) return &settings_.lfo_layer[KNOB_MOD_1];
+  if (layer == 1) {
+    if (knob == KNOB_SHAPE_1) return &settings_.second_layer[KNOB_SHAPE_1];
+    if (knob == KNOB_MOD_1) return &settings_.lfo_layer[KNOB_MOD_1];
+    if (knob == KNOB_MOD_2) return &settings_.lfo_layer[KNOB_SHAPE_1];
+    return NULL;
+  }
+  if (layer == 2) {
+    if (knob == KNOB_SHAPE_1) return &settings_.lfo_layer[KNOB_SHAPE_2];
+    if (knob == KNOB_MOD_1) return &settings_.second_layer[KNOB_MOD_2];
+    return NULL;
+  }
+  if (knob == KNOB_SHAPE_2) return &settings_.second_layer[KNOB_SHAPE_2];
   return &main_layer_[knob];
 }
 
@@ -444,7 +458,7 @@ void Ui::ReadKnobs() {
 
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
     uint16_t* value = KnobValue(layer_, i);
-    if (pickup_[i].Follow(pot_[i], elapsed, value)) {
+    if (value && pickup_[i].Follow(pot_[i], elapsed, value)) {
       parameters_dirty_ = true;
       if (layer_ || i == KNOB_SHAPE_2) {  // saved values
         SettingsChanged();
@@ -456,7 +470,7 @@ void Ui::ReadKnobs() {
 void Ui::ComputeParameters() {
   VoiceParameters n;
   // The voice reads tune from main SHAPE 2's slot; it is saved in the LFO
-  // layer now (FN 2 + SHAPE 2).
+  // layer now (set by FN 2 + SHAPE 1).
   uint16_t main_layer[KNOB_LAST];
   copy(&main_layer_[0], &main_layer_[KNOB_LAST], &main_layer[0]);
   main_layer[KNOB_SHAPE_2] = settings_.lfo_layer[KNOB_SHAPE_2];

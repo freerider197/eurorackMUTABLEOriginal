@@ -34,7 +34,7 @@ static inline int32_t Sine(uint32_t phase) {
   return a + ((b - a) * fractional >> 16);
 }
 
-// Wave (METER + SHAPE 2) on the main tone: sine -> triangle -> folded sine
+// Wave (SHAPE 2) on the main tone: sine -> triangle -> folded sine
 // -> square. Each stage crossfades from the one before.
 static inline int32_t Wave(
     const VoiceParameters& p, uint32_t phase, int32_t sine) {

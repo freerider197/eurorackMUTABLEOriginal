@@ -17,12 +17,11 @@ enum Knob {
   KNOB_LAST
 };
 
-// main_layer: SHAPE 1 decay, MOD 1 tone, tune, MOD 2 soft distortion. The
-//   tune slot is filled by ui.cc from FN 2 + SHAPE 2 (the main SHAPE 2 knob
-//   sets the LFO depth).
-// second_layer: crush, unused, wave, glide.
-// lfo_layer: SHAPE 1 LFO speed, MOD 1 LFO depth (SHAPE 2 tune, read through
-//   main_layer; MOD 2 unused).
+// main_layer: decay, tone, tune, soft distortion. The tune slot is filled
+//   by ui.cc from the saved tune (FN 2 + SHAPE 1).
+// second_layer: crush, unused, wave, glide (the slots where they are saved;
+//   ui.cc KnobValue says which knob sets each).
+// lfo_layer: LFO speed, LFO depth, tune (read through main_layer), unused.
 // lfo_free: false = the LFO restarts on each trigger, true = free running.
 // All values 0..65535 (knob fully counter-clockwise .. fully clockwise).
 void ComputeVoiceParameters(

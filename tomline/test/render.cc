@@ -422,7 +422,7 @@ bool DistortionOk(uint8_t engine) {
   return ok;
 }
 
-// Wave (METER + SHAPE 2), read from the voice's own VCA words with snap,
+// Wave (SHAPE 2), read from the voice's own VCA words with snap,
 // noise and distortion off. One hit of C2, the first 8 cycles:
 // harmonics 1 to 16 against the plain sine. Fully CCW must leave the voice
 // untouched; each stage must sound like its name while the fundamental
