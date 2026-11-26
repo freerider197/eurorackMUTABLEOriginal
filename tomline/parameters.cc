@@ -98,6 +98,31 @@ void ComputeVoiceParameters(
       ? 0
       : static_cast<int32_t>((1.0f + 3.0f * distortion * distortion) *
                              (4096.0f / 1.5f));
+  // Without a correction the hit gets louder as MOD 2 goes up, by up to
+  // 6 dB with a short decay and 2 dB with a long one. Level rise in dB
+  // (RMS of the first 0.3 s of a C2 hit, BT and LT averaged, measured with
+  // render.cc's level check), for Decay 0 / 25 / 50 / 75 / 100 % (rows) and
+  // MOD 2 every 1/8 (columns). The gain after the clipper takes it back off.
+  static const float kDistortionRiseDb[5][9] = {
+    { 0.00f, -0.19f, 0.73f, 1.95f, 3.17f, 4.22f, 5.09f, 5.80f, 6.39f },
+    { 0.00f, -0.23f, 0.67f, 1.87f, 3.04f, 4.00f, 4.75f, 5.31f, 5.71f },
+    { 0.00f, -0.38f, 0.48f, 1.57f, 2.54f, 3.19f, 3.55f, 3.76f, 3.89f },
+    { 0.00f, -0.57f, 0.22f, 1.18f, 1.90f, 2.26f, 2.47f, 2.62f, 2.73f },
+    { 0.00f, -0.71f, 0.04f, 0.90f, 1.45f, 1.74f, 1.93f, 2.06f, 2.16f },
+  };
+  float dr = decay * 4.0f;
+  int32_t r = static_cast<int32_t>(dr);
+  if (r > 3) r = 3;
+  float dc = distortion * 8.0f;
+  int32_t c = static_cast<int32_t>(dc);
+  if (c > 7) c = 7;
+  float fr = dr - r, fc = dc - c;
+  float top = kDistortionRiseDb[r][c] +
+      (kDistortionRiseDb[r][c + 1] - kDistortionRiseDb[r][c]) * fc;
+  float bottom = kDistortionRiseDb[r + 1][c] +
+      (kDistortionRiseDb[r + 1][c + 1] - kDistortionRiseDb[r + 1][c]) * fc;
+  float rise = top + (bottom - top) * fr;
+  n.distortion_gain = static_cast<int32_t>(Exp2(-rise * 0.1660964f) * 4096.0f);
   // Wave: a third of the knob each for sine -> triangle, triangle -> folded
   // sine (fold gain 1 to 2: the top folds back down, the fundamental stays
   // within about 4 dB), folded -> square. Fully CCW = the plain sine.
@@ -137,6 +162,13 @@ void ComputeVoiceParameters(
   n.lfo_depth = lfo_depth < 0.01f ? 0 : Q16(lfo_depth * lfo_depth * 12.0f);
   n.lfo_shape = lfo_shape == LFO_RAMP_UP ? LFO_RAMP_UP : LFO_TRIANGLE;
   n.lfo_free = lfo_free ? 1 : 0;
+
+  // Pitch sweep (METER + SHAPE 2): up to +12 semitones on a squared curve, so small
+  // amounts are easy to set, falling back with a 20 ms time constant (within
+  // 10 cents of the note 100 ms after the hit at full amount).
+  float sweep = lfo_layer[KNOB_MOD_2] / 65535.0f;
+  n.sweep_depth = sweep < 0.01f ? 0 : Q16(sweep * sweep * 12.0f);
+  n.sweep_coefficient = DecayQ31(0.02f);
 
 }
 

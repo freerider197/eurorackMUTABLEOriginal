@@ -34,7 +34,7 @@ static inline int32_t Sine(uint32_t phase) {
   return a + ((b - a) * fractional >> 16);
 }
 
-// Wave (METER + SHAPE 2) on the main tone: sine -> triangle -> folded sine
+// Wave (SHAPE 2) on the main tone: sine -> triangle -> folded sine
 // -> square. Each stage crossfades from the one before.
 static inline int32_t Wave(
     const VoiceParameters& p, uint32_t phase, int32_t sine) {
@@ -97,6 +97,7 @@ void Voice::Init() {
   amp_ = 0;
   attack_ = kUnity;
   snap_ = 0;
+  sweep_ = 0;
   partial_ = 0;
   lift_ = 0;
   hold_ = kPowerUpHold;
@@ -120,6 +121,7 @@ void Voice::Process(
     amp_ = kUnity;
     attack_ = 0;
     snap_ = kUnity;
+    sweep_ = kUnity;
     crush_phase_ = 0xffffffffUL;  // crush: take a sample right away
     partial_ = kUnity;
     phase_ = 0;
@@ -152,6 +154,7 @@ void Voice::Process(
   // Envelopes.
   amp_ = Decay(amp_, p.amp_coefficient);
   snap_ = Decay(snap_, p.snap_coefficient);
+  sweep_ = Decay(sweep_, p.sweep_coefficient);
   partial_ = Decay(partial_, p.partial_coefficient);
   if (attack_ < kUnity) {
     attack_ += kAttackStep;
@@ -172,6 +175,9 @@ void Voice::Process(
 
   // Oscillators.
   s += static_cast<int32_t>(static_cast<int64_t>(p.snap_depth) * snap_ >> 30);
+  // Pitch sweep (METER + SHAPE 2): each hit starts above the note and falls
+  // back to it, so the held pitch stays in tune.
+  s += static_cast<int32_t>(static_cast<int64_t>(p.sweep_depth) * sweep_ >> 30);
   uint32_t increment = SemitonesToIncrement(s);
   phase_ += increment;
 
@@ -213,9 +219,11 @@ void Voice::Process(
   v += (p.snap_noise * snap_env >> 15) * white >> 15;
   // Soft distortion (MOD 2) on the whole mix, after the envelope: the loud
   // start of a hit saturates, the quiet tail stays clean. |v| < 50000 here,
-  // so v * distortion (at most 10923) fits in 32 bits.
+  // so v * distortion (at most 10923) fits in 32 bits. Then a gain that keeps
+  // the hit as loud as the clean sound (|v| <= 32767, gain < 8192: fits).
   if (p.distortion) {
     v = SoftClip(v * p.distortion >> 12);
+    v = v * p.distortion_gain >> 12;
   }
   v = ScaleMix(v);
   // Crush (METER + SHAPE 1): the mix is sampled at a lower rate and held

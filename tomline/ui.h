@@ -2,13 +2,14 @@
 //
 // Control map (see docs/HARDWARE_MAP.md for where each control is wired):
 //
-//   SHAPE 1   decay               | with METER: crush        | FN 2 held: LFO speed
-//   MOD 1     tone (filter env)   | with METER: unused       | FN 2 held: LFO depth
-//   SHAPE 2   tune, +/-12 st (C2) | with METER: wave         |
-//   MOD 2     soft distortion     | with METER: glide        |
+//   SHAPE 1   decay               | with METER: crush        | FN 2 held: tune,
+//                                 |                          |   +/-12 st, saved
+//   MOD 1     tone (filter env)   | with METER: LFO depth    | FN 2 held: glide
+//   SHAPE 2   wave                | with METER: pitch sweep  | FN 2 held: unused
+//   MOD 2     soft distortion     | with METER: LFO speed    | FN 2 held: unused
 //   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
 //             each trigger (default) / free running.
-//   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: LFO layer (pitch LFO).
+//   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: tune and glide layer.
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
 //             Hold 3 s without turning a knob: stock offset calibration.
 //             Tapped while FN 2 is held: LFO wave, triangle / ramp up.
@@ -60,11 +61,11 @@ struct Settings {
   uint8_t engine;
   uint8_t snap;
   uint8_t lfo_shape;
-  uint8_t flags;     // kFlagLfoFree, kFlagCrush, kFlagWave (was padding, so 0)
+  uint8_t flags;     // kFlagLfoFree, kFlagSweep, kFlagTune, kFlagSnap, kFlagCrush, kFlagWave
   uint16_t second_layer[KNOB_LAST];  // crush, unused (was +1 octave), wave, glide
   int32_t voct_offset;  // EXCITE 2 counts at 0 V
   int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
-  uint16_t lfo_layer[KNOB_LAST];  // SHAPE 1 speed, MOD 1 depth; others unused
+  uint16_t lfo_layer[KNOB_LAST];  // LFO speed, LFO depth, tune, pitch sweep
   uint32_t magic;
 };
 
@@ -129,7 +130,7 @@ class Ui {
   void HoldKnobs();
   void UpdateLayer(bool hold_knobs);
   void SettingsChanged();
-  uint16_t* LayerValues(uint8_t layer);
+  uint16_t* KnobValue(uint8_t layer, uint8_t knob);
   void ComputeParameters();
   void CheckSetup();
   void PaintLeds();

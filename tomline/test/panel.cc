@@ -261,7 +261,7 @@ int main() {
   Turn(S1, 25000, 400);
   Up(BUTTON_FN_2);
   Check(ui->settings_.snap == 2, "FN 2 short hold while turning SHAPE 1: snap unchanged");
-  Check(Near(ui->settings_.lfo_layer[S1], 25000), "  ... and the LFO speed followed the knob");
+  Check(Near(ui->settings_.lfo_layer[S2], 25000), "  ... and the tune followed the knob");
   Check(Decay() == 10000, "  ... decay unchanged");
   Start();
   Down(BUTTON_FN_2);
@@ -313,6 +313,49 @@ int main() {
   Tap(BUTTON_FN_1);
   Check(ui->mode_ == UI_MODE_NORMAL, "  ... FN 1 cancels it");
 
+  printf("Knob map: SHAPE 2 wave; METER: MOD 1 LFO depth, MOD 2 LFO speed; FN 2: SHAPE 1 tune, MOD 1 glide\n");
+  const int M2 = KNOB_MOD_2;
+  Start();
+  Check(ui->settings_.lfo_layer[S2] == 0, "new module: tune fully down (C1 at 0 V)");
+  stmlib::sim_settings_saves = 0;
+  Turn(S2, 50000, 400);
+  Ms(2500);
+  Check(Near(ui->settings_.second_layer[S2], 50000) && stmlib::sim_settings_saves == 1,
+        "SHAPE 2 turned: wave follows, saved");
+  Down(BUTTON_METER);
+  Turn(M1, 20000, 400);
+  Turn(M2, 45000, 400);
+  Up(BUTTON_METER);
+  Ms(300);
+  Check(Near(ui->settings_.lfo_layer[M1], 20000), "METER + MOD 1: LFO depth follows");
+  Check(Near(ui->settings_.lfo_layer[S1], 45000), "METER + MOD 2: LFO speed follows");
+  Check(Near(ui->settings_.second_layer[S2], 50000) && ui->settings_.second_layer[M2] == 0 &&
+        ui->settings_.second_layer[M1] == 0, "  ... wave and glide unchanged");
+  Ms(2500);  // the LFO values are saved first
+  stmlib::sim_settings_saves = 0;
+  Down(BUTTON_METER);
+  Turn(S2, 40000, 400);
+  Up(BUTTON_METER);
+  Ms(2500);
+  Check(Near(ui->settings_.lfo_layer[KNOB_MOD_2], 40000) && stmlib::sim_settings_saves == 1,
+        "METER + SHAPE 2: pitch sweep follows, saved");
+  Down(BUTTON_FN_2);
+  Turn(S1, 10000, 400);
+  Turn(M1, 30000, 400);
+  Turn(M2, 5000, 400);
+  Up(BUTTON_FN_2);
+  Ms(300);
+  Check(Near(ui->settings_.lfo_layer[S2], 10000), "FN 2 + SHAPE 1: tune follows");
+  Check(Near(ui->settings_.second_layer[M2], 30000), "FN 2 + MOD 1: glide follows");
+  Check(Near(ui->settings_.lfo_layer[M1], 20000) && Near(ui->settings_.lfo_layer[S1], 45000) &&
+        Decay() == 32768, "  ... FN 2 + MOD 2 does nothing; LFO and decay unchanged");
+  Check(ui->parameters_.tune == static_cast<int32_t>(
+            (12.0f + (ui->settings_.lfo_layer[S2] / 65535.0f - 0.5f) * 24.0f) * 65536.0f),
+        "  ... the voice plays that tune");
+  Turn(S1, 40000, 400);
+  Check(Near(Decay(), 40000) && Near(ui->settings_.lfo_layer[S2], 10000),
+        "SHAPE 1 on the main page: decay moves, tune stays");
+
   printf("Saving\n");
   Start();
   Ms(3000);
@@ -330,15 +373,13 @@ int main() {
   sim_noise = 0;
   Check(stmlib::sim_settings_saves == 0, "second page open 60 s, knob noise, untouched: no save");
 
-  printf("Wave (METER + SHAPE 2), crush and older saved settings\n");
+  printf("Wave (SHAPE 2), crush and older saved settings\n");
   Start();
-  Down(BUTTON_METER);
   Turn(S2, 50000, 800);
-  Up(BUTTON_METER);
   Ms(2500);
   Check(Near(ui->settings_.second_layer[S2], 50000) && stmlib::sim_settings_saves == 1,
-        "METER held, SHAPE 2 turned: wave follows the knob, saved");
-  Check(ui->main_layer_[S2] == 32768, "  ... tune unchanged");
+        "SHAPE 2 turned: wave follows the knob, saved");
+  Check(ui->settings_.lfo_layer[S2] == 0, "  ... tune unchanged");
   Settings old_record;
   memset(&old_record, 0, sizeof(old_record));
   old_record.engine = ENGINE_LT;
@@ -375,6 +416,16 @@ int main() {
   old_record.flags = kFlagWave | kFlagCrush | kFlagSnap;
   Start();
   Check(ui->settings_.snap == 0, "settings saved with snap off: off kept");
+  Check(ui->settings_.lfo_layer[S2] == 0, "  ... saved before tune was saved: tune fully down");
+  old_record.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune;
+  old_record.lfo_layer[S2] = 30000;
+  old_record.lfo_layer[KNOB_MOD_2] = 25000;  // leftover from an old FN 2 + MOD 2 turn
+  Start();
+  Check(ui->settings_.lfo_layer[S2] == 30000, "settings saved with a tune: kept");
+  Check(ui->settings_.lfo_layer[KNOB_MOD_2] == 0, "  ... saved before the sweep: sweep off");
+  old_record.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune | kFlagSweep;
+  Start();
+  Check(ui->settings_.lfo_layer[KNOB_MOD_2] == 25000, "settings saved with a sweep: kept");
   stmlib::sim_settings_record = NULL;
 
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);
