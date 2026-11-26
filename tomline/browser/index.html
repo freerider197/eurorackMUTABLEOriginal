@@ -77,6 +77,7 @@ button{font:inherit;color:inherit}
 .oct{display:flex;align-items:center;gap:6px}
 .oct output{font-family:var(--f-mono);min-width:3ch;text-align:center}
 canvas#scope{display:block;width:100%;height:170px;border-radius:6px;background:#0f1412}
+canvas#dscope{display:block;width:100%;height:300px;border-radius:6px;background:#0f1412}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px}
 .fact{border-top:2px solid var(--line);padding-top:8px;font-size:13.5px;color:var(--muted)}
 .fact b{display:block;font-family:var(--f-display);font-weight:600;font-size:13px;letter-spacing:.8px;text-transform:uppercase;color:var(--ink);margin-bottom:2px}
@@ -193,9 +194,16 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
           <div class="seg" role="group" aria-label="Offset comparison"><button class="btn" type="button" id="abHw" aria-pressed="true">With offset (hardware)</button><button class="btn" type="button" id="abId" aria-pressed="false">Without offset (ideal)</button></div>
           <label class="chk" for="kick"><input type="checkbox" id="kick"> Kick on every beat: into IN 2 (the duck hears it) and into the mix, summed DC-coupled like a VCA mixer</label>
           <label class="sl" for="klev">KICK LEVEL <input id="klev" type="range" min="1" max="10" step="0.5" value="6"><output id="klevv">6 V</output></label>
+          <label class="sl" for="kdec">KICK DECAY <input id="kdec" type="range" min="0" max="1" step="0.01" value="0.4"><output id="kdecv">150 ms</output></label>
           <label class="btn" for="kfile" style="cursor:pointer">Use your own kick…<input type="file" id="kfile" accept="audio/*" hidden></label>
           <button class="btn" type="button" id="kbuiltin" hidden>Built-in kick</button>
         </div>
+      </div>
+
+      <div class="card scope">
+        <div class="head"><h2>Sidechain scope</h2><span class="hint">one beat from each kick (tick Kick, press Play, set the duck with FN 1)</span></div>
+        <canvas id="dscope" width="800" height="300"></canvas>
+        <p class="note" id="dsnote" style="margin:8px 0 0;font-size:13px;color:var(--muted)">Top: the kick on IN 2 (grey) and what the duck hears from it (orange, 100 % = full duck). Bottom: the duck drawn downward (blue: how much the bass is turned down) and the bass on OUT 1 after the duck (pink). The red line is where the bass is fully back.</p>
       </div>
 
       <div class="card map">
@@ -530,7 +538,7 @@ class Engine {
   constructor(sr) {
     this.sr = sr;
     this.k = { engine: 0, snap: 2, main: [9146, 40632, 32768, 19661], second: [0, 0, 0, 0],
-      lfo: [32768, 0, 0, 0], duck: [0, 32768], lfoShape: 0, lfoFree: 0, level1: 0, curve1: 1, ideal: false, kick: false, kickLevel: 6, master: 0.75, bpm: 122, playing: false };
+      lfo: [32768, 0, 0, 0], duck: [0, 32768], lfoShape: 0, lfoFree: 0, level1: 0, curve1: 1, ideal: false, kick: false, kickLevel: 6, kickDecay: 0.15, master: 0.75, bpm: 122, playing: false };
     this.p = computeParams(0, 1, this.k.main, this.k.second);
     this.voice = new TomlineVoice();
     this.pat = []; this.pos = -1; this.spc = 0;
@@ -538,7 +546,8 @@ class Engine {
     this.fwAcc = 1; this.pwmFiltered = 65535;
     this.d1 = 0; this.d2 = 0; this.f1 = 0; this.f2 = 0; this.pwmV = 3.3;
     this.kph = 0; this.kam = 0; this.kpe = 0; this.dx = 0; this.dy = 0;
-    this.kv = 0; this.ksmp = null; this.kpos = 1e9; this.duckT = 0;  // kick volts now, your own kick sample
+    this.kv = 0; this.ksmp = null; this.kpos = 1e9; this.ksEnv = 0; this.duckT = 0;  // kick volts now, your own kick sample
+    this.ds = null; this.dsArm = false;  // sidechain scope capture, one beat from each kick
     // The module has been on for a while: past the power-up (1 s at 0 V, then
     // the lift's rise), with OUT 1 and the audio input settled at the lift.
     this.voice.lift = K_LIFT; this.voice.hold = 0;
@@ -568,7 +577,7 @@ class Engine {
     this.pos = (this.pos + 1) % this.pat.length;
     const s = this.pat[this.pos];
     this.send({ t: 'step', v: this.pos });
-    if (this.k.kick && this.pos % 4 === 0) { this.kam = 1; this.kpe = 1; this.kph = 0; this.kpos = 0; }
+    if (this.k.kick && this.pos % 4 === 0) { this.kam = 1; this.kpe = 1; this.kph = 0; this.kpos = 0; this.ksEnv = 1; this.dsArm = true; }
     if (s.on) { this.counts = Math.floor(s.n * COUNTS_PER_VOLT / 12); this.pendingTrig = true; }
   }
   // Hardware VCA law from the schematic: current-mode, gain = (I / Iref)^n.
@@ -594,6 +603,22 @@ class Engine {
     sc = sc > 32767 ? 32767 : (sc < -32768 ? -32768 : sc);
     this.voice.process(this.p, trig, this.pitchQ16, sc);
     if (++this.duckT >= 1024) { this.duckT = 0; this.send({ t: 'duck', v: this.voice.duckLevel }); }
+    // Sidechain scope: one beat from each kick, 400 columns. Kick volts and
+    // the bass (min / max per column), what the duck hears, and the duck.
+    if (this.dsArm) {
+      this.dsArm = false; const n = 400;
+      this.ds = { n, per: Math.max(1, Math.floor(FW_RATE * 60 / this.k.bpm / n)), i: 0, c: 0,
+        kmin: new Float32Array(n).fill(1e9), kmax: new Float32Array(n).fill(-1e9), bmin: new Float32Array(n).fill(1e9), bmax: new Float32Array(n).fill(-1e9),
+        heard: new Float32Array(n), duck: new Float32Array(n) };
+    }
+    if (this.ds) {
+      const d = this.ds, j = d.i, b = this.voice.v * 3.33;
+      if (this.kv < d.kmin[j]) d.kmin[j] = this.kv; if (this.kv > d.kmax[j]) d.kmax[j] = this.kv;
+      if (b < d.bmin[j]) d.bmin[j] = b; if (b > d.bmax[j]) d.bmax[j] = b;
+      d.heard[j] = this.voice.duckLevel / 32767;
+      d.duck[j] = this.voice.duckLevel * this.p.duckDepth / 1073741824;
+      if (++d.c >= d.per) { d.c = 0; if (++d.i >= d.n) { this.send({ t: 'dscope', v: { kmin: d.kmin, kmax: d.kmax, bmin: d.bmin, bmax: d.bmax, heard: d.heard, duck: d.duck, ms: d.n * d.per / FW_RATE * 1000 } }); this.ds = null; } }
+    }
     if (trig) { this.send({ t: 'trig' }); if (this.si < 0) { this.si = 0; this.sd = 0; } }
     // pwm.Write: 1/16 smoothing, 10-bit.
     this.pwmFiltered += ((65535 - this.voice.freqWord) - this.pwmFiltered) >> 4;
@@ -615,14 +640,14 @@ class Engine {
     const sr = this.sr, n = out.length, k = this.k;
     const sps = sr * 60 / k.bpm / 4;
     const kDac = 1 - Math.exp(-2 * Math.PI * 15915 / sr), kRc = 1 - Math.exp(-2 * Math.PI * 195 / sr);
-    const kpd = Math.exp(-1 / (0.03 * sr)), kad = Math.exp(-1 / (0.28 * sr));
+    const kpd = Math.exp(-1 / (0.03 * sr)), kad = Math.exp(-1 / (k.kickDecay * sr));  // kick pitch 30 ms, level: KICK DECAY
     const rDc = 1 - 2 * Math.PI * 3 / sr;
     for (let i = 0; i < n; i++) {
       if (k.playing) { this.spc += 1; if (this.spc >= sps) { this.spc -= sps; if (this.spc > sps) this.spc = 0; this.step(); } }
       // The kick (built-in, or your own sample): into the mix and into IN 2.
       let kv = 0;
       if (this.ksmp) {
-        if (this.kpos < this.ksmp.length) kv = k.kickLevel * this.ksmp[this.kpos++];
+        if (this.kpos < this.ksmp.length && this.ksEnv > 1e-4) { this.ksEnv *= kad; kv = k.kickLevel * this.ksEnv * this.ksmp[this.kpos++]; }  // KICK DECAY fades your sample too
       } else if (this.kam > 1e-4) {
         this.kpe *= kpd; this.kam *= kad; this.kph += (48 + 110 * this.kpe) / sr; if (this.kph >= 1) this.kph -= 1;
         kv = k.kickLevel * this.kam * Math.sin(6.283185307 * this.kph);
@@ -669,7 +694,7 @@ const PATS = [
   mk([[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,0],[0,1],[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,1],[0,1]])
 ];
 const S = { k: { engine: 0, snap: 2, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), duck: DEFV.duck.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
-  ideal: false, kick: false, kickLevel: 6, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
+  ideal: false, kick: false, kickLevel: 6, kickDecay: 0.15, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
   fn1: false, fn1Used: false, fn1Lock: false, duckLevel: 0, warn: false };
 try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { if (!j.wave && j.k.second) j.k.second[2] = 0; /* saved before the wave: start at sine */ if (!j.crush && j.k.second) j.k.second[0] = 0; /* was the noise level: crush starts off */ if (!j.snap && typeof j.k.snap === 'number') j.k.snap = j.k.snap >= 2 ? 3 : j.k.snap + 1; /* old 0.4/1.5/4/10 ms: one step up */ if (!j.tune && j.k.lfo) j.k.lfo[2] = 0; /* tune moved to FN 2 + SHAPE 2: start at C1 */ if (!j.sweep && j.k.lfo) j.k.lfo[3] = 0; /* saved before the sweep: off */ Object.assign(S.k, j.k); if (j.cpat) S.pat = j.pat; /* patterns saved before the all-C default: back to it */ } } catch (e) {}
 S.k.ideal = false; delete S.k.in1;
@@ -684,9 +709,10 @@ function onMsg(m) {
   else if (m.t === 'trig') blinkTrig();
   else if (m.t === 'leds') { S.warn = m.warn; drawLeds(); }
   else if (m.t === 'duck') { S.duckLevel = m.v; if (S.layer === 3) paintDuck(); }
+  else if (m.t === 'dscope') drawDuckScope(m.v);
 }
 function syncAll() {
-  for (const key of ['engine','snap','lfoShape','lfoFree','level1','curve1','ideal','kick','kickLevel','master','bpm']) post({ t: 'k', k: key, v: S.k[key] });
+  for (const key of ['engine','snap','lfoShape','lfoFree','level1','curve1','ideal','kick','kickLevel','kickDecay','master','bpm']) post({ t: 'k', k: key, v: S.k[key] });
   for (let i = 0; i < 4; i++) { for (const key of ['main', 'second', 'lfo']) post({ t: 'k', k: key, i, v: S.k[key][i] }); }
   for (let i = 0; i < 2; i++) post({ t: 'k', k: 'duck', i, v: S.k.duck[i] });
   post({ t: 'pat', v: S.pat });
@@ -1066,6 +1092,11 @@ in2Plug();
 kickEl.addEventListener('change', () => { setK('kick', kickEl.checked); in2Plug(); drawGuide(); lcd('KICK', kickEl.checked ? 'on every beat: into the mix and into IN 2 · hold FN 1 for the duck' : 'off'); });
 const klev = document.getElementById('klev'), klevv = document.getElementById('klevv');
 klev.value = S.k.kickLevel; klevv.textContent = S.k.kickLevel + ' V';
+// KICK DECAY: 40 ms .. 1 s, level time constant of the built-in kick (and a fade on your own).
+const kdec = document.getElementById('kdec'), kdecv = document.getElementById('kdecv');
+const kdecS = v => 0.04 * Math.pow(25, v), kdecV = sec => Math.log(sec / 0.04) / Math.log(25);
+kdec.value = kdecV(S.k.kickDecay).toFixed(2); kdecv.textContent = Math.round(S.k.kickDecay * 1000) + ' ms';
+kdec.addEventListener('input', () => { const sec = kdecS(+kdec.value); setK('kickDecay', sec); kdecv.textContent = Math.round(sec * 1000) + ' ms'; lcd('KICK DECAY', Math.round(sec * 1000) + ' ms: how fast the kick dies away'); });
 klev.addEventListener('input', () => { setK('kickLevel', +klev.value); klevv.textContent = klev.value + ' V'; lcd('KICK LEVEL', klev.value + ' V peak into IN 2 and the mix'); });
 // Your own kick: decoded here, nothing is uploaded. Not kept after a reload.
 const kfile = document.getElementById('kfile'), kbuiltin = document.getElementById('kbuiltin');
@@ -1142,7 +1173,46 @@ function preview() {
     if (got) drawScope(got);
   });
 }
-window.addEventListener('resize', () => drawScope());
+// Sidechain scope (see the Engine's capture): top lane the kick, bottom lane the duck (negative) and the bass.
+const dcv = document.getElementById('dscope'), dcx = dcv.getContext('2d');
+let lastDs = null;
+function drawDuckScope(d) {
+  if (d) lastDs = d; d = lastDs;
+  const dpr = Math.min(2, window.devicePixelRatio || 1), W = dcv.clientWidth || 600, H = dcv.clientHeight || 300;
+  if (dcv.width !== Math.round(W * dpr)) { dcv.width = Math.round(W * dpr); dcv.height = Math.round(H * dpr); }
+  const c = dcx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+  const mid = H / 2, l1 = { top: 8, zero: mid / 2 + 4, h: mid / 2 - 12 }, l2 = { zero: mid + 8, h: mid - 20 };
+  c.font = '11px "IBM Plex Mono", monospace'; c.textBaseline = 'middle';
+  c.strokeStyle = 'rgba(157,242,180,.13)'; c.lineWidth = 1;
+  for (const y of [l1.zero, l2.zero, l2.zero + l2.h]) { c.beginPath(); c.moveTo(0, Math.round(y) + .5); c.lineTo(W, Math.round(y) + .5); c.stroke(); }
+  c.strokeStyle = 'rgba(157,242,180,.35)'; c.beginPath(); c.moveTo(0, Math.round(mid) + .5); c.lineTo(W, Math.round(mid) + .5); c.stroke();
+  c.fillStyle = 'rgba(157,242,180,.6)';
+  c.fillText('KICK ON IN 2', 6, 12); c.fillText('DUCK (DOWN) + BASS', 6, mid + 12);
+  if (!d) { c.fillText('waiting for a kick…', W / 2 - 60, mid / 2); return; }
+  const n = d.duck.length, X = i => i / (n - 1) * W;
+  c.fillStyle = 'rgba(157,242,180,.6)'; c.textAlign = 'right';
+  c.fillText(Math.round(d.ms) + ' ms (one beat)', W - 6, H - 8); c.fillText('0', W - 6, mid + 1); c.textAlign = 'left';
+  // Kick waveform band (±10 V) and what the duck hears.
+  c.fillStyle = 'rgba(200,200,200,.45)';
+  for (let i = 0; i < n; i++) { const a = l1.zero - d.kmax[i] / 10 * l1.h, b = l1.zero - d.kmin[i] / 10 * l1.h; c.fillRect(X(i), a, Math.max(1, W / n), Math.max(1, b - a)); }
+  c.strokeStyle = '#ffb446'; c.lineWidth = 2; c.beginPath();
+  for (let i = 0; i < n; i++) { const y = l1.zero - d.heard[i] * l1.h; i ? c.lineTo(X(i), y) : c.moveTo(X(i), y); } c.stroke();
+  // Duck as a negative envelope, and the bass after it.
+  c.fillStyle = 'rgba(80,140,255,.35)'; c.strokeStyle = '#5b8cff'; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(0, l2.zero); for (let i = 0; i < n; i++) c.lineTo(X(i), l2.zero + d.duck[i] * l2.h); c.lineTo(W, l2.zero); c.closePath(); c.fill();
+  c.beginPath(); for (let i = 0; i < n; i++) { const y = l2.zero + d.duck[i] * l2.h; i ? c.lineTo(X(i), y) : c.moveTo(X(i), y); } c.stroke();
+  c.fillStyle = 'rgba(255,111,166,.55)';
+  const bs = l2.h / 2 / 3.33;  // bass band: ±3.33 V around the middle of the lane
+  for (let i = 0; i < n; i++) { const yc = l2.zero + l2.h / 2, a = yc - d.bmax[i] * bs, b = yc - d.bmin[i] * bs; c.fillRect(X(i), a, Math.max(1, W / n), Math.max(1, b - a)); }
+  // Where the bass is back (duck under 5 %).
+  let back = -1; for (let i = n - 1; i >= 0; i--) { if (d.duck[i] > 0.05) { back = i + 1; break; } }
+  c.textAlign = 'left';
+  if (back >= 0 && back < n) { c.strokeStyle = '#ff4a3d'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(back), mid); c.lineTo(X(back), H); c.stroke(); c.fillStyle = '#ff6b5e'; c.fillText('bass back ' + Math.round(back / n * d.ms) + ' ms', Math.min(X(back) + 4, W - 130), mid + 26); }
+  else if (back >= n) { c.fillStyle = '#ff6b5e'; c.fillText('bass not back before the next kick', W / 2 - 100, mid + 26); }
+  else { c.fillStyle = 'rgba(157,242,180,.6)'; c.fillText('no duck (depth at zero: hold FN 1, turn SHAPE 2)', W / 2 - 150, mid + 26); }
+}
+window.addEventListener('resize', () => { drawScope(); drawDuckScope(); });
+drawDuckScope();
 
 /* ===================== init ===================== */
 bpm.value = S.k.bpm; bpmv.textContent = S.k.bpm; master.value = S.k.master;
