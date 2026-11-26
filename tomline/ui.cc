@@ -61,6 +61,10 @@ const uint16_t kLfoLayerDefaults[KNOB_LAST] = {
   0,      // tune fully down: 0 V on EXCITE 2 plays C1
   0       // pitch sweep off
 };
+const uint16_t kDuckLayerDefaults[2] = {
+  0,      // duck off
+  32768   // release at noon: the bass is back about 240 ms after a kick
+};
 
 static inline int32_t Abs(int32_t x) { return x < 0 ? -x : x; }
 
@@ -84,14 +88,31 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     settings_.voct_k = kDefaultVoctK;
     copy(&kLfoLayerDefaults[0], &kLfoLayerDefaults[KNOB_LAST],
          &settings_.lfo_layer[0]);
+    copy(&kDuckLayerDefaults[0], &kDuckLayerDefaults[2],
+         &settings_.duck_layer[0]);
     settings_.magic = kSettingsMagic;
-    // Settings saved by the firmware before the LFO: keep them. The new
-    // record is written from the start of the settings pages (version 0),
-    // which erases each page before its first write, as for a fresh module.
+    // Settings saved by an older firmware: keep them. The new record is
+    // written from the start of the settings pages (version 0), which erases
+    // each page before its first write, as for a fresh module.
+    SettingsV2 v2;
     SettingsV1 old;
     uint16_t old_token;
-    if (settings_storage.ParsimoniousLoad(&old, &old_token) &&
+    if (settings_storage.ParsimoniousLoad(&v2, &old_token) &&
+        v2.magic == kSettingsMagic) {
+      // Before the duck: everything carries over, the duck starts off.
+      settings_.engine = v2.engine;
+      settings_.snap = v2.snap;
+      settings_.lfo_shape = v2.lfo_shape;
+      settings_.flags = v2.flags;
+      copy(&v2.second_layer[0], &v2.second_layer[KNOB_LAST],
+           &settings_.second_layer[0]);
+      settings_.voct_offset = v2.voct_offset;
+      settings_.voct_k = v2.voct_k;
+      copy(&v2.lfo_layer[0], &v2.lfo_layer[KNOB_LAST],
+           &settings_.lfo_layer[0]);
+    } else if (settings_storage.ParsimoniousLoad(&old, &old_token) &&
         old.magic == kSettingsMagic) {
+      // Before the LFO.
       settings_.engine = old.engine;
       settings_.snap = old.snap;
       copy(&old.second_layer[0], &old.second_layer[KNOB_LAST],
@@ -149,7 +170,9 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   second_layer_latched_ = false;
   meter_held_ = false;
   fn2_held_ = false;
+  fn1_held_ = false;
   fn1_with_fn2_ = false;
+  duck_level_ = 0;
 
   mode_ = UI_MODE_NORMAL;
   settings_dirty_ = false;
@@ -262,6 +285,7 @@ void Ui::HandleEvents() {
       if (!e.ignored) {
         OnButtonReleased(e.button, e.duration);
       }
+      if (e.button == BUTTON_FN_1) fn1_held_ = false;
       if (e.button == BUTTON_FN_2) fn2_held_ = false;
       if (e.button == BUTTON_METER) meter_held_ = false;
     }
@@ -291,6 +315,9 @@ void Ui::OnButtonPressed(uint8_t button) {
   if (button == BUTTON_FN_1) {
     fn1_with_fn2_ = fn2_held_;  // FN 1 does nothing on the FN 2 page
     lfo_button_[button] = !fn2_held_ && meter_page;
+    // Held, from the main or the METER page: the duck page. Its tap still
+    // does its job at the release if no knob was turned.
+    fn1_held_ = !fn2_held_;
   } else if (button == BUTTON_FN_2) {
     lfo_button_[button] = meter_page;
     if (!meter_page) {
@@ -410,6 +437,7 @@ void Ui::OnButtonsCombo() {
 //   METER: SHAPE 1 = crush, MOD 1 = LFO depth, MOD 2 = LFO speed
 //   FN 2:  SHAPE 1 = tune (lfo_layer slot 2), MOD 1 = glide (second_layer
 //          slot 3)
+//   FN 1:  SHAPE 2 = duck depth, MOD 2 = duck release (duck_layer)
 uint16_t* Ui::KnobValue(uint8_t layer, uint8_t knob) {
   if (layer == 1) {
     if (knob == KNOB_SHAPE_1) return &settings_.second_layer[KNOB_SHAPE_1];
@@ -422,11 +450,17 @@ uint16_t* Ui::KnobValue(uint8_t layer, uint8_t knob) {
     if (knob == KNOB_MOD_1) return &settings_.second_layer[KNOB_MOD_2];
     return NULL;
   }
+  if (layer == 3) {
+    if (knob == KNOB_SHAPE_2) return &settings_.duck_layer[0];
+    if (knob == KNOB_MOD_2) return &settings_.duck_layer[1];
+    return NULL;
+  }
   if (knob == KNOB_SHAPE_2) return &settings_.second_layer[KNOB_SHAPE_2];
   return &main_layer_[knob];
 }
 
-// FN 2 held wins over METER; METER held or latched wins over the main layer.
+// FN 2 held wins over FN 1 held, FN 1 held over METER; METER held or latched
+// wins over the main layer.
 void Ui::UpdateLayer(bool hold_knobs) {
   if (mode_ != UI_MODE_NORMAL) {
     return;
@@ -434,6 +468,8 @@ void Ui::UpdateLayer(bool hold_knobs) {
   uint8_t layer = 0;
   if (fn2_held_) {
     layer = 2;
+  } else if (fn1_held_) {
+    layer = 3;
   } else if (meter_held_ || second_layer_latched_) {
     layer = 1;
   }
@@ -497,7 +533,7 @@ void Ui::ComputeParameters() {
   ComputeVoiceParameters(
       settings_.engine, settings_.snap, main_layer, settings_.second_layer,
       settings_.lfo_layer, settings_.lfo_shape, &n,
-      (settings_.flags & kFlagLfoFree) != 0);
+      (settings_.flags & kFlagLfoFree) != 0, settings_.duck_layer);
   // Copy field by field: each 32-bit store is atomic for the interrupt.
   volatile int32_t* dst = reinterpret_cast<volatile int32_t*>(&parameters_);
   const int32_t* src = reinterpret_cast<const int32_t*>(&n);
@@ -620,7 +656,7 @@ void Ui::PaintLeds() {
   }
 
   // Normal mode. Amber instead of green on the METER page, red on the FN 2
-  // page.
+  // page, yellow on the duck page (FN 1 held).
   uint8_t red = layer_ ? 255 : 0;
   uint8_t green = layer_ == 1 ? 120 : (layer_ == 2 ? 0 : 255);
   leds_.set(settings_.engine, red, green);
@@ -644,6 +680,17 @@ void Ui::PaintLeds() {
   }
   if (layer_ == 2) {
     return;  // FN 2 page: tune and glide only, right column off
+  }
+  if (layer_ == 3) {
+    // Right column: a meter of the kick heard on IN 2, from the bottom, in
+    // red. It moves even with the depth at zero, so the patch can be checked.
+    int32_t level = duck_level_;
+    for (uint8_t row = 0; row < 4; ++row) {
+      if (level > (3 - row) * 8192 + 1024) {
+        leds_.set(4 + row, 255, 0);
+      }
+    }
+    return;
   }
   for (uint8_t row = 0; row < 4; ++row) {
     if (3 - row < settings_.snap) {

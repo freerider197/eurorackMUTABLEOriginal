@@ -19,7 +19,7 @@ int main() {
   const int32_t kCountsPerVolt = 3972;
   const int32_t kVoctK = 12 * 65536 * 256 / kCountsPerVolt;
   struct Case { const char* path; uint8_t engine; uint8_t snap; uint16_t main[4]; uint16_t second[4];
-                uint16_t lfo[4]; uint8_t lfo_shape; bool lfo_free; };
+                uint16_t lfo[4]; uint8_t lfo_shape; bool lfo_free; uint16_t duck[2]; };
   Case cases[] = {
     { "build/tomline_words_bt.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 0, 16384, 0, 0 } },
     { "build/tomline_words_lt.bin", ENGINE_LT, 1, { 29491, 40632, 32768, 19661 }, { 0, 16384, 0, 0 } },
@@ -39,10 +39,14 @@ int main() {
     { "build/tomline_words_crush_rate.bin", ENGINE_BT, 1, { 40000, 60000, 32768, 19661 }, { 20000, 16384, 0, 0 } },
     { "build/tomline_words_crush_low.bin", ENGINE_LT, 2, { 50000, 65535, 32768, 30000 }, { 55000, 16384, 30000, 0 } },
     { "build/tomline_words_sweep.bin", ENGINE_BT, 1, { 29491, 60000, 32768, 19661 }, { 0, 16384, 0, 20000 }, { 50000, 0, 0, 40000 }, LFO_TRIANGLE, false },
+    { "build/tomline_words_duck_full.bin", ENGINE_BT, 1, { 29491, 40632, 32768, 19661 }, { 0, 16384, 0, 0 }, { 32768, 0, 0, 0 }, LFO_TRIANGLE, false, { 65535, 32768 } },
+    { "build/tomline_words_duck_fast.bin", ENGINE_LT, 2, { 50000, 60000, 32768, 30000 }, { 0, 16384, 20000, 0 }, { 32768, 0, 0, 0 }, LFO_TRIANGLE, false, { 40000, 0 } },
+    { "build/tomline_words_duck_slow.bin", ENGINE_BT, 0, { 40000, 50000, 20000, 0 }, { 0, 0, 0, 0 }, { 32768, 0, 0, 0 }, LFO_TRIANGLE, false, { 52000, 65535 } },
   };
   for (const Case& c : cases) {
     VoiceParameters p;
-    ComputeVoiceParameters(c.engine, c.snap, c.main, c.second, c.lfo, c.lfo_shape, &p, c.lfo_free);
+    ComputeVoiceParameters(c.engine, c.snap, c.main, c.second, c.lfo, c.lfo_shape, &p, c.lfo_free,
+                           c.duck);
     Voice voice;
     voice.Init();
     double samples_per_step = kSampleRate * 60.0 / 122.0 / 4.0;
@@ -50,6 +54,9 @@ int main() {
     int step = -1;
     int32_t counts = 0, pitch = 0;
     std::vector<uint16_t> out;
+    // IN 2: an integer kick on every beat (a decaying triangle, about 52 Hz),
+    // the same in compare_browser.js.
+    int32_t kick_amp = 0, kick_phase = 0;
     for (int64_t n = 0; n < static_cast<int64_t>(samples_per_step * 64); ++n) {
       bool trigger = false;
       if (n >= next_step) {
@@ -64,7 +71,12 @@ int main() {
       int32_t semitones = counts * kVoctK >> 8;
       pitch += (semitones - pitch) >> 5;
       uint16_t gain, frequency;
-      voice.Process(p, trigger, pitch, &gain, &frequency);
+      if (n % 15288 == 0) { kick_amp = 24000; kick_phase = 0; }
+      kick_phase = (kick_phase + 110) & 0xffff;
+      int32_t tri = kick_phase < 32768 ? kick_phase - 16384 : 49152 - kick_phase;
+      int32_t kick = tri * kick_amp >> 14;
+      kick_amp -= kick_amp >> 13;
+      voice.Process(p, trigger, pitch, kick, &gain, &frequency);
       out.push_back(gain);
       out.push_back(frequency);
     }

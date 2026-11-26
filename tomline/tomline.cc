@@ -76,7 +76,9 @@ void Process(uint16_t* cv) {
 
   uint16_t gain = 0;
   uint16_t frequency = 0;
-  voice.Process(ui.parameters(), trigger, pitch, &gain, &frequency);
+  // IN 2: the kick, for the sidechain duck.
+  voice.Process(ui.parameters(), trigger, pitch, cv_scaler.audio_sample(1),
+                &gain, &frequency);
 
   if (ui.calibrating()) {
     // Stock calibration: VCAs closed, filters open.
@@ -91,7 +93,8 @@ void Process(uint16_t* cv) {
     DacWrite(1, cv_scaler.ScaleGain(1, 0));
     pwm.Write(1, 65535);
   }
-  ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0), voice.lfo_phase());
+  ui.OnSample(trigger, gain, cv_scaler.raw_gain_sample(0), voice.lfo_phase(),
+              voice.duck_level());
 }
 
 void Init() {

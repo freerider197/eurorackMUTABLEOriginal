@@ -77,6 +77,7 @@ button{font:inherit;color:inherit}
 .oct{display:flex;align-items:center;gap:6px}
 .oct output{font-family:var(--f-mono);min-width:3ch;text-align:center}
 canvas#scope{display:block;width:100%;height:170px;border-radius:6px;background:#0f1412}
+canvas#dscope{display:block;width:100%;height:300px;border-radius:6px;background:#0f1412}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px}
 .fact{border-top:2px solid var(--line);padding-top:8px;font-size:13.5px;color:var(--muted)}
 .fact b{display:block;font-family:var(--f-display);font-weight:600;font-size:13px;letter-spacing:.8px;text-transform:uppercase;color:var(--ink);margin-bottom:2px}
@@ -107,7 +108,7 @@ canvas#scope{display:block;width:100%;height:170px;border-radius:6px;background:
 @media (prefers-reduced-motion:reduce){.pbtn .cap{transition:none}}
 /* Page guide above the panel: what every control does on the page you're on. */
 .guide{background:var(--surface);border:2px solid var(--pc,var(--line));border-radius:10px;padding:10px;margin-bottom:10px;display:grid;gap:8px}
-.gtabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.gtabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .gtabs .btn{padding:6px 4px;font-size:13px}
 .gtabs .btn[aria-pressed="true"]{background:var(--pc);border-color:var(--pc);color:#fff}
 .gmsg{font-family:var(--f-mono);font-size:13px;background:#1b2a22;color:#9df2b4;border-radius:6px;padding:6px 9px;min-height:2.6em}
@@ -135,6 +136,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
           <button class="btn" type="button" id="pgN" style="--pc:#178a46">Normal</button>
           <button class="btn" type="button" id="pgM" style="--pc:#b06800">METER page</button>
           <button class="btn" type="button" id="pgF" style="--pc:#cf3528">FN 2 held</button>
+          <button class="btn" type="button" id="pgD" style="--pc:#8a6a00">FN 1 held</button>
         </div>
         <div class="gmsg"><b id="gk">ENGINE</b><span id="gv">BT · bass tom</span></div>
         <div class="gmap" id="gmap"></div>
@@ -148,6 +150,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
         <label class="sl" for="bpm">TEMPO <input id="bpm" type="range" min="60" max="180" step="1" value="122"><output id="bpmv">122</output></label>
         <label class="sl" for="master">VOLUME <input id="master" type="range" min="0" max="1" step="0.01" value="0.75"></label>
         <button class="btn" type="button" id="fn2lock" aria-pressed="false" title="For a mouse: keeps FN 2 held, so the knobs set tune and glide. Click again (or click FN 2) to let go">Hold FN 2 · Tune</button>
+        <button class="btn" type="button" id="fn1lock" aria-pressed="false" title="For a mouse: keeps FN 1 held, so SHAPE 2 and MOD 2 set the duck. Click again (or click FN 1) to let go">Hold FN 1 · Duck</button>
         <div class="lcd" aria-live="polite"><span id="lcdk">ENGINE</span><span id="lcdv">BT · bass tom</span></div>
       </div>
 
@@ -177,7 +180,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
       <div class="card keys">
         <div class="head">
           <h2>Keys</h2>
-          <span class="hint">A–K on your keyboard, Z / X for octave, Space to play, hold Shift for METER, L for FN 2 (tune, glide). Mouse only: tap METER to latch it, or use Hold FN 2 above</span>
+          <span class="hint">A–K on your keyboard, Z / X for octave, Space to play, hold Shift for METER, L for FN 2 (tune, glide), O for FN 1 (duck). Mouse only: tap METER to latch it, or use Hold FN 2 / Hold FN 1 above</span>
           <div class="oct push"><button class="btn" type="button" id="kod" aria-label="Octave down">−</button><output id="koct">C2</output><button class="btn" type="button" id="kou" aria-label="Octave up">+</button></div>
         </div>
         <div id="piano" class="piano"></div>
@@ -189,8 +192,18 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
         <div class="ab">
           <span class="lbl">LISTEN</span>
           <div class="seg" role="group" aria-label="Offset comparison"><button class="btn" type="button" id="abHw" aria-pressed="true">With offset (hardware)</button><button class="btn" type="button" id="abId" aria-pressed="false">Without offset (ideal)</button></div>
-          <label class="chk" for="kick"><input type="checkbox" id="kick"> Add a kick on every beat, summed DC-coupled like a VCA mixer</label>
+          <label class="chk" for="kick"><input type="checkbox" id="kick"> Kick on every beat: into IN 2 (the duck hears it) and into the mix, summed DC-coupled like a VCA mixer</label>
+          <label class="sl" for="klev">KICK LEVEL <input id="klev" type="range" min="1" max="10" step="0.5" value="6"><output id="klevv">6 V</output></label>
+          <label class="sl" for="kdec">KICK DECAY <input id="kdec" type="range" min="0" max="1" step="0.01" value="0.4"><output id="kdecv">150 ms</output></label>
+          <label class="btn" for="kfile" style="cursor:pointer">Use your own kick…<input type="file" id="kfile" accept="audio/*" hidden></label>
+          <button class="btn" type="button" id="kbuiltin" hidden>Built-in kick</button>
         </div>
+      </div>
+
+      <div class="card scope">
+        <div class="head"><h2>Sidechain scope</h2><span class="hint">one beat from each kick (tick Kick, press Play, set the duck with FN 1)</span></div>
+        <canvas id="dscope" width="800" height="300"></canvas>
+        <p class="note" id="dsnote" style="margin:8px 0 0;font-size:13px;color:var(--muted)">Top: the kick on IN 2 (grey) and its level as the duck hears it (orange, 100 % = enough for a full duck). Bottom: the duck drawn downward (blue: how much the bass is turned down) and the bass on OUT 1 after it (pink). From each hit the Release curve brings the bass back; a shorter kick lets it back sooner. The red line is where the bass is back.</p>
       </div>
 
       <div class="card map">
@@ -202,7 +215,9 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
             <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock. FN 2 held: Glide (fully left = off)</td><td>Pitch LFO amount, up to ±12 st (fully left = off)</td></tr>
             <tr><td>SHAPE 2</td><td>Wave: fully left = sine, then triangle, folded sine, and square at fully right</td><td>Not used</td></tr>
             <tr><td>MOD 2</td><td>Soft distortion: fully left = clean, turning up drives the sound into a soft clipper. The loud start of each hit saturates, the quiet tail comes up; the hit stays as loud as the clean sound (within 1 dB)</td><td>Pitch LFO speed, 0.05–20 Hz</td></tr>
-            <tr><td>FN 1</td><td>Engine: BT or LT</td><td>LFO: restarts on each trigger / free running</td></tr>
+            <tr><td>FN 1</td><td>Tap: engine, BT or LT</td><td>LFO: restarts on each trigger / free running</td></tr>
+            <tr><td>FN 1 held</td><td>Sidechain duck (or hold O), from the main or METER page: SHAPE 2 depth (fully left = off), MOD 2 release (how soon the bass comes back). The kick goes into IN 2; the bass follows its shape. LEDs yellow, the right column is a red meter of the kick heard</td><td>—</td></tr>
+            <tr><td>IN 2</td><td>Kick audio for the duck. It is only listened to, never sent to OUT 1</td><td>—</td></tr>
             <tr><td>FN 2</td><td>Tap: snap, the attack click: off, 0.4, 1.5 or 4 ms</td><td>LFO wave: triangle / ramp up</td></tr>
             <tr><td>FN 2 held</td><td>Tune and glide (or hold L): SHAPE 1 tune, MOD 1 glide. Nothing else; LEDs red. On the METER page the right LEDs show the LFO: the wave LED pulses, the third lit = free running</td><td>—</td></tr>
             <tr><td>METER</td><td>Tap to latch the second row, or hold Shift</td><td>—</td></tr>
@@ -296,7 +311,7 @@ function crushParams(crush) {
   if (crush < F(0.01)) return { crushInc: 0 };
   return { crushInc: Math.trunc(F(fExp2(F(crush * F(-3))) * F(F(F(6000) / K_SR_F) * F(2147483520)))) };
 }
-function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0, lfoFree = 0) {
+function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoShape = 0, lfoFree = 0, duck = null) {
   const bt = engine === 0;
   const decay = F(main[0] / F(65535)), tune = F(main[2] / F(65535)), distortion = F(main[3] / F(65535));
   const crush = F(second[0] / F(65535));  // second[1] unused (was the +1 octave)
@@ -340,8 +355,17 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
     // Pitch sweep (METER + SHAPE 2): lfo[3], up to +12 st, 20 ms fall.
     sweepDepth: F(lfo[3] / F(65535)) < F(0.01) ? 0 : q16(F(F(F(lfo[3] / F(65535)) * F(lfo[3] / F(65535))) * F(12))),
     sweepC: decayQ31(F(0.02)),
+    // Sidechain duck (FN 1 + SHAPE 2 / MOD 2): depth squared; Release, bass
+    // fully back 40 ms .. 800 ms after the hit: curve step per sample.
+    duckDepth: duckDepthQ15(duck),
+    duckRelease: Math.trunc(F(F(2147483520) / F(F(F(0.04) * fExp2(F((duck ? F(duck[1] / F(65535)) : F(0)) * F(4.3219281)))) * K_SR_F))),
     tauSeconds: tau
   };
+}
+
+function duckDepthQ15(duck) {
+  const d = duck ? F(duck[0] / F(65535)) : F(0);
+  return d < F(0.01) ? 0 : q15(F(d * d));
 }
 
 // --- voice.cc ---
@@ -412,11 +436,14 @@ class TomlineVoice {
     this.amp = 0; this.attack = K_UNITY; this.snap = 0; this.sweep = 0; this.partial = 0;
     this.lift = 0; this.hold = K_POWER_UP_HOLD; this.lastMix = 0; this.tail = 0; this.fade = 0; this.rng = 0x21f3a5c1;
     this.crushPhase = 0; this.crushHold = 0;
+    this.scLp = 0; this.lastAc = 0; this.rising = false; this.peak = 0; this.peakHold = 0;
+    this.duckMem = 0; this.duckRetrig = 0; this.duckPhase = 0x7fffffff; this.duck = 0; this.duckLevel = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
   // pitch: semitones above C1, Q16 (as Ui::Pitch). Outputs gainWord (0..65535)
-  // and freqWord (0..65535), exactly as Voice::Process.
-  process(p, trigger, pitch) {
+  // and freqWord (0..65535), exactly as Voice::Process. sidechain: IN 2 in
+  // ADC counts (CvScaler::audio_sample), the kick for the duck.
+  process(p, trigger, pitch, sidechain = 0) {
     if (trigger) {
       this.gliding = p.glideK !== 0 && this.amp > (K_UNITY >> 6);
       this.amp = K_UNITY; this.attack = 0; this.snap = K_UNITY; this.sweep = K_UNITY;
@@ -478,6 +505,34 @@ class TomlineVoice {
       v = clip15(v + (Math.imul(this.tail, this.fade) >> 15));
     }
     this.lastMix = v;
+    // Sidechain duck: DC blocker (10 Hz), rectifier, kick level from the tops
+    // of its half cycles (held 16.5 ms, then a 10 ms fall), hit detection,
+    // the Release curve (1 - t/T)^2 from each hit; duck = min(kick, curve),
+    // gliding 0.5 ms down / 8 ms back. Before the lift.
+    this.scLp += (sidechain * 256 - this.scLp) >> 9;
+    let ac = sidechain - (this.scLp >> 8);
+    if (ac < 0) ac = -ac;
+    if (ac > 32767) ac = 32767;
+    ac <<= 15;
+    if (ac < this.lastAc && this.rising && this.lastAc >= this.peak - (this.peak >> 2)) { this.peak = this.lastAc; this.peakHold = 512; }
+    this.rising = ac > this.lastAc || (this.rising && ac === this.lastAc);
+    this.lastAc = ac;
+    if (ac > this.peak) { this.peak = ac; this.peakHold = 512; }
+    else if (this.peakHold > 0) this.peakHold--;
+    else this.peak = mul31(this.peak, 2140587007);
+    if (this.duckRetrig > 0) this.duckRetrig--;
+    else if (this.peak - this.duckMem > (this.duckMem >> 1) && (this.peak >> 15) > 64) { this.duckPhase = 0; this.duckRetrig = 933; }
+    if (this.peak > this.duckMem) this.duckMem += (this.peak - this.duckMem) >> 9;
+    else this.duckMem = mul31(this.duckMem, 2146792985);
+    if (this.duckPhase < 0x7fffffff - p.duckRelease) this.duckPhase += p.duckRelease; else this.duckPhase = 0x7fffffff;
+    const u = 32767 - (this.duckPhase >> 16), curve = Math.imul(u, u) >> 15;
+    let heard = ((this.peak >> 15) - 64) << 2;
+    heard = heard < 0 ? 0 : (heard > 32767 ? 32767 : heard);
+    this.kickHeard = heard;  // for the sidechain scope only
+    const dt = (heard < curve ? heard : curve) << 15;
+    this.duck += (dt - this.duck) >> (dt > this.duck ? 4 : 8);
+    this.duckLevel = this.duck >> 15;
+    if (p.duckDepth) v = Math.imul(v, 32768 - (Math.imul(this.duck >> 15, p.duckDepth) >> 15)) >> 15;
     // Fixed lift: 1 s at 0 V after power-up, then +1 per sample to mid scale.
     if (this.hold > 0) this.hold--; else if (this.lift < K_LIFT) this.lift++;
     let g = this.lift + v;
@@ -497,7 +552,7 @@ class Engine {
   constructor(sr) {
     this.sr = sr;
     this.k = { engine: 0, snap: 2, main: [9146, 40632, 32768, 19661], second: [0, 0, 0, 0],
-      lfo: [32768, 0, 0, 0], lfoShape: 0, lfoFree: 0, level1: 0, curve1: 1, ideal: false, kick: false, master: 0.75, bpm: 122, playing: false };
+      lfo: [32768, 0, 0, 0], duck: [0, 32768], lfoShape: 0, lfoFree: 0, level1: 0, curve1: 1, ideal: false, kick: false, kickLevel: 6, kickDecay: 0.15, master: 0.75, bpm: 122, playing: false };
     this.p = computeParams(0, 1, this.k.main, this.k.second);
     this.voice = new TomlineVoice();
     this.pat = []; this.pos = -1; this.spc = 0;
@@ -505,6 +560,8 @@ class Engine {
     this.fwAcc = 1; this.pwmFiltered = 65535;
     this.d1 = 0; this.d2 = 0; this.f1 = 0; this.f2 = 0; this.pwmV = 3.3;
     this.kph = 0; this.kam = 0; this.kpe = 0; this.dx = 0; this.dy = 0;
+    this.kv = 0; this.ksmp = null; this.kpos = 1e9; this.ksEnv = 0; this.duckT = 0;  // kick volts now, your own kick sample
+    this.ds = null; this.dsArm = false;  // sidechain scope capture, one beat from each kick
     // The module has been on for a while: past the power-up (1 s at 0 V, then
     // the lift's rise), with OUT 1 and the audio input settled at the lift.
     this.voice.lift = K_LIFT; this.voice.hold = 0;
@@ -516,11 +573,13 @@ class Engine {
   }
   handle(m) {
     if (m.t === 'k') {
-      if (m.k === 'main' || m.k === 'second' || m.k === 'lfo') this.k[m.k][m.i] = m.v; else this.k[m.k] = m.v;
+      if (m.k === 'main' || m.k === 'second' || m.k === 'lfo' || m.k === 'duck') this.k[m.k][m.i] = m.v; else this.k[m.k] = m.v;
       if (m.k === 'playing' && m.v) { this.pos = -1; this.spc = 1e9; }
       // As ui.cc: the voice reads tune from main slot 2; it lives in lfo[2] (FN 2 + SHAPE 1).
       const main = this.k.main.slice(); main[2] = this.k.lfo[2];
-      this.p = computeParams(this.k.engine, this.k.snap, main, this.k.second, this.k.lfo, this.k.lfoShape, this.k.lfoFree);
+      this.p = computeParams(this.k.engine, this.k.snap, main, this.k.second, this.k.lfo, this.k.lfoShape, this.k.lfoFree, this.k.duck);
+    } else if (m.t === 'kicksample') {
+      this.ksmp = m.v; this.kpos = 1e9;  // null = back to the built-in kick
     } else if (m.t === 'pat') {
       this.pat = m.v;
     } else if (m.t === 'note') {
@@ -532,7 +591,7 @@ class Engine {
     this.pos = (this.pos + 1) % this.pat.length;
     const s = this.pat[this.pos];
     this.send({ t: 'step', v: this.pos });
-    if (this.k.kick && this.pos % 4 === 0) { this.kam = 1; this.kpe = 1; this.kph = 0; }
+    if (this.k.kick && this.pos % 4 === 0) { this.kam = 1; this.kpe = 1; this.kph = 0; this.kpos = 0; this.ksEnv = 1; this.dsArm = true; }
     if (s.on) { this.counts = Math.floor(s.n * COUNTS_PER_VOLT / 12); this.pendingTrig = true; }
   }
   // Hardware VCA law from the schematic: current-mode, gain = (I / Iref)^n.
@@ -552,7 +611,28 @@ class Engine {
     // EXCITE 2: V/oct, as Ui::Pitch.
     const semisQ16 = Math.floor(this.counts * VOCT_K / 256);
     this.pitchQ16 += (semisQ16 - this.pitchQ16) >> 5;
-    this.voice.process(this.p, trig, this.pitchQ16);
+    // IN 2: the kick, for the sidechain duck. Its scaling is not measured:
+    // the EXCITE scale is assumed. Inverted, as CvScaler::audio_sample.
+    let sc = Math.trunc(-this.kv * COUNTS_PER_VOLT);
+    sc = sc > 32767 ? 32767 : (sc < -32768 ? -32768 : sc);
+    this.voice.process(this.p, trig, this.pitchQ16, sc);
+    if (++this.duckT >= 1024) { this.duckT = 0; this.send({ t: 'duck', v: this.voice.duckLevel }); }
+    // Sidechain scope: one beat from each kick, 400 columns. Kick volts and
+    // the bass (min / max per column), what the duck hears, and the duck.
+    if (this.dsArm) {
+      this.dsArm = false; const n = 400;
+      this.ds = { n, per: Math.max(1, Math.floor(FW_RATE * 60 / this.k.bpm / n)), i: 0, c: 0,
+        kmin: new Float32Array(n).fill(1e9), kmax: new Float32Array(n).fill(-1e9), bmin: new Float32Array(n).fill(1e9), bmax: new Float32Array(n).fill(-1e9),
+        heard: new Float32Array(n), duck: new Float32Array(n) };
+    }
+    if (this.ds) {
+      const d = this.ds, j = d.i, b = this.voice.v * 3.33;
+      if (this.kv < d.kmin[j]) d.kmin[j] = this.kv; if (this.kv > d.kmax[j]) d.kmax[j] = this.kv;
+      if (b < d.bmin[j]) d.bmin[j] = b; if (b > d.bmax[j]) d.bmax[j] = b;
+      d.heard[j] = this.voice.kickHeard / 32767;
+      d.duck[j] = this.voice.duckLevel * this.p.duckDepth / 1073741824;
+      if (++d.c >= d.per) { d.c = 0; if (++d.i >= d.n) { this.send({ t: 'dscope', v: { kmin: d.kmin, kmax: d.kmax, bmin: d.bmin, bmax: d.bmax, heard: d.heard, duck: d.duck, ms: d.n * d.per / FW_RATE * 1000 } }); this.ds = null; } }
+    }
     if (trig) { this.send({ t: 'trig' }); if (this.si < 0) { this.si = 0; this.sd = 0; } }
     // pwm.Write: 1/16 smoothing, 10-bit.
     this.pwmFiltered += ((65535 - this.voice.freqWord) - this.pwmFiltered) >> 4;
@@ -574,10 +654,19 @@ class Engine {
     const sr = this.sr, n = out.length, k = this.k;
     const sps = sr * 60 / k.bpm / 4;
     const kDac = 1 - Math.exp(-2 * Math.PI * 15915 / sr), kRc = 1 - Math.exp(-2 * Math.PI * 195 / sr);
-    const kpd = Math.exp(-1 / (0.03 * sr)), kad = Math.exp(-1 / (0.28 * sr));
+    const kpd = Math.exp(-1 / (0.03 * sr)), kad = Math.exp(-1 / (k.kickDecay * sr));  // kick pitch 30 ms, level: KICK DECAY
     const rDc = 1 - 2 * Math.PI * 3 / sr;
     for (let i = 0; i < n; i++) {
       if (k.playing) { this.spc += 1; if (this.spc >= sps) { this.spc -= sps; if (this.spc > sps) this.spc = 0; this.step(); } }
+      // The kick (built-in, or your own sample): into the mix and into IN 2.
+      let kv = 0;
+      if (this.ksmp) {
+        if (this.kpos < this.ksmp.length && this.ksEnv > 1e-4) { this.ksEnv *= kad; kv = k.kickLevel * this.ksEnv * this.ksmp[this.kpos++]; }  // KICK DECAY fades your sample too
+      } else if (this.kam > 1e-4) {
+        this.kpe *= kpd; this.kam *= kad; this.kph += (48 + 110 * this.kpe) / sr; if (this.kph >= 1) this.kph -= 1;
+        kv = k.kickLevel * this.kam * Math.sin(6.283185307 * this.kph);
+      }
+      this.kv = kv;
       this.fwAcc += FW_RATE / sr;
       while (this.fwAcc >= 1) { this.fwAcc -= 1; this.fwTick(); }
       const vin = 3.33;  // IN 1 unpatched
@@ -595,9 +684,7 @@ class Engine {
       this.f2 += kf * (this.f1 - this.f2);
       let o1 = this.f2;
       if (o1 > 10.5) o1 = 10.5; else if (o1 < -10.5) o1 = -10.5;  // TL072 rails
-      // Optional kick, summed DC-coupled with OUT 1.
-      let kv = 0;
-      if (this.kam > 1e-4) { this.kpe *= kpd; this.kam *= kad; this.kph += (48 + 110 * this.kpe) / sr; if (this.kph >= 1) this.kph -= 1; kv = 6 * this.kam * Math.sin(6.283185307 * this.kph); }
+      // The kick summed with OUT 1, DC-coupled like a VCA mixer.
       const mm = 10 * Math.tanh((o1 + kv) / 10);
       const y = mm - this.dx + rDc * this.dy; this.dx = mm; this.dy = y;  // AC-coupled audio input
       out[i] = Math.tanh(y * k.master * 0.2);
@@ -613,16 +700,16 @@ const NN = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 // n = semitones of V/oct; the name includes TUNE (FN 2 + SHAPE 1, fully left: 0 V = C1).
 const nname = n => { const m = n + 12 + Math.round((S.k.lfo[2] / 65535 - 0.5) * 24); return NN[((m % 12) + 12) % 12] + (1 + Math.floor(m / 12)); };
 const ENG = ['BT · bass tom', 'LT · low tom'];
-const DEFV = { main: [9146, 40632, 32768, 19661], second: [0, 0, 0, 0], lfo: [32768, 0, 0, 0] };
+const DEFV = { main: [9146, 40632, 32768, 19661], second: [0, 0, 0, 0], lfo: [32768, 0, 0, 0], duck: [0, 32768] };
 const mk = a => a.map(([n, on]) => ({ n, on: !!on }));
 const PATS = [
   mk([[0,1],[0,0],[0,1],[0,1],[0,0],[0,1],[0,1],[0,1],[0,1],[0,0],[0,1],[0,1],[0,1],[0,1],[0,0],[0,1]]),  // all C: 0 V
   mk([[0,1],[0,0],[0,0],[0,1],[0,0],[0,1],[0,0],[0,1],[0,1],[0,0],[0,1],[0,0],[0,1],[0,0],[0,1],[0,1]]),
   mk([[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,0],[0,1],[0,1],[0,0],[0,0],[0,0],[0,1],[0,0],[0,1],[0,1]])
 ];
-const S = { k: { engine: 0, snap: 2, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
-  ideal: false, kick: false, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
-  warn: false };
+const S = { k: { engine: 0, snap: 2, main: DEFV.main.slice(), second: DEFV.second.slice(), lfo: DEFV.lfo.slice(), duck: DEFV.duck.slice(), lfoShape: 0, lfoFree: 0, level1: 0, level2: 0, curve1: 1, curve2: 1,
+  ideal: false, kick: false, kickLevel: 6, kickDecay: 0.15, master: 0.75, bpm: 122 }, pat: PATS[0].map(s => ({ ...s })), sel: 0, layer: 0, latched: false, held: false, fn2: false, fn2Used: false, fn1WithFn2: false, koct: 0,
+  fn1: false, fn1Used: false, fn1Lock: false, duckLevel: 0, warn: false };
 try { const j = JSON.parse(localStorage.getItem('tomline-fw-v1') || 'null'); if (j && j.k && j.pat && j.pat.length === 16) { if (!j.wave && j.k.second) j.k.second[2] = 0; /* saved before the wave: start at sine */ if (!j.crush && j.k.second) j.k.second[0] = 0; /* was the noise level: crush starts off */ if (!j.snap && typeof j.k.snap === 'number') j.k.snap = j.k.snap >= 2 ? 3 : j.k.snap + 1; /* old 0.4/1.5/4/10 ms: one step up */ if (!j.tune && j.k.lfo) j.k.lfo[2] = 0; /* tune moved to FN 2 + SHAPE 2: start at C1 */ if (!j.sweep && j.k.lfo) j.k.lfo[3] = 0; /* saved before the sweep: off */ Object.assign(S.k, j.k); if (j.cpat) S.pat = j.pat; /* patterns saved before the all-C default: back to it */ } } catch (e) {}
 S.k.ideal = false; delete S.k.in1;
 let saveT = 0;
@@ -635,10 +722,13 @@ function onMsg(m) {
   else if (m.t === 'scope') drawScope(m.v);
   else if (m.t === 'trig') blinkTrig();
   else if (m.t === 'leds') { S.warn = m.warn; drawLeds(); }
+  else if (m.t === 'duck') { S.duckLevel = m.v; if (S.layer === 3) paintDuck(); }
+  else if (m.t === 'dscope') drawDuckScope(m.v);
 }
 function syncAll() {
-  for (const key of ['engine','snap','lfoShape','lfoFree','level1','curve1','ideal','kick','master','bpm']) post({ t: 'k', k: key, v: S.k[key] });
+  for (const key of ['engine','snap','lfoShape','lfoFree','level1','curve1','ideal','kick','kickLevel','kickDecay','master','bpm']) post({ t: 'k', k: key, v: S.k[key] });
   for (let i = 0; i < 4; i++) { for (const key of ['main', 'second', 'lfo']) post({ t: 'k', k: key, i, v: S.k[key][i] }); }
+  for (let i = 0; i < 2; i++) post({ t: 'k', k: 'duck', i, v: S.k.duck[i] });
   post({ t: 'pat', v: S.pat });
 }
 const ENGINE_SRC = () => {
@@ -670,7 +760,7 @@ async function startAudio() {
   return starting;
 }
 function setK(key, v, i) {
-  if (key === 'main' || key === 'second' || key === 'lfo') { S.k[key][i] = v; post({ t: 'k', k: key, i, v }); }
+  if (key === 'main' || key === 'second' || key === 'lfo' || key === 'duck') { S.k[key][i] = v; post({ t: 'k', k: key, i, v }); }
   else { S.k[key] = v; post({ t: 'k', k: key, v }); }
   save(); preview();
   if (key === 'lfo' && i === 2) { drawSteps(); setOct(S.koct); }
@@ -679,13 +769,14 @@ function setK(key, v, i) {
 /* ===================== panel (Streams layout, 562 x 1200 units) ===================== */
 const svg = document.getElementById('panel');
 const C1 = '#c9306b', C2 = '#2fadb3';
-// layer 0 / 1 / 2 targets: ['main'|'second'|'lfo', index] or a hardware key.
+// layer 0 / 1 / 2 / 3 targets: ['main'|'second'|'lfo'|'duck', index] or a hardware key.
 const KN = [
-  // As ui.cc KnobValue: METER = crush, LFO depth, —, LFO speed; FN 2 = tune, glide, —, —.
-  { id: 's1', x: 98, y: 182, cap: '#f4f4f4', p: [['main', 0], ['second', 0], ['lfo', 2]] },
-  { id: 'm1', x: 98, y: 400, cap: '#f4f4f4', p: [['main', 1], ['lfo', 1], ['second', 3]] },
-  { id: 's2', x: 462, y: 182, cap: '#f4f4f4', p: [['second', 2], ['lfo', 3], ['none']] },
-  { id: 'm2', x: 462, y: 400, cap: '#f4f4f4', p: [['main', 3], ['lfo', 0], ['none']] },
+  // As ui.cc KnobValue: METER = crush, LFO depth, —, LFO speed; FN 2 = tune, glide, —, —;
+  // FN 1 = —, —, duck depth, duck release.
+  { id: 's1', x: 98, y: 182, cap: '#f4f4f4', p: [['main', 0], ['second', 0], ['lfo', 2], ['none']] },
+  { id: 'm1', x: 98, y: 400, cap: '#f4f4f4', p: [['main', 1], ['lfo', 1], ['second', 3], ['none']] },
+  { id: 's2', x: 462, y: 182, cap: '#f4f4f4', p: [['second', 2], ['lfo', 3], ['none'], ['duck', 0]] },
+  { id: 'm2', x: 462, y: 400, cap: '#f4f4f4', p: [['main', 3], ['lfo', 0], ['none'], ['duck', 1]] },
   { id: 'l1', x: 98, y: 630, cap: C1, p: [['level1']] },
   { id: 'l2', x: 462, y: 630, cap: C2, p: [['level2']] },
   { id: 'r1', x: 280, y: 567, trim: true, p: [['curve1']] },
@@ -694,7 +785,7 @@ const KN = [
 const JK = [
   { id: 'ex1', x: 70, y: 905, name: 'EXCITE 1', plug: '#e9a93a', what: 'patched · trigger from the sequencer' },
   { id: 'in1', x: 212, y: 905, name: 'IN 1', what: 'not used, leave empty' },
-  { id: 'in2', x: 350, y: 905, name: 'IN 2', what: 'not used' },
+  { id: 'in2', x: 350, y: 905, name: 'IN 2', plug: '#8b5cf6', what: 'the kick, for the sidechain duck (tick Kick under the scope)' },
   { id: 'ex2', x: 492, y: 905, name: 'EXCITE 2', plug: '#3d86f0', what: 'patched · V/oct from the sequencer' },
   { id: 'lv1', x: 70, y: 1032, name: 'LEVEL 1', what: 'not used, leave empty' },
   { id: 'o1', x: 212, y: 1032, name: 'OUT 1', plug: C1, what: 'patched · the sound' },
@@ -761,7 +852,7 @@ ${curveIcon(232,608,C1,false)}${curveIcon(328,608,C1,true)}${curveIcon(232,742,C
 ${sub(100,766,'KEEP AT ZERO')}${sub(462,766,'NOT USED')}
 <line x1="30" y1="800" x2="532" y2="800" stroke="#b2b5bb" stroke-width="3"/>
 ${t(70,846,'EXCITE','pl','style="font-size:23px"')}${t(212,846,'IN','pl','style="font-size:23px"')}${t(350,846,'IN','pl','style="font-size:23px"')}${t(492,846,'EXCITE','pl','style="font-size:23px"')}
-${sub(70,864,'TRIG')}${sub(212,864,'NOT USED')}${sub(492,864,'V/OCT')}
+${sub(70,864,'TRIG')}${sub(212,864,'NOT USED')}${sub(350,864,'KICK')}${sub(492,864,'V/OCT')}
 <rect x="24" y="958" width="92" height="32" rx="8" fill="${C1}"/>${t(70,982,'LEVEL','pl','style="font-size:21px;fill:#fff"')}
 <rect x="446" y="958" width="92" height="32" rx="8" fill="${C2}"/>${t(492,982,'LEVEL','pl','style="font-size:21px;fill:#fff"')}
 <rect x="165" y="953" width="94" height="139" rx="8" fill="#5e6168"/>${t(212,983,'OUT','pl','style="font-size:22px;fill:#fff"')}
@@ -781,6 +872,8 @@ const META = {
   'second0': { n: 'CRUSH', f: v => v < 0.01 ? 'off' : Math.round(6000 * Math.pow(2, -3 * v)) + ' Hz' },
   'lfo3': { n: 'SWEEP', f: v => v < 0.01 ? 'off' : 'starts +' + (v * v * 12).toFixed(1) + ' st, falls in 20 ms' },
   'none': { n: 'NOT USED', f: () => 'this knob does nothing on this layer' },
+  'duck0': { n: 'DUCK', f: v => v < 0.01 ? 'off' : v > 0.99 ? 'bass silent at the kick' : (20 * Math.log10(1 - v * v)).toFixed(1) + ' dB at the kick' },
+  'duck1': { n: 'RELEASE', f: v => 'bass fully back ' + Math.round(40 * Math.pow(20, v)) + ' ms after the hit (sooner if the kick is shorter)' },
   'second2': { n: 'WAVE', f: v => v < 0.01 ? 'sine' : v < 1 / 3 ? 'sine → triangle' : v < 2 / 3 ? 'triangle → folded' : v < 0.99 ? 'folded → square' : 'square' },
   'second3': { n: 'GLIDE', f: v => v < 0.01 ? 'off' : Math.round((0.004 + v * v * 0.5) * 1000) + ' ms' },
   'lfo0': { n: 'LFO SPEED', f: v => { const hz = 0.05 * Math.pow(400, v); return (hz < 1 ? hz.toFixed(2) : hz.toFixed(1)) + ' Hz'; } },
@@ -794,18 +887,21 @@ const META = {
 const lcdk = document.getElementById('lcdk'), lcdv = document.getElementById('lcdv');
 function lcd(k, v) { lcdk.textContent = k; lcdv.textContent = v; const a = document.getElementById('gk'), b = document.getElementById('gv'); if (a) { a.textContent = k; b.textContent = v; } }
 // Page guide: the four knobs (as on the panel) and the buttons, for the page you're on.
-const PAGE = [{ name: 'Normal', c: '#178a46' }, { name: 'METER page', c: '#b06800' }, { name: 'FN 2 held', c: '#cf3528' }];
+const PAGE = [{ name: 'Normal', c: '#178a46' }, { name: 'METER page', c: '#b06800' }, { name: 'FN 2 held', c: '#cf3528' }, { name: 'FN 1 held', c: '#8a6a00' }];
 const KNAME = { s1: 'SHAPE 1', s2: 'SHAPE 2', m1: 'MOD 1', m2: 'MOD 2' };
 function drawGuide() {
   const g = document.getElementById('guide'); if (!g) return;
   const pc = PAGE[S.layer].c; g.style.setProperty('--pc', pc);
-  ['pgN', 'pgM', 'pgF'].forEach((id, i) => document.getElementById(id).setAttribute('aria-pressed', S.layer === i));
+  ['pgN', 'pgM', 'pgF', 'pgD'].forEach((id, i) => document.getElementById(id).setAttribute('aria-pressed', S.layer === i));
   document.getElementById('gmap').innerHTML = ['s1', 's2', 'm1', 'm2'].map(id => {
     const k = KN.find(x => x.id === id), tg = target(k), m = META[keyOf(tg)], off = tg[0] === 'none';
     return `<div class="gk${off ? ' off' : ''}"><div class="w">${KNAME[id]}</div><div class="n">${off ? 'not used' : m.n}</div><div class="v">${off ? '—' : m.f(getV(tg))}</div></div>`;
   }).join('');
   const lfoWave = S.k.lfoShape ? 'ramp up' : 'triangle', lfoMode = S.k.lfoFree ? 'free running' : 'restarts on each hit';
-  const rows = S.layer === 2 ? [
+  const rows = S.layer === 3 ? [
+    ['IN 2', S.k.kick ? 'the kick is patched in: the bass ducks to it' : 'tick <u>Kick</u> under the scope to patch a kick in'],
+    ['FN 1', 'release (or click Normal above) to go back · a tap without a turn still does its job']
+  ] : S.layer === 2 ? [
     ['FN 2', 'release (or click Normal above) to go back'],
     ['FN 1, METER', 'do nothing on this page']
   ] : S.layer === 1 ? [
@@ -817,7 +913,8 @@ function drawGuide() {
     ['FN 1 click', 'engine, now <u>' + ENG[S.k.engine] + '</u>'],
     ['FN 2 click', 'snap, now <u>' + ['off', '0.4 ms', '1.5 ms', '4 ms'][S.k.snap] + '</u>'],
     ['METER click', 'METER page: crush, sweep, LFO'],
-    ['Keyboard', 'hold Shift = METER page, hold L = FN 2']
+    ['FN 1 hold', 'duck page: SHAPE 2 depth, MOD 2 release'],
+    ['Keyboard', 'hold Shift = METER page, hold L = FN 2, hold O = FN 1']
   ];
   document.getElementById('gbtns').innerHTML = rows.map(([a, b]) => `<div><b style="color:${pc}">${a}:</b> ${b}</div>`).join('');
 }
@@ -831,12 +928,13 @@ function drawKnob(k) {
   g.setAttribute('aria-valuenow', Math.round(v * 100)); g.setAttribute('aria-label', m.n); g.setAttribute('aria-valuetext', m.f(v));
 }
 function drawKnobs() { KN.forEach(drawKnob); drawGuide(); }
-const DEFAULT = { none: 0.5, main: DEFV.main, second: DEFV.second, lfo: DEFV.lfo, level1: 0, level2: 0, curve1: 1, curve2: 1 };
+const DEFAULT = { none: 0.5, main: DEFV.main, second: DEFV.second, lfo: DEFV.lfo, duck: DEFV.duck, level1: 0, level2: 0, curve1: 1, curve2: 1 };
 function setKnob(k, v) {
   v = Math.max(0, Math.min(1, v)); const tg = target(k);
   if (tg[0] === 'none') { lcd(META.none.n, META.none.f()); return; }
   setV(tg, v); drawKnob(k); drawGuide();
   if (S.layer === 2) S.fn2Used = true;
+  if (S.layer === 3) S.fn1Used = true;
   const m = META[keyOf(tg)]; lcd(m.n, m.f(v));
   if (tg[0] === 'level1' || tg[0] === 'curve1') { /* the firmware's setup check updates the LED within 0.5 s */ }
 }
@@ -874,8 +972,10 @@ function lfoLed(t) {
   for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), i === S.k.lfoShape ? amberAt((w + 32768) / 65535) : (i === 2 && S.k.lfoFree ? '#ffb446' : null));
   lfoRaf = requestAnimationFrame(lfoLed);
 }
+// FN 1 page: the right column is a meter of the kick heard on IN 2, in red (as ui.cc).
+function paintDuck() { for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), S.duckLevel > (3 - i) * 8192 + 1024 ? '#ff4a3d' : null); }
 function drawLeds() {
-  const on = S.layer === 2 ? '#ff4a3d' : (S.layer ? '#ffb446' : '#6be07b');
+  const on = S.layer === 3 ? '#ffe14a' : S.layer === 2 ? '#ff4a3d' : (S.layer ? '#ffb446' : '#6be07b');
   paint(document.getElementById('L0'), S.k.engine === 0 ? on : null);
   paint(document.getElementById('L1'), S.k.engine === 1 ? on : null);
   const blink = (Math.floor(performance.now() / 256) & 1) === 1;
@@ -883,6 +983,7 @@ function drawLeds() {
   paint(document.getElementById('L3'), trigOn ? '#6be07b' : null);
   if (S.layer === 1) { if (!lfoRaf) { lfoUiT = 0; lfoRaf = requestAnimationFrame(lfoLed); } }
   else if (S.layer === 2) for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), null);  // FN 2 page: tune, glide only
+  else if (S.layer === 3) paintDuck();
   else for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), (3 - i) < S.k.snap ? on : null);
   svg.classList.toggle('shift', S.layer === 1);
   svg.classList.toggle('lfo', S.layer === 2);
@@ -901,13 +1002,25 @@ function press(id, fn) {
 }
 let comboing = false;
 function combo() { comboing = true; lcd('FN 1 + FN 2', 'V/oct calibration: runs on the module (1 V, then 3 V)'); }
-// As ui.cc: FN 1 does nothing on the FN 2 page; on the METER page it is LFO restart on trigger / free running.
+// As ui.cc: FN 1 does nothing on the FN 2 page; on the METER page its tap is LFO restart on trigger / free running.
+// Held (not on the FN 2 page): the duck page; a knob turned meanwhile cancels the tap.
 const meterPage = () => !(S.fn2 || S.fn2Lock) && (S.latched || S.held);
-document.getElementById('b1').addEventListener('pointerdown', () => { S.fn1WithFn2 = S.fn2 || S.fn2Lock; S.fn1Lfo = meterPage(); if (S.fn1WithFn2) S.fn2Used = true; });
+document.getElementById('b1').addEventListener('pointerdown', () => {
+  S.fn1WithFn2 = S.fn2 || S.fn2Lock; S.fn1Lfo = meterPage(); if (S.fn1WithFn2) S.fn2Used = true;
+  else { S.fn1 = true; S.fn1Used = false; setLayer(); }
+});
 press('b1', () => {
+  if (S.fn1Lock) { S.fn1 = false; setFn1Lock(false); return; }  // a click on FN 1 lets go of the hold
+  const used = S.fn1Used; S.fn1 = false; setLayer();
   if (S.fn1WithFn2) { S.fn1WithFn2 = false; lcd('FN 1', 'does nothing while FN 2 is held'); return; }
+  if (used) return;
   if (S.fn1Lfo) { setK('lfoFree', S.k.lfoFree ? 0 : 1); drawLeds(); lcd('LFO MODE', S.k.lfoFree ? 'free running' : 'restarts on each hit'); return; }
   setK('engine', (S.k.engine + 1) % 2); drawLeds(); drawKnobs(); lcd('ENGINE', ENG[S.k.engine]); });
+{
+  const b1 = document.getElementById('b1');
+  const off = () => { if (S.fn1) { S.fn1 = false; setLayer(); } };
+  b1.addEventListener('pointerup', off); b1.addEventListener('pointerleave', off); b1.addEventListener('pointercancel', off);
+}
 // FN 2: tap = snap. Held (or L held on the keyboard) = LFO layer; a knob or
 // METER used meanwhile cancels the snap step, as in ui.cc.
 press('b2', () => {
@@ -925,14 +1038,21 @@ press('b2', () => {
 // Hold FN 2 button (for a mouse): FN 2 stays held until clicked again.
 S.fn2Lock = false;
 const fn2LockBtn = document.getElementById('fn2lock');
-function setFn2Lock(on) { S.fn2Lock = on; S.fn2Used = true; fn2LockBtn.setAttribute('aria-pressed', on); setLayer(); }
+function setFn2Lock(on) { S.fn2Lock = on; S.fn2Used = true; fn2LockBtn.setAttribute('aria-pressed', on); if (on && S.fn1Lock) { S.fn1Lock = false; fn1LockBtn.setAttribute('aria-pressed', false); } setLayer(); }
 fn2LockBtn.addEventListener('click', () => setFn2Lock(!S.fn2Lock));
-document.getElementById('pgN').addEventListener('click', () => { S.latched = false; if (S.fn2Lock) setFn2Lock(false); else setLayer(); });
-document.getElementById('pgM').addEventListener('click', () => { S.latched = true; if (S.fn2Lock) setFn2Lock(false); else setLayer(); });
+// Hold FN 1 button (for a mouse): the duck page stays open until clicked again.
+const fn1LockBtn = document.getElementById('fn1lock');
+function setFn1Lock(on) { S.fn1Lock = on; S.fn1Used = true; fn1LockBtn.setAttribute('aria-pressed', on); if (on && S.fn2Lock) { S.fn2Lock = false; fn2LockBtn.setAttribute('aria-pressed', false); } setLayer(); }
+fn1LockBtn.addEventListener('click', () => setFn1Lock(!S.fn1Lock));
+function unlockAll() { if (S.fn2Lock) { S.fn2Lock = false; fn2LockBtn.setAttribute('aria-pressed', false); } if (S.fn1Lock) { S.fn1Lock = false; fn1LockBtn.setAttribute('aria-pressed', false); } }
+document.getElementById('pgN').addEventListener('click', () => { S.latched = false; unlockAll(); setLayer(); });
+document.getElementById('pgM').addEventListener('click', () => { S.latched = true; unlockAll(); setLayer(); });
 document.getElementById('pgF').addEventListener('click', () => setFn2Lock(true));
+document.getElementById('pgD').addEventListener('click', () => setFn1Lock(true));
 function setLayer() {
-  const l = (S.fn2 || S.fn2Lock) ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
-  if (l === 2) lcd('FN 2 held', 'SHAPE 1 tune, MOD 1 glide');
+  const l = (S.fn2 || S.fn2Lock) ? 2 : (S.fn1 || S.fn1Lock) ? 3 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
+  if (l === 3) lcd('FN 1 held', 'SHAPE 2 duck depth, MOD 2 release · the kick goes into IN 2');
+  else if (l === 2) lcd('FN 2 held', 'SHAPE 1 tune, MOD 1 glide');
   else if (l === 1) lcd('METER page', 'crush, sweep, LFO amount and speed · FN 1: LFO ' + (S.k.lfoFree ? 'free running' : 'restart on hit') + ' · FN 2: LFO wave ' + (S.k.lfoShape ? 'ramp up' : 'triangle'));
   else lcd('Normal page', 'decay, tone, wave, drive');
 }
@@ -981,7 +1101,34 @@ const abHw = document.getElementById('abHw'), abId = document.getElementById('ab
 function setIdeal(on) { setK('ideal', on); abHw.setAttribute('aria-pressed', !on); abId.setAttribute('aria-pressed', on); lcd('LISTEN', on ? 'without offset · ideal output' : 'with offset · what the hardware gives'); }
 abHw.addEventListener('click', () => setIdeal(false)); abId.addEventListener('click', () => setIdeal(true));
 const kickEl = document.getElementById('kick'); kickEl.checked = !!S.k.kick;
-kickEl.addEventListener('change', () => { setK('kick', kickEl.checked); lcd('KICK', kickEl.checked ? 'on every beat, mixed DC-coupled' : 'off'); });
+const in2Plug = () => { const pl = document.querySelector('#j-in2 .plug'); if (pl) pl.setAttribute('visibility', S.k.kick ? 'visible' : 'hidden'); };
+in2Plug();
+kickEl.addEventListener('change', () => { setK('kick', kickEl.checked); in2Plug(); drawGuide(); lcd('KICK', kickEl.checked ? 'on every beat: into the mix and into IN 2 · hold FN 1 for the duck' : 'off'); });
+const klev = document.getElementById('klev'), klevv = document.getElementById('klevv');
+klev.value = S.k.kickLevel; klevv.textContent = S.k.kickLevel + ' V';
+// KICK DECAY: 40 ms .. 1 s, level time constant of the built-in kick (and a fade on your own).
+const kdec = document.getElementById('kdec'), kdecv = document.getElementById('kdecv');
+const kdecS = v => 0.04 * Math.pow(25, v), kdecV = sec => Math.log(sec / 0.04) / Math.log(25);
+kdec.value = kdecV(S.k.kickDecay).toFixed(2); kdecv.textContent = Math.round(S.k.kickDecay * 1000) + ' ms';
+kdec.addEventListener('input', () => { const sec = kdecS(+kdec.value); setK('kickDecay', sec); kdecv.textContent = Math.round(sec * 1000) + ' ms'; lcd('KICK DECAY', Math.round(sec * 1000) + ' ms: how fast the kick dies away'); });
+klev.addEventListener('input', () => { setK('kickLevel', +klev.value); klevv.textContent = klev.value + ' V'; lcd('KICK LEVEL', klev.value + ' V peak into IN 2 and the mix'); });
+// Your own kick: decoded here, nothing is uploaded. Not kept after a reload.
+const kfile = document.getElementById('kfile'), kbuiltin = document.getElementById('kbuiltin');
+kfile.addEventListener('change', async () => {
+  const f = kfile.files && kfile.files[0]; if (!f) return;
+  try {
+    await startAudio();
+    const buf = await ctx.decodeAudioData(await f.arrayBuffer());
+    const d = buf.getChannelData(0).slice(0, Math.floor(buf.sampleRate * 2));
+    let peak = 0; for (const x of d) peak = Math.max(peak, Math.abs(x));
+    if (peak > 0) for (let i = 0; i < d.length; i++) d[i] /= peak;
+    post({ t: 'kicksample', v: d }); kbuiltin.hidden = false;
+    if (!S.k.kick) { kickEl.checked = true; setK('kick', true); in2Plug(); }
+    lcd('KICK', f.name + ' · on every beat');
+  } catch (e) { lcd('KICK', 'could not read that file'); }
+  kfile.value = '';
+});
+kbuiltin.addEventListener('click', () => { post({ t: 'kicksample', v: null }); kbuiltin.hidden = true; lcd('KICK', 'built-in kick'); });
 
 /* ===================== keys ===================== */
 const piano = document.getElementById('piano');
@@ -1002,11 +1149,12 @@ window.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   const k = e.key.toLowerCase();
   if (k === 'l') { if (meterPage()) return; S.fn2 = true; S.fn2Used = true; setLayer(); return; }
+  if (k === 'o') { S.fn1 = true; S.fn1Used = true; setLayer(); return; }
   if (k === ' ' && !(e.target.closest && e.target.closest('button,[role="slider"],[role="button"],[role="switch"]'))) { e.preventDefault(); togglePlay(); return; }
   const i = QW.indexOf(k); if (i >= 0) { playKey(i); return; }
   if (k === 'z') setOct(S.koct - 1); if (k === 'x') setOct(S.koct + 1);
 });
-window.addEventListener('keyup', e => { if (e.key === 'Shift') { S.held = false; setLayer(); } if (e.key.toLowerCase() === 'l') { S.fn2 = false; setLayer(); } });
+window.addEventListener('keyup', e => { if (e.key === 'Shift') { S.held = false; setLayer(); } if (e.key.toLowerCase() === 'l') { S.fn2 = false; setLayer(); } if (e.key.toLowerCase() === 'o') { S.fn1 = false; setLayer(); } });
 
 /* ===================== scope ===================== */
 const cv = document.getElementById('scope'), cx2 = cv.getContext('2d');
@@ -1039,7 +1187,46 @@ function preview() {
     if (got) drawScope(got);
   });
 }
-window.addEventListener('resize', () => drawScope());
+// Sidechain scope (see the Engine's capture): top lane the kick, bottom lane the duck (negative) and the bass.
+const dcv = document.getElementById('dscope'), dcx = dcv.getContext('2d');
+let lastDs = null;
+function drawDuckScope(d) {
+  if (d) lastDs = d; d = lastDs;
+  const dpr = Math.min(2, window.devicePixelRatio || 1), W = dcv.clientWidth || 600, H = dcv.clientHeight || 300;
+  if (dcv.width !== Math.round(W * dpr)) { dcv.width = Math.round(W * dpr); dcv.height = Math.round(H * dpr); }
+  const c = dcx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+  const mid = H / 2, l1 = { top: 8, zero: mid / 2 + 4, h: mid / 2 - 12 }, l2 = { zero: mid + 8, h: mid - 20 };
+  c.font = '11px "IBM Plex Mono", monospace'; c.textBaseline = 'middle';
+  c.strokeStyle = 'rgba(157,242,180,.13)'; c.lineWidth = 1;
+  for (const y of [l1.zero, l2.zero, l2.zero + l2.h]) { c.beginPath(); c.moveTo(0, Math.round(y) + .5); c.lineTo(W, Math.round(y) + .5); c.stroke(); }
+  c.strokeStyle = 'rgba(157,242,180,.35)'; c.beginPath(); c.moveTo(0, Math.round(mid) + .5); c.lineTo(W, Math.round(mid) + .5); c.stroke();
+  c.fillStyle = 'rgba(157,242,180,.6)';
+  c.fillText('KICK ON IN 2', 6, 12); c.fillText('DUCK (DOWN) + BASS', 6, mid + 12);
+  if (!d) { c.fillText('waiting for a kick…', W / 2 - 60, mid / 2); return; }
+  const n = d.duck.length, X = i => i / (n - 1) * W;
+  c.fillStyle = 'rgba(157,242,180,.6)'; c.textAlign = 'right';
+  c.fillText(Math.round(d.ms) + ' ms (one beat)', W - 6, H - 8); c.fillText('0', W - 6, mid + 1); c.textAlign = 'left';
+  // Kick waveform band (±10 V) and what the duck hears.
+  c.fillStyle = 'rgba(200,200,200,.45)';
+  for (let i = 0; i < n; i++) { const a = l1.zero - d.kmax[i] / 10 * l1.h, b = l1.zero - d.kmin[i] / 10 * l1.h; c.fillRect(X(i), a, Math.max(1, W / n), Math.max(1, b - a)); }
+  c.strokeStyle = '#ffb446'; c.lineWidth = 2; c.beginPath();
+  for (let i = 0; i < n; i++) { const y = l1.zero - d.heard[i] * l1.h; i ? c.lineTo(X(i), y) : c.moveTo(X(i), y); } c.stroke();
+  // Duck as a negative envelope, and the bass after it.
+  c.fillStyle = 'rgba(80,140,255,.35)'; c.strokeStyle = '#5b8cff'; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(0, l2.zero); for (let i = 0; i < n; i++) c.lineTo(X(i), l2.zero + d.duck[i] * l2.h); c.lineTo(W, l2.zero); c.closePath(); c.fill();
+  c.beginPath(); for (let i = 0; i < n; i++) { const y = l2.zero + d.duck[i] * l2.h; i ? c.lineTo(X(i), y) : c.moveTo(X(i), y); } c.stroke();
+  c.fillStyle = 'rgba(255,111,166,.55)';
+  const bs = l2.h / 2 / 3.33;  // bass band: ±3.33 V around the middle of the lane
+  for (let i = 0; i < n; i++) { const yc = l2.zero + l2.h / 2, a = yc - d.bmax[i] * bs, b = yc - d.bmin[i] * bs; c.fillRect(X(i), a, Math.max(1, W / n), Math.max(1, b - a)); }
+  // Where the bass is back (duck under 5 %).
+  let back = -1; for (let i = n - 1; i >= 0; i--) { if (d.duck[i] > 0.05) { back = i + 1; break; } }
+  c.textAlign = 'left';
+  if (back >= 0 && back < n) { c.strokeStyle = '#ff4a3d'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(back), mid); c.lineTo(X(back), H); c.stroke(); c.fillStyle = '#ff6b5e'; c.fillText('bass back ' + Math.round(back / n * d.ms) + ' ms', Math.min(X(back) + 4, W - 130), mid + 26); }
+  else if (back >= n) { c.fillStyle = '#ff6b5e'; c.fillText('bass not back before the next kick', W / 2 - 100, mid + 26); }
+  else { c.fillStyle = 'rgba(157,242,180,.6)'; c.fillText('no duck (depth at zero: hold FN 1, turn SHAPE 2)', W / 2 - 150, mid + 26); }
+}
+window.addEventListener('resize', () => { drawScope(); drawDuckScope(); });
+drawDuckScope();
 
 /* ===================== init ===================== */
 bpm.value = S.k.bpm; bpmv.textContent = S.k.bpm; master.value = S.k.master;

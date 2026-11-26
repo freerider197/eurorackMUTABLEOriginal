@@ -386,7 +386,7 @@ int main() {
   Check(Near(ui->settings_.second_layer[S2], 50000) && stmlib::sim_settings_saves == 1,
         "SHAPE 2 turned: wave follows the knob, saved");
   Check(ui->settings_.lfo_layer[S2] == 0, "  ... tune unchanged");
-  Settings old_record;
+  SettingsV2 old_record;
   memset(&old_record, 0, sizeof(old_record));
   old_record.engine = ENGINE_LT;
   old_record.snap = 2;
@@ -432,7 +432,70 @@ int main() {
   old_record.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune | kFlagSweep;
   Start();
   Check(ui->settings_.lfo_layer[KNOB_MOD_2] == 25000, "settings saved with a sweep: kept");
+  Check(ui->settings_.duck_layer[0] == 0 && ui->settings_.duck_layer[1] == 32768,
+        "  ... saved before the duck: duck off, release at noon");
+  Settings new_record;
+  memset(&new_record, 0, sizeof(new_record));
+  new_record.engine = ENGINE_LT;
+  new_record.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune | kFlagSweep;
+  new_record.voct_k = 12345;
+  new_record.duck_layer[0] = 40000;
+  new_record.duck_layer[1] = 10000;
+  new_record.magic = kSettingsMagic;
+  stmlib::sim_settings_record = &new_record;
+  stmlib::sim_settings_record_size = sizeof(new_record);
+  Start();
+  Check(ui->settings_.duck_layer[0] == 40000 && ui->settings_.duck_layer[1] == 10000 &&
+        ui->settings_.engine == ENGINE_LT && ui->settings_.voct_k == 12345,
+        "settings saved with the duck: all kept");
   stmlib::sim_settings_record = NULL;
+
+  printf("Duck layer (FN 1 held)\n");
+  Start();
+  Down(BUTTON_FN_1);
+  Check(ui->layer_ == 3, "FN 1 held: duck layer");
+  Turn(S2, 60000, 800);
+  Turn(KNOB_MOD_2, 10000, 800);
+  Up(BUTTON_FN_1);
+  Ms(2500);
+  Check(Near(ui->settings_.duck_layer[0], 60000) && Near(ui->settings_.duck_layer[1], 10000),
+        "FN 1 held, SHAPE 2 and MOD 2 turned: depth and release follow");
+  Check(ui->settings_.engine == ENGINE_BT, "  ... FN 1 let go after a turn: engine unchanged");
+  Check(ui->parameters_.duck_depth > 0, "  ... the voice gets the duck depth");
+  Check(stmlib::sim_settings_saves == 1, "  ... saved once");
+  Check(ui->layer_ == 0 && Near(ui->settings_.second_layer[S2], 0) &&
+        ui->main_layer_[KNOB_MOD_2] == 32768,
+        "  ... back on the main page: wave and distortion untouched");
+  Tap(BUTTON_FN_1);
+  Ms(100);
+  Check(ui->settings_.engine == ENGINE_LT, "FN 1 tap: engine still switches");
+  Down(BUTTON_FN_1);
+  Turn(S1, 0, 800);
+  Turn(M1, 0, 800);
+  Up(BUTTON_FN_1);
+  Check(ui->main_layer_[S1] == 32768 && ui->main_layer_[M1] == 32768,
+        "FN 1 held, SHAPE 1 and MOD 1 turned: nothing changes");
+  uint8_t flags = ui->settings_.flags, engine = ui->settings_.engine;
+  Down(BUTTON_FN_2);
+  Down(BUTTON_FN_1);
+  Check(ui->layer_ == 2, "FN 2 held, then FN 1: still the FN 2 page");
+  Up(BUTTON_FN_1);
+  Up(BUTTON_FN_2);
+  Ms(100);
+  Check(ui->settings_.flags == flags && ui->settings_.engine == engine,
+        "  ... and the FN 1 tap does nothing there");
+  Tap(BUTTON_METER);  // METER page latched
+  Down(BUTTON_FN_1);
+  Check(ui->layer_ == 3, "METER page, FN 1 held: duck page");
+  Turn(KNOB_MOD_2, 40000, 800);
+  Up(BUTTON_FN_1);
+  Ms(100);
+  Check(ui->layer_ == 1 && Near(ui->settings_.duck_layer[1], 40000) && ui->settings_.flags == flags,
+        "  ... MOD 2 sets the release, back on the METER page, free run unchanged");
+  Tap(BUTTON_FN_1);
+  Ms(100);
+  Check((ui->settings_.flags & kFlagLfoFree) != (flags & kFlagLfoFree),
+        "METER page, FN 1 tap: LFO free run still toggles");
 
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);
   return failures ? 1 : 0;

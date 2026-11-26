@@ -39,9 +39,10 @@ the comparison (see Tests), then `python3 tomline/tools/make_standalone.py`.
 | EXCITE 2 | V/oct. 0 V = C1 (32.7 Hz) with Tune (FN 2 + SHAPE 1) fully down, the default; C2 at noon |
 | OUT 1 | The sound, swinging around +3.33 V (0 V to about +6.7 V, see "Offset"). Use an AC-coupled input (Erica Black Quad VCA2: IN 1–3, not IN 4) |
 | IN 1 | Not used, leave empty |
+| IN 2 | Optional: kick audio (a copy from a mult) for the sidechain duck. Only listened to, never sent to OUT 1 |
 | Channel 1 response trimmer (small magenta knob) | **Fully clockwise (LIN)** |
 | LEVEL MOD 1 (big magenta knob) | **Fully counter-clockwise** |
-| LEVEL 1, IN 2, LEVEL 2, OUT 2, LEVEL MOD 2, trimmer 2 | Not used |
+| LEVEL 1, LEVEL 2, OUT 2, LEVEL MOD 2, trimmer 2 | Not used |
 
 If LEVEL MOD 1 or the channel 1 trimmer is set wrong, LED 3 of the left column
 blinks red.
@@ -54,7 +55,8 @@ blinks red.
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve). **FN 2 held: Glide** between notes (fully CCW = off) | Pitch LFO amount (depth): fully CCW = off, up to ±12 semitones |
 | SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change | Pitch sweep. Fully CCW = off (the default); turning up makes each hit start higher, up to +12 semitones at fully CW (+3 at noon), and fall back to the note with a 20 ms time constant, so the held note stays in tune |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Pitch LFO speed, 0.05 to 20 Hz (1 Hz at noon) |
-| FN 1 (left button) | Engine: BT / LT | LFO restarts on each trigger (default) / free running |
+| FN 1 (left button), tap | Engine: BT / LT | LFO restarts on each trigger (default) / free running |
+| FN 1, hold | Duck layer, from the main or the METER page: **SHAPE 2 = Duck depth** (fully CCW = off, the default; fully CW = the bass is silent at the kick's peak). **MOD 2 = Release**: counted from each kick hit, the bass is fully back 40 ms later at fully CCW, 180 ms at noon, 0.8 s at fully CW (sooner if the kick is shorter). The kick is patched into IN 2. SHAPE 1 and MOD 1 do nothing here. A tap without a turn still does its job | |
 | FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | LFO wave: triangle / ramp up. FN 2 doesn't open its own page from here |
 | FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. Nothing else (SHAPE 2, MOD 2, FN 1 and METER do nothing here). Everything LFO lives on the METER page | |
 | METER, tap | Latch / unlatch the second layer | |
@@ -76,7 +78,19 @@ always goes to pitch and is added after the glide. By default every trigger
 restarts it at the middle of its wave (no pitch jump, going up), so each hit
 gets the same pitch movement; free running, it ignores triggers.
 
-Engine, snap, crush, wave, glide, LFO speed, amount, wave and free run, Tune, sweep, and the
+Sidechain duck: patch a copy of your kick into IN 2 (the other copy goes to
+your mixer as usual). On each kick hit Tomline turns its own bass down at
+once (0.5 ms), then brings it back on a smooth curve, (1 - t / Release)^2:
+fast at first, easing in, fully back at the Release time even if the kick
+still rings. A shorter kick lets the bass back sooner, following the kick's
+own fade. That is the "pumping" glue of a kick and bass, without an
+external VCA and inverted envelope. Only the bass wave gets quieter; OUT 1's rest level (+3.33 V) does
+not move, so a DC-coupled mixer does not thump. A kick of about 2 V peak or
+more gives the full duck; under about 16 mV IN 2 counts as silent. With
+nothing in IN 2 nothing ducks. Plugging a cable into IN 2 can duck the bass
+for a moment (the jump from the jack's +3.33 V to 0 V looks like a hit).
+
+Engine, snap, crush, wave, glide, LFO speed, amount, wave and free run, Tune, sweep, duck depth and release, and the
 V/oct calibration are saved to flash 2 s after the last change. Settings saved
 by an older Tomline (before the LFO) are read once: engine, snap, second-layer
 values and V/oct calibration carry over, and the LFO starts off. Settings saved
@@ -87,7 +101,10 @@ off (that slot was the noise level; the noise is gone). Settings saved
 before Tune moved to FN 2 start with Tune fully down (C1 at 0 V). Settings saved before the sweep start with the sweep off. A snap saved before
 "off" existed keeps its length (10 ms becomes 4 ms). Going back to an older
 Tomline keeps all settings except free run, which reads as "restart on
-trigger", and plays the snap one step longer.
+trigger", and plays the snap one step longer. Settings saved before the duck
+carry over, with the duck off. The duck made the saved record bigger: an older
+Tomline flashed back finds the settings as they were before the duck build (or
+its defaults), not later changes.
 
 ## LEDs
 
@@ -102,6 +119,7 @@ trigger", and plays the snap one step longer.
 | METER page: right column top (triangle) or 2nd (ramp up) pulsing amber | LFO wave; the pulse follows the LFO, so its speed shows even at zero amount |
 | METER page: right column 3rd LED amber | LFO free running (off = restarts on each trigger) |
 | FN 2 held: engine LED red, right column off | Tune and glide page |
+| FN 1 held: engine LED yellow, right column a red meter from the bottom | Duck page; the meter shows the kick heard on IN 2 (all four = full duck at full depth), even with the depth at zero, so you can check the patch |
 
 ## Offset
 
@@ -178,6 +196,7 @@ Every row below was read from the code in `streams/` and the schematic
 
 Heard on the module by the owner: the soft-distortion build (v10,
 `tomline-v10-distortion.wav`, commit 5d530a7, merged in #24) flashed and sounded good.
+The kick duck build (`tomline-v16-duck-release.wav`, #32) was flashed and works.
 Not measured yet:
 
 - Peak output level (about 6.7 V expected, from gain.h and the schematic).
@@ -186,6 +205,7 @@ Not measured yet:
 - V/oct tracking before calibration: resistor and 3.3 V tolerances can be off by a few percent, so calibrate.
 - CPU time in the audio interrupt. Estimated well under the budget (the voice is about 400 instructions, the budget is 2316 cycles per sample), not measured.
 - The BT and LT sounds are modeled by ear, not from Elektron's circuits.
+- IN 2's scale (counts per volt) for the duck: assumed to match EXCITE's. If a kick ducks too little or too much, the sensitivity can be changed.
 
 ## Building
 
@@ -208,8 +228,8 @@ Check the stack after every firmware change:
 python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
 ```
 
-Last run: worst case 596 bytes (main loop 332, SysTick 100, audio interrupt
-164), 4096 reserved, 3500 to spare. The
+Last run: worst case 620 bytes (main loop 348, SysTick 100, audio interrupt
+172), 4096 reserved, 3476 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -242,7 +262,14 @@ within 6 dB, the triangle has its 5th harmonic, the fold adds bright
 harmonics, the square has odd harmonics, and the level stays within 1 dB,
 that MOD 2 keeps the hit's level within 1 dB at every Decay and Wave,
 and Crush: the sample rate just past off, at noon and at full, and that the
-level stays, and that snap off has no click noise or pitch blip.
+level stays, and that snap off has no click noise or pitch blip,
+and the sidechain duck (a kick model on IN 2): depth at zero and an empty
+IN 2 change nothing, the duck's depth at the hit, the Release times counted
+from the hit, a short kick letting the bass back sooner, a smooth return
+(no steps), a new duck on every kick, no click, and the rest level
+unchanged under a duck. It writes `build/tomline_duck.wav` (the roller with a
+kick on every beat, ducked, kick mixed in) and `tomline_duck_off.wav` to
+compare.
 It also checks that OUT 1 rests at 3.33 V, that its average level doesn't jump
 on a hit, and the power-up (0 V for 1 s, then a slow rise). It exits
 with an error if a check fails.
@@ -265,6 +292,14 @@ BT -0.5 to +0.1 dB, LT -0.1 to +0.2 dB (without the level matching: about
 -1.7 to +1.6 dB); triangle 5th harmonic 1 s into a long note BT -36.1 dB (sine
 -40.8), LT -42.6 dB (sine -58.3): the level matching
 clips the triangle's tips a little; square 3rd harmonic BT -8.3, LT -9.6 dB (ideal -9.5).
+Duck: depth at zero and IN 2 empty: VCA words identical to no duck; 6 V
+kick, 3-8 ms in: full depth -29.3 dB, 71 % depth -5.7 dB; long kick, bass
+fully back (duck under 1 %) 57 / 171 / 729 ms after the hit at Release fully
+CCW / noon / fully CW (expected 54 / 179 / 738); 20 ms kick with Release at
+800 ms: bass back 85 ms after the hit; after its deepest point the duck
+never deepens again (0.00 %); a kick on every beat at 122 BPM ducks fully
+each time and the bass is back before the next; rest level unchanged. IN 2's scale is assumed to match EXCITE's (3972 counts per volt),
+not measured.
 Snap off: largest jump in the first 3 ms of a hit BT 0.08 V, LT 0.08 V (0.4 ms
 snap: 0.27 / 0.19 V).
 Crush sample rate (just past off / noon / full): 5856 / 2120 / 748 Hz
@@ -291,13 +326,14 @@ g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tom
 ./build/tomline_panel
 ```
 
-Last run: all 68 checks OK. Without the LEDs-off reading, the model moves
+Last run: all 83 checks OK (FN 1 held + SHAPE 2 / MOD 2 set the duck, a
+tap still does its job, records from before the duck carry over). Without the LEDs-off reading, the model moves
 untouched values on page changes; with it, nothing moves.
 
-`tomline/test/words.cc` dumps the firmware's VCA and filter words for 13
+`tomline/test/words.cc` dumps the firmware's VCA and filter words for 16
 patches (BT, LT, glide, everything at maximum, LFO triangle and ramp up, each
 restarting and free running, the wave at triangle, folded and square, and
-crush at two rates), and
+crush at two rates, and the duck at three settings with a kick on IN 2), and
 `tomline/test/compare_browser.js` runs the browser port on the same input:
 
 ```
@@ -306,7 +342,7 @@ g++ -O2 -I. -o build/tomline_words tomline/test/words.cc tomline/voice.cc tomlin
 node tomline/test/compare_browser.js
 ```
 
-Last run: identical in all 13 cases (244,627 samples each, zero
+Last run: identical in all 16 cases (244,627 samples each, zero
 difference).
 
 ## Files
