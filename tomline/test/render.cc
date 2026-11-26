@@ -340,6 +340,42 @@ bool LfoRestartOk() {
   return ok;
 }
 
+// Pitch sweep (TEST, METER + SHAPE 2, the LFO layer's slot 3). Off must not
+// change the sound. At full: the first 50 ms of a C2 hit has more zero
+// crossings than without (it starts 12 st up), and 0.2-1.2 s in the pitch is
+// back on C2 (the held note stays in tune). Returns the error in cents.
+double SweepTailCents(bool* start_higher, bool* off_same) {
+  Patch base = { ENGINE_BT, 2, { 65535, 65535, 32768, 0 }, { 0, 0, 0, 0 },
+                 { 0, 0, 0, 0 } };
+  Patch sweep = base;
+  sweep.lfo_layer[3] = 65535;
+  VoiceParameters p;
+  ComputeVoiceParameters(ENGINE_BT, 2, base.main_layer, base.second_layer,
+                         base.lfo_layer, 0, &p);
+  *off_same = p.sweep_depth == 0;
+  int crossings[2];
+  for (int k = 0; k < 2; ++k) {
+    const Patch& pt = k ? sweep : base;
+    ComputeVoiceParameters(ENGINE_BT, 0, pt.main_layer, pt.second_layer,
+                           pt.lfo_layer, 0, &p);
+    Voice voice;
+    voice.Init();
+    uint16_t g, f;
+    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+    int prev = 0, count = 0;
+    for (int i = 0; i < static_cast<int>(0.05 * kFirmwareRate); ++i) {
+      voice.Process(p, i == 0, 12 << 16, &g, &f);
+      int v = static_cast<int>(g) - 32767;
+      if (prev < 0 && v >= 0) ++count;
+      prev = v;
+    }
+    crossings[k] = count;
+  }
+  *start_higher = crossings[1] > crossings[0] + 1;
+  double hz = MeasurePitch(sweep, 0);
+  return 1200.0 * log2(hz / 65.40639133);
+}
+
 // Depth at zero: the speed knob must not change the sound at all.
 bool LfoOffIsSilent(const std::vector<Step>& steps) {
   Patch slow = { ENGINE_BT, 2, { 9146, 40632, 32768, 19661 },
@@ -954,6 +990,12 @@ int main() {
   printf("LFO restart: every trigger restarts it at mid-wave, free run leaves it: %s\n",
          lfo_restart_ok ? "OK" : "FAIL");
   failures += !lfo_restart_ok;
+  bool sweep_start, sweep_off;
+  double sweep_cents = SweepTailCents(&sweep_start, &sweep_off);
+  bool sweep_ok = sweep_start && sweep_off && fabs(sweep_cents) < 1.0;
+  printf("Pitch sweep (TEST): off = none, full starts higher, 0.2-1.2 s later %+.2f cents from C2  %s\n",
+         sweep_cents, sweep_ok ? "OK" : "FAIL");
+  failures += !sweep_ok;
   bool lfo_off_ok = LfoOffIsSilent(roller);
   printf("LFO depth at zero, speed turned: sound unchanged  %s\n",
          lfo_off_ok ? "OK" : "FAIL");

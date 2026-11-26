@@ -163,6 +163,13 @@ void ComputeVoiceParameters(
   n.lfo_shape = lfo_shape == LFO_RAMP_UP ? LFO_RAMP_UP : LFO_TRIANGLE;
   n.lfo_free = lfo_free ? 1 : 0;
 
+  // Pitch sweep (TEST): up to +12 semitones on a squared curve, so small
+  // amounts are easy to set, falling back with a 20 ms time constant (within
+  // 10 cents of the note 100 ms after the hit at full amount).
+  float sweep = lfo_layer[KNOB_MOD_2] / 65535.0f;
+  n.sweep_depth = sweep < 0.01f ? 0 : Q16(sweep * sweep * 12.0f);
+  n.sweep_coefficient = DecayQ31(0.02f);
+
 }
 
 }  // namespace tomline

@@ -65,6 +65,8 @@ struct VoiceParameters {
   int32_t lfo_depth;            // semitones, Q16, 0 = off
   int32_t lfo_shape;            // LfoShape
   int32_t lfo_free;             // 1 = free running, 0 = restarts on each trigger
+  int32_t sweep_coefficient;    // Q31 per-sample decay of the pitch sweep
+  int32_t sweep_depth;          // semitones, Q16, start of the sweep, 0 = off
 };
 
 class Voice {
@@ -132,6 +134,7 @@ class Voice {
   int32_t amp_;       // Q30
   int32_t attack_;    // Q30
   int32_t snap_;      // Q30
+  int32_t sweep_;     // Q30, pitch sweep envelope
   int32_t partial_;   // Q30
   int32_t lift_;      // VCA word the wave swings around
   int32_t hold_;      // power-up samples left at 0 V

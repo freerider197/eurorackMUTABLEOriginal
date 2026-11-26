@@ -127,6 +127,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     main_layer_[i] = pot_[i];
     press_pot_[i] = pot_[i];
   }
+  sweep_ = 0;
   calibration_pot_[0] = calibration_pot_[1] = 0;
   fill(&press_time_[0], &press_time_[BUTTON_LAST], 0);
   fill(&long_press_handled_[0], &long_press_handled_[BUTTON_LAST], false);
@@ -395,7 +396,7 @@ uint16_t* Ui::KnobValue(uint8_t layer, uint8_t knob) {
     if (knob == KNOB_SHAPE_1) return &settings_.second_layer[KNOB_SHAPE_1];
     if (knob == KNOB_MOD_1) return &settings_.lfo_layer[KNOB_MOD_1];
     if (knob == KNOB_MOD_2) return &settings_.lfo_layer[KNOB_SHAPE_1];
-    return NULL;
+    return &sweep_;  // SHAPE 2: pitch sweep (TEST, not saved)
   }
   if (layer == 2) {
     if (knob == KNOB_SHAPE_1) return &settings_.lfo_layer[KNOB_SHAPE_2];
@@ -460,7 +461,7 @@ void Ui::ReadKnobs() {
     uint16_t* value = KnobValue(layer_, i);
     if (value && pickup_[i].Follow(pot_[i], elapsed, value)) {
       parameters_dirty_ = true;
-      if (layer_ || i == KNOB_SHAPE_2) {  // saved values
+      if (value != &sweep_ && (layer_ || i == KNOB_SHAPE_2)) {  // saved values
         SettingsChanged();
       }
     }
@@ -474,9 +475,13 @@ void Ui::ComputeParameters() {
   uint16_t main_layer[KNOB_LAST];
   copy(&main_layer_[0], &main_layer_[KNOB_LAST], &main_layer[0]);
   main_layer[KNOB_SHAPE_2] = settings_.lfo_layer[KNOB_SHAPE_2];
+  // The sweep goes to the voice through the unused LFO-layer slot 3.
+  uint16_t lfo_layer[KNOB_LAST];
+  copy(&settings_.lfo_layer[0], &settings_.lfo_layer[KNOB_LAST], &lfo_layer[0]);
+  lfo_layer[KNOB_MOD_2] = sweep_;
   ComputeVoiceParameters(
       settings_.engine, settings_.snap, main_layer, settings_.second_layer,
-      settings_.lfo_layer, settings_.lfo_shape, &n,
+      lfo_layer, settings_.lfo_shape, &n,
       (settings_.flags & kFlagLfoFree) != 0);
   // Copy field by field: each 32-bit store is atomic for the interrupt.
   volatile int32_t* dst = reinterpret_cast<volatile int32_t*>(&parameters_);

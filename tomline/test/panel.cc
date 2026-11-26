@@ -325,13 +325,20 @@ int main() {
   Down(BUTTON_METER);
   Turn(M1, 20000, 400);
   Turn(M2, 45000, 400);
-  Turn(S2, 10000, 400);
   Up(BUTTON_METER);
   Ms(300);
   Check(Near(ui->settings_.lfo_layer[M1], 20000), "METER + MOD 1: LFO depth follows");
   Check(Near(ui->settings_.lfo_layer[S1], 45000), "METER + MOD 2: LFO speed follows");
   Check(Near(ui->settings_.second_layer[S2], 50000) && ui->settings_.second_layer[M2] == 0 &&
-        ui->settings_.second_layer[M1] == 0, "METER + SHAPE 2 does nothing (wave, glide unchanged)");
+        ui->settings_.second_layer[M1] == 0, "  ... wave and glide unchanged");
+  Ms(2500);  // the LFO values are saved first
+  stmlib::sim_settings_saves = 0;
+  Down(BUTTON_METER);
+  Turn(S2, 40000, 400);
+  Up(BUTTON_METER);
+  Ms(2500);
+  Check(Near(ui->sweep_, 40000) && stmlib::sim_settings_saves == 0,
+        "METER + SHAPE 2: pitch sweep (TEST) follows, not saved");
   Down(BUTTON_FN_2);
   Turn(S1, 10000, 400);
   Turn(M1, 30000, 400);

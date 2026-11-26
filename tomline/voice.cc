@@ -97,6 +97,7 @@ void Voice::Init() {
   amp_ = 0;
   attack_ = kUnity;
   snap_ = 0;
+  sweep_ = 0;
   partial_ = 0;
   lift_ = 0;
   hold_ = kPowerUpHold;
@@ -120,6 +121,7 @@ void Voice::Process(
     amp_ = kUnity;
     attack_ = 0;
     snap_ = kUnity;
+    sweep_ = kUnity;
     crush_phase_ = 0xffffffffUL;  // crush: take a sample right away
     partial_ = kUnity;
     phase_ = 0;
@@ -152,6 +154,7 @@ void Voice::Process(
   // Envelopes.
   amp_ = Decay(amp_, p.amp_coefficient);
   snap_ = Decay(snap_, p.snap_coefficient);
+  sweep_ = Decay(sweep_, p.sweep_coefficient);
   partial_ = Decay(partial_, p.partial_coefficient);
   if (attack_ < kUnity) {
     attack_ += kAttackStep;
@@ -172,6 +175,9 @@ void Voice::Process(
 
   // Oscillators.
   s += static_cast<int32_t>(static_cast<int64_t>(p.snap_depth) * snap_ >> 30);
+  // Pitch sweep (METER + SHAPE 2): each hit starts above the note and falls
+  // back to it, so the held pitch stays in tune.
+  s += static_cast<int32_t>(static_cast<int64_t>(p.sweep_depth) * sweep_ >> 30);
   uint32_t increment = SemitonesToIncrement(s);
   phase_ += increment;
 

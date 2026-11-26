@@ -38,6 +38,7 @@ int main() {
     { "build/tomline_words_wave_square.bin", ENGINE_BT, 0, { 50000, 50000, 20000, 40000 }, { 0, 0, 65535, 20000 } },
     { "build/tomline_words_crush_rate.bin", ENGINE_BT, 1, { 40000, 60000, 32768, 19661 }, { 20000, 16384, 0, 0 } },
     { "build/tomline_words_crush_low.bin", ENGINE_LT, 2, { 50000, 65535, 32768, 30000 }, { 55000, 16384, 30000, 0 } },
+    { "build/tomline_words_sweep.bin", ENGINE_BT, 1, { 29491, 60000, 32768, 19661 }, { 0, 16384, 0, 20000 }, { 50000, 0, 0, 40000 }, LFO_TRIANGLE, false },
   };
   for (const Case& c : cases) {
     VoiceParameters p;

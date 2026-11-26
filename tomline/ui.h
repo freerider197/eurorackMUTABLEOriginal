@@ -152,6 +152,7 @@ class Ui {
 
   int32_t pot_[KNOB_LAST];          // filtered positions
   uint16_t main_layer_[KNOB_LAST];
+  uint16_t sweep_;  // pitch sweep (TEST), METER + SHAPE 2, not saved
   Pickup pickup_[KNOB_LAST];        // for the page that is open
   int32_t press_pot_[KNOB_LAST];    // positions at the last button press
   int32_t calibration_pot_[2];      // SHAPE 1 / 2 in offset calibration
