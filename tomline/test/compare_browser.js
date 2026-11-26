@@ -24,12 +24,16 @@ const cases = [
   ['build/tomline_words_crush_rate.bin', 0, 1, [40000, 60000, 32768, 19661], [20000, 16384, 0, 0]],
   ['build/tomline_words_crush_low.bin', 1, 2, [50000, 65535, 32768, 30000], [55000, 16384, 30000, 0]],
   ['build/tomline_words_sweep.bin', 0, 1, [29491, 60000, 32768, 19661], [0, 16384, 0, 20000], [50000, 0, 0, 40000], 0, 0],
+  ['build/tomline_words_duck_full.bin', 0, 1, [29491, 40632, 32768, 19661], [0, 16384, 0, 0], [32768, 0, 0, 0], 0, 0, [65535, 32768]],
+  ['build/tomline_words_duck_fast.bin', 1, 2, [50000, 60000, 32768, 30000], [0, 16384, 20000, 0], [32768, 0, 0, 0], 0, 0, [40000, 0]],
+  ['build/tomline_words_duck_slow.bin', 0, 0, [40000, 50000, 20000, 0], [0, 0, 0, 0], [32768, 0, 0, 0], 0, 0, [52000, 65535]],
 ];
 let failed = false;
-for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0, lfoFree = 0] of cases) {
+for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0, lfoFree = 0, duck = [0, 0]] of cases) {
   const buf = fs.readFileSync(path);
   const ref = new Uint16Array(buf.buffer, buf.byteOffset, buf.length / 2);
-  const p = computeParams(engine, snap, main, second, lfo, lfoShape, lfoFree);
+  const p = computeParams(engine, snap, main, second, lfo, lfoShape, lfoFree, duck);
+  let kickAmp = 0, kickPhase = 0;  // IN 2: the same integer kick as words.cc
   const v = new TomlineVoice();
   const sps = FW_RATE * 60 / 122 / 4;
   let next = 0, step = -1, counts = 0, pitch = 0;
@@ -44,7 +48,12 @@ for (const [path, engine, snap, main, second, lfo = [0, 0, 0, 0], lfoShape = 0, 
     }
     const semis = (counts * VOCT_K) >> 8;
     pitch += (semis - pitch) >> 5;
-    v.process(p, trig, pitch);
+    if (i % 15288 === 0) { kickAmp = 24000; kickPhase = 0; }
+    kickPhase = (kickPhase + 110) & 0xffff;
+    const tri = kickPhase < 32768 ? kickPhase - 16384 : 49152 - kickPhase;
+    const kick = (tri * kickAmp) >> 14;
+    kickAmp -= kickAmp >> 13;
+    v.process(p, trig, pitch, kick);
     const dg = v.gainWord - ref[2 * i], df = v.freqWord - ref[2 * i + 1];
     maxG = Math.max(maxG, Math.abs(dg)); sumG += dg * dg; sumRef += (ref[2 * i] - 16384) ** 2;
     maxF = Math.max(maxF, Math.abs(df));
