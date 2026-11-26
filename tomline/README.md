@@ -124,7 +124,7 @@ From the Streams manual: connect your audio interface output to channel 1's
 **EXCITE** input. Power on the system with channel 1's function button (FN 1)
 held: the four left LEDs blink orange. Set channel 1's **SHAPE** knob to its
 middle position. Turn speakers off and silence other sounds on the computer,
-then play `release/tomline-0.4.wav`. On red blinking, press FN 1 to retry and
+then play `release/tomline-0.5.wav`. On red blinking, press FN 1 to retry and
 adjust the level with SHAPE 1 (best with 2 green and 1 orange LED lit on the
 right).
 
