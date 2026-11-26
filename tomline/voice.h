@@ -68,7 +68,7 @@ struct VoiceParameters {
   int32_t sweep_coefficient;    // Q31 per-sample decay of the pitch sweep
   int32_t sweep_depth;          // semitones, Q16, start of the sweep, 0 = off
   int32_t duck_depth;           // Q15, sidechain duck at full kick, 0 = off
-  int32_t duck_release;         // Q31 per-sample decay of the duck after its hold
+  int32_t duck_release;         // Release curve step per sample, 2^31 / samples
 };
 
 class Voice {
@@ -91,7 +91,8 @@ class Voice {
 
   inline int32_t envelope() const { return amp_; }
   inline uint32_t lfo_phase() const { return lfo_phase_; }
-  // Kick heard on IN 2, 0 .. 32767 (32767 = full duck at full depth).
+  // The duck before the depth knob, 0 .. 32767 (32767 = full duck at full
+  // depth): the kick heard on IN 2, within the Release curve.
   inline int32_t duck_level() const { return duck_ >> 15; }
 
   // Where a trigger restarts the LFO: the middle of the wave (no pitch
@@ -153,7 +154,12 @@ class Voice {
   int32_t crush_hold_;    // the held sample
 
   int32_t sidechain_lp_;  // Q8, slow average of IN 2 (its DC level)
-  int32_t peak_;          // rectified IN 2 peak, ADC counts, Q15
+  int32_t last_ac_;       // previous rectified IN 2 sample, Q15
+  bool rising_;           // IN 2 rising: the next fall marks a half-cycle top
+  int32_t peak_;          // kick level, ADC counts, Q15
+  int32_t duck_memory_;   // fading memory of the kick level, finds hits
+  int32_t duck_retrigger_;  // samples before a new hit can start
+  int32_t duck_phase_;    // Release curve, 0 at a hit .. 2^31 - 1 = done
   int32_t peak_hold_;     // samples left before the peak starts to fall
   int32_t duck_;          // Q30, smoothed duck amount
 

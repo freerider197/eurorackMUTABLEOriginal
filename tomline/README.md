@@ -56,7 +56,7 @@ blinks red.
 | SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change | Pitch sweep. Fully CCW = off (the default); turning up makes each hit start higher, up to +12 semitones at fully CW (+3 at noon), and fall back to the note with a 20 ms time constant, so the held note stays in tune |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Pitch LFO speed, 0.05 to 20 Hz (1 Hz at noon) |
 | FN 1 (left button), tap | Engine: BT / LT | LFO restarts on each trigger (default) / free running |
-| FN 1, hold | Duck layer, from the main or the METER page: **SHAPE 2 = Duck depth** (fully CCW = off, the default; fully CW = the bass is silent at the kick's peak). **MOD 2 = Release**: how soon the bass comes back, about 75 ms after the kick at fully CCW, 240 ms at noon, 0.9 s at fully CW. The bass follows the kick's own shape (patched into IN 2). SHAPE 1 and MOD 1 do nothing here. A tap without a turn still does its job | |
+| FN 1, hold | Duck layer, from the main or the METER page: **SHAPE 2 = Duck depth** (fully CCW = off, the default; fully CW = the bass is silent at the kick's peak). **MOD 2 = Release**: counted from each kick hit, the bass is fully back 40 ms later at fully CCW, 180 ms at noon, 0.8 s at fully CW (sooner if the kick is shorter). The kick is patched into IN 2. SHAPE 1 and MOD 1 do nothing here. A tap without a turn still does its job | |
 | FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | LFO wave: triangle / ramp up. FN 2 doesn't open its own page from here |
 | FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. Nothing else (SHAPE 2, MOD 2, FN 1 and METER do nothing here). Everything LFO lives on the METER page | |
 | METER, tap | Latch / unlatch the second layer | |
@@ -79,10 +79,12 @@ restarts it at the middle of its wave (no pitch jump, going up), so each hit
 gets the same pitch movement; free running, it ignores triggers.
 
 Sidechain duck: patch a copy of your kick into IN 2 (the other copy goes to
-your mixer as usual). Tomline follows the kick's level and turns its own
-bass down while the kick sounds, then lets it back with the Release time:
-the "pumping" glue of a kick and bass, without an external VCA and inverted
-envelope. Only the bass wave gets quieter; OUT 1's rest level (+3.33 V) does
+your mixer as usual). On each kick hit Tomline turns its own bass down at
+once (0.5 ms), then brings it back on a smooth curve, (1 - t / Release)^2:
+fast at first, easing in, fully back at the Release time even if the kick
+still rings. A shorter kick lets the bass back sooner, following the kick's
+own fade. That is the "pumping" glue of a kick and bass, without an
+external VCA and inverted envelope. Only the bass wave gets quieter; OUT 1's rest level (+3.33 V) does
 not move, so a DC-coupled mixer does not thump. A kick of about 2 V peak or
 more gives the full duck; under about 16 mV IN 2 counts as silent. With
 nothing in IN 2 nothing ducks. Plugging a cable into IN 2 can duck the bass
@@ -261,8 +263,9 @@ that MOD 2 keeps the hit's level within 1 dB at every Decay and Wave,
 and Crush: the sample rate just past off, at noon and at full, and that the
 level stays, and that snap off has no click noise or pitch blip,
 and the sidechain duck (a kick model on IN 2): depth at zero and an empty
-IN 2 change nothing, the duck's depth at the kick's peak, the Release
-times, no wobble on a steady 50 Hz input, no click, and the rest level
+IN 2 change nothing, the duck's depth at the hit, the Release times counted
+from the hit, a short kick letting the bass back sooner, a smooth return
+(no steps), a new duck on every kick, no click, and the rest level
 unchanged under a duck. It writes `build/tomline_duck.wav` (the roller with a
 kick on every beat, ducked, kick mixed in) and `tomline_duck_off.wav` to
 compare.
@@ -289,10 +292,12 @@ BT -0.5 to +0.1 dB, LT -0.1 to +0.2 dB (without the level matching: about
 -40.8), LT -42.6 dB (sine -58.3): the level matching
 clips the triangle's tips a little; square 3rd harmonic BT -8.3, LT -9.6 dB (ideal -9.5).
 Duck: depth at zero and IN 2 empty: VCA words identical to no duck; 6 V
-kick, 10-30 ms in: full depth -53.1 dB, 71 % depth -6.0 dB; bass back (duck
-under 10 %) 72 / 238 / 890 ms after a 4 V burst at Release fully CCW / noon /
-fully CW (expected 74 / 240 / 883); steady 50 Hz: no wobble; rest level
-unchanged. IN 2's scale is assumed to match EXCITE's (3972 counts per volt),
+kick, 3-8 ms in: full depth -29.3 dB, 71 % depth -5.7 dB; long kick, bass
+fully back (duck under 1 %) 57 / 171 / 729 ms after the hit at Release fully
+CCW / noon / fully CW (expected 54 / 179 / 738); 20 ms kick with Release at
+800 ms: bass back 85 ms after the hit; after its deepest point the duck
+never deepens again (0.00 %); a kick on every beat at 122 BPM ducks fully
+each time and the bass is back before the next; rest level unchanged. IN 2's scale is assumed to match EXCITE's (3972 counts per volt),
 not measured.
 Snap off: largest jump in the first 3 ms of a hit BT 0.08 V, LT 0.08 V (0.4 ms
 snap: 0.27 / 0.19 V).

@@ -983,15 +983,14 @@ double RmsOf(const std::vector<int32_t>& x, size_t a, size_t b) {
 int32_t KickAt100ms(int64_t n) {  // one kick, 100 ms in
   return KickCounts(KickVolts((n - 3109) / kFirmwareRate));
 }
-int32_t Burst(int64_t n) {  // 4 V, 50 Hz for 200 ms, then nothing
-  return n < 6218 ? KickCounts(4.0 * sin(2 * M_PI * 50.0 * n / kFirmwareRate)) : 0;
-}
-int32_t Sine1V(int64_t n) {  // steady 50 Hz at 1 V
-  return KickCounts(1.0 * sin(2 * M_PI * 50.0 * n / kFirmwareRate));
+int32_t ShortKick(int64_t n) {  // one 6 V kick dying away in 20 ms, 100 ms in
+  double t = (n - 3109) / kFirmwareRate;
+  return t < 0 ? 0 : KickCounts(6.0 * exp(-t / 0.02) * sin(2 * M_PI * 55.0 * t));
 }
 
 bool DuckOk() {
   const int len = static_cast<int>(kFirmwareRate);  // 1 s
+  const int hit = 3109;
   bool all = true;
   // Depth at zero: the duck changes nothing, even with a kick on IN 2.
   DuckRun plain = RunDuck(0, 32768, true, NULL, len);
@@ -1006,15 +1005,15 @@ bool DuckOk() {
   printf("  full depth, IN 2 empty (steady +3.33 V): identical to no duck  %s\n",
          empty_ok ? "OK" : "FAIL");
   all = all && empty_ok;
-  // Full depth, one kick: the bass drops at the kick's peak.
+  // Full depth, one kick: the bass drops at once.
   DuckRun full = RunDuck(65535, 32768, true, KickAt100ms, len);
-  size_t a = 3109 + 311, b = 3109 + 933;  // 10 .. 30 ms after the kick
+  size_t a = hit + 93, b = hit + 249;  // 3 .. 8 ms after the kick
   double drop = 20 * log10(RmsOf(full.wave, a, b) / RmsOf(plain.wave, a, b));
   DuckRun half = RunDuck(46341, 32768, true, KickAt100ms, len);  // knob at 71 %
   double half_drop = 20 * log10(RmsOf(half.wave, a, b) / RmsOf(plain.wave, a, b));
   double before = 20 * log10(RmsOf(full.wave, 1000, 3000) / RmsOf(plain.wave, 1000, 3000));
-  bool depth_ok = drop < -30 && half_drop > -9 && half_drop < -4 && fabs(before) < 0.01;
-  printf("  6 V kick, 10-30 ms in: full depth %.1f dB, 71 %% depth %.1f dB, before it %.2f dB  %s\n",
+  bool depth_ok = drop < -20 && half_drop > -8 && half_drop < -4 && fabs(before) < 0.01;
+  printf("  6 V kick, 3-8 ms in: full depth %.1f dB, 71 %% depth %.1f dB, before it %.2f dB  %s\n",
          drop, half_drop, before, depth_ok ? "OK" : "FAIL");
   all = all && depth_ok;
   // Rest level: a kick with no note playing leaves the VCA word at the lift.
@@ -1024,37 +1023,61 @@ bool DuckOk() {
   printf("  kick with no note: OUT 1 stays at the rest level  %s\n",
          rest_ok ? "OK" : "FAIL");
   all = all && rest_ok;
-  // Release: time after the end of a 4 V burst until the duck is under 10 %.
-  // Expected: 16.5 ms hold + tau * ln(15888 / 883).
+  // Release counts from the hit: with a long kick (still ringing), the bass
+  // is fully back (duck under 1 %) after the Release time. Curve (1 - t/T)^2
+  // is under 1 % from 0.9 T, plus the 8 ms glide (about 18 ms more).
   const uint16_t knobs[3] = { 0, 32768, 65535 };
-  const double taus[3] = { 0.02, 0.02 * sqrt(15.0), 0.3 };
+  const double times[3] = { 40.0, 40.0 * sqrt(20.0), 800.0 };
   for (int k = 0; k < 3; ++k) {
-    DuckRun r = RunDuck(65535, knobs[k], false, Burst, 3 * len);
-    int end = 6218, i = end;
-    while (i < 3 * len && r.level[i] >= 3277) ++i;
-    double ms = (i - end) * 1000.0 / kFirmwareRate;
-    double expected = 16.5 + 1000.0 * taus[k] * log(15888.0 / 883.0);
+    DuckRun r = RunDuck(65535, knobs[k], false, KickAt100ms, len);
+    int i = hit + 200;
+    while (i < len && r.level[i] >= 328) ++i;
+    double ms = (i - hit) * 1000.0 / kFirmwareRate;
+    double expected = 0.9 * times[k] + 18.0;
     bool ok = fabs(ms - expected) < expected * 0.15;
-    printf("  release knob %3d %%: duck under 10 %% %.0f ms after the kick (expected %.0f)  %s\n",
+    printf("  release knob %3d %%, long kick: bass fully back %.0f ms after the hit (expected %.0f)  %s\n",
            knobs[k] * 100 / 65535, ms, expected, ok ? "OK" : "FAIL");
     all = all && ok;
   }
-  // Smooth: a steady 50 Hz, 1 V input ducks evenly, no wobble at 100 Hz.
-  DuckRun steady = RunDuck(65535, 0, false, Sine1V, len);
-  int32_t lo = 32767, hi = 0;
-  for (int i = len / 2; i < len; ++i) {
-    lo = std::min(lo, steady.level[i]);
-    hi = std::max(hi, steady.level[i]);
+  // A short kick: the bass comes back with the kick, long before Release.
+  DuckRun shortk = RunDuck(65535, 65535, false, ShortKick, len);
+  int i = hit + 100;
+  while (i < len && shortk.level[i] >= 3277) ++i;
+  double short_ms = (i - hit) * 1000.0 / kFirmwareRate;
+  bool short_ok = short_ms < 150;
+  printf("  20 ms kick, release fully CW (800 ms): bass back (under 10 %%) %.0f ms after the hit  %s\n",
+         short_ms, short_ok ? "OK" : "FAIL");
+  all = all && short_ok;
+  // Smooth: after its lowest point the bass only comes back up, without
+  // steps (the duck never deepens again by more than 0.2 %).
+  int32_t worst_rise = 0;
+  for (int k = 0; k < 2; ++k) {
+    DuckRun r = RunDuck(65535, 65535, false, k ? KickAt100ms : ShortKick, len);
+    int top = hit;
+    for (int j = hit; j < hit + 1000; ++j) if (r.level[j] > r.level[top]) top = j;
+    for (int j = top + 1; j < len; ++j) worst_rise = std::max(worst_rise, r.level[j] - r.level[j - 1]);
   }
-  bool smooth_ok = hi > 0 && (hi - lo) < hi / 50;
-  printf("  steady 50 Hz at 1 V, fastest release: duck %.0f %%, wobble %.2f %%  %s\n",
-         hi * 100.0 / 32767, (hi - lo) * 100.0 / std::max(hi, 1), smooth_ok ? "OK" : "FAIL");
+  bool smooth_ok = worst_rise <= 66;
+  printf("  after the deepest point the duck only lets go: worst step back down %.2f %%  %s\n",
+         worst_rise * 100.0 / 32767, smooth_ok ? "OK" : "FAIL");
   all = all && smooth_ok;
+  // A kick on every beat: each one ducks fully, and the bass is back before
+  // the next (release at noon).
+  DuckRun beats = RunDuck(65535, 32768, false, KickOnBeats, 3 * 15288);
+  bool beats_ok = true;
+  for (int k = 0; k < 3; ++k) {
+    int32_t deep = 0;
+    for (int j = k * 15288; j < k * 15288 + 600; ++j) deep = std::max(deep, beats.level[j]);
+    beats_ok = beats_ok && deep > 31000 && beats.level[k * 15288 + 15200] < 328;
+  }
+  printf("  kick on every beat at 122 BPM: each one ducks fully, bass back before the next  %s\n",
+         beats_ok ? "OK" : "FAIL");
+  all = all && beats_ok;
   // One-sample steps of the ducked wave stay small: no click from the duck.
   int32_t worst = 0, worst_plain = 0;
-  for (size_t i = 3109; i < 3109 + 1555; ++i) {
-    worst = std::max(worst, abs(full.wave[i] - full.wave[i - 1]));
-    worst_plain = std::max(worst_plain, abs(plain.wave[i] - plain.wave[i - 1]));
+  for (size_t j = hit; j < hit + 1555; ++j) {
+    worst = std::max(worst, abs(full.wave[j] - full.wave[j - 1]));
+    worst_plain = std::max(worst_plain, abs(plain.wave[j] - plain.wave[j - 1]));
   }
   bool click_ok = worst <= worst_plain;
   printf("  largest one-sample step while ducking %d (bass alone %d)  %s\n",

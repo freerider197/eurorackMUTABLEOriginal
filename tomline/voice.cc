@@ -28,18 +28,28 @@ const int32_t kPowerUpHold = 31088;
 // Sidechain (IN 2). DC blocker: 1 / 512 per sample, a 10 Hz corner, so the
 // steady +3.33 V of an empty IN 2 (or a DC offset on the kick) never ducks.
 const int32_t kSidechainDcShift = 9;
-// The kick's peak is held for 16.5 ms (half a period at 30 Hz) before the
-// Release knob lets it fall, and held again by each new peak that comes
-// close: the duck stays smooth instead of following each wiggle of the
-// kick's waveform.
+// The kick's level: the top of each half cycle of its wave. A top within
+// 25 % of the held level becomes the new level (so the level follows the
+// kick as it dies away, without stair steps); with no such top for 16.5 ms
+// (half a period at 30 Hz) the kick has stopped and the level falls with a
+// 10 ms time constant.
 const int32_t kDuckHold = 512;
+const int32_t kDuckFall = 2140587007;  // Q31, exp(-1 / (10 ms * 31088 Hz))
+// A hit: the level jumps 50 % above a slow memory of it (it follows a
+// louder level with a 16 ms time constant and fades with 100 ms), and the
+// last hit is 30 ms ago or more. A kick on top of the last one's tail is
+// still a new hit.
+const int32_t kDuckMemoryRiseShift = 9;
+const int32_t kDuckMemoryFall = 2146792985;  // Q31, 100 ms
+const int32_t kDuckRetrigger = 933;
 // Below about 16 mV (64 counts) IN 2 is noise: no duck.
 const int32_t kDuckGate = 64;
-// Full duck from about 2 V (8192 counts) of kick peak above the gate.
+// Full duck from about 2 V (8192 counts) of kick level above the gate.
 const int32_t kDuckShift = 2;
-// The duck amount glides with a 2 ms time constant (64 samples), so it
-// never steps.
-const int32_t kDuckSmoothShift = 6;
+// The duck amount glides down (bass quieter) with a 0.5 ms time constant and
+// back up with 8 ms, so it never steps.
+const int32_t kDuckAttackShift = 4;
+const int32_t kDuckReturnShift = 8;
 
 static inline int32_t Sine(uint32_t phase) {
   uint32_t index = phase >> 22;
@@ -123,8 +133,13 @@ void Voice::Init() {
   crush_phase_ = 0;
   crush_hold_ = 0;
   sidechain_lp_ = 0;
+  last_ac_ = 0;
+  rising_ = false;
   peak_ = 0;
   peak_hold_ = 0;
+  duck_memory_ = 0;
+  duck_retrigger_ = 0;
+  duck_phase_ = 0x7fffffff;  // no hit yet: no duck
   duck_ = 0;
 }
 
@@ -266,8 +281,9 @@ void Voice::Process(
   }
   last_mix_ = v;
 
-  // Sidechain duck: follows the kick on IN 2. DC blocker, rectifier, peak
-  // with hold, then the Release decay; the amount glides to it.
+  // Sidechain duck. The kick on IN 2 sets how far down the bass goes and
+  // its shape; from each hit, the Release curve brings the bass fully back
+  // in the Release time, even while the kick still rings.
   sidechain_lp_ += (sidechain * 256 - sidechain_lp_) >> kSidechainDcShift;
   int32_t ac = sidechain - (sidechain_lp_ >> 8);
   if (ac < 0) {
@@ -276,22 +292,50 @@ void Voice::Process(
   if (ac > 32767) {
     ac = 32767;
   }
-  ac <<= 15;  // Q15 below one count, so a slow release is not cut short
-  if (ac >= peak_ - (peak_ >> 4)) {
-    // A peak as high as the held one, or nearly (within 6 %): the kick is
-    // still sounding, hold again.
-    if (ac > peak_) {
-      peak_ = ac;
+  ac <<= 15;  // Q15 below one count
+  if (ac < last_ac_ && rising_) {
+    // last_ac_ is the top of a half cycle.
+    if (last_ac_ >= peak_ - (peak_ >> 2)) {
+      peak_ = last_ac_;
+      peak_hold_ = kDuckHold;
     }
+  }
+  rising_ = ac > last_ac_ || (rising_ && ac == last_ac_);
+  last_ac_ = ac;
+  if (ac > peak_) {
+    peak_ = ac;  // a louder kick: at once
     peak_hold_ = kDuckHold;
   } else if (peak_hold_ > 0) {
     --peak_hold_;
   } else {
-    peak_ = Decay(peak_, p.duck_release);
+    peak_ = Decay(peak_, kDuckFall);
   }
+  if (duck_retrigger_ > 0) {
+    --duck_retrigger_;
+  } else if (peak_ - duck_memory_ > (duck_memory_ >> 1) &&
+             (peak_ >> 15) > kDuckGate) {
+    duck_phase_ = 0;  // a hit: the Release curve starts
+    duck_retrigger_ = kDuckRetrigger;
+  }
+  if (peak_ > duck_memory_) {
+    duck_memory_ += (peak_ - duck_memory_) >> kDuckMemoryRiseShift;
+  } else {
+    duck_memory_ = Decay(duck_memory_, kDuckMemoryFall);
+  }
+  // Release curve: (1 - t / T)^2, from 1 at the hit to 0 at the Release
+  // time T: fast at first, then it eases the bass back in.
+  if (duck_phase_ < 0x7fffffff - p.duck_release) {
+    duck_phase_ += p.duck_release;
+  } else {
+    duck_phase_ = 0x7fffffff;
+  }
+  int32_t u = 32767 - (duck_phase_ >> 16);
+  int32_t curve = u * u >> 15;
   int32_t heard = ((peak_ >> 15) - kDuckGate) << kDuckShift;
   CONSTRAIN(heard, 0, 32767);
-  duck_ += ((heard << 15) - duck_) >> kDuckSmoothShift;
+  int32_t duck_target = (heard < curve ? heard : curve) << 15;
+  duck_ += (duck_target - duck_) >>
+      (duck_target > duck_ ? kDuckAttackShift : kDuckReturnShift);
   // Applied before the lift: only the wave gets quieter, OUT 1's rest level
   // stays put (a moving rest level would thump through a DC-coupled input).
   if (p.duck_depth) {

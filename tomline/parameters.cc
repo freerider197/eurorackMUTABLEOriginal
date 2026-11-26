@@ -173,13 +173,13 @@ void ComputeVoiceParameters(
 
   // Sidechain duck (FN 1 + SHAPE 2 / MOD 2): depth on a squared curve, so
   // a light duck is easy to set; fully CW silences the bass at the kick's
-  // peak. Release time constant 20 ms .. 300 ms (77 ms at noon), after a
-  // 16.5 ms hold: after a 4 V kick the bass is back (duck under 10 %) about
-  // 75 ms later at fully CCW, 240 ms at noon, 0.9 s at fully CW.
+  // peak. Release: the bass is fully back 40 ms after the hit at fully CCW,
+  // 179 ms at noon, 800 ms at fully CW (sooner if the kick is shorter).
   float duck_depth = duck_layer ? duck_layer[0] / 65535.0f : 0.0f;
   float duck_release = duck_layer ? duck_layer[1] / 65535.0f : 0.0f;
   n.duck_depth = duck_depth < 0.01f ? 0 : Q15(duck_depth * duck_depth);
-  n.duck_release = DecayQ31(0.02f * Exp2(duck_release * 3.9068906f));  // 15 = 2^3.907
+  float release = 0.04f * Exp2(duck_release * 4.3219281f);  // 20 = 2^4.322
+  n.duck_release = static_cast<int32_t>(2147483520.0f / (release * kSampleRate));
 }
 
 }  // namespace tomline

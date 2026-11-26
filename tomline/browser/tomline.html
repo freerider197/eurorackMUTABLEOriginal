@@ -196,7 +196,7 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
       <div class="card scope">
         <div class="head"><h2>Sidechain scope</h2><span class="hint">one beat from each kick (tick Kick, press Play, set the duck with FN 1)</span></div>
         <canvas id="dscope" width="800" height="300"></canvas>
-        <p class="note" id="dsnote" style="margin:8px 0 0;font-size:13px;color:var(--muted)">Top: the kick on IN 2 (grey) and what the duck hears from it (orange, 100 % = full duck). Bottom: the duck drawn downward (blue: how much the bass is turned down) and the bass on OUT 1 after the duck (pink). The red line is where the bass is fully back.</p>
+        <p class="note" id="dsnote" style="margin:8px 0 0;font-size:13px;color:var(--muted)">Top: the kick on IN 2 (grey) and its level as the duck hears it (orange, 100 % = enough for a full duck). Bottom: the duck drawn downward (blue: how much the bass is turned down) and the bass on OUT 1 after it (pink). From each hit the Release curve brings the bass back; a shorter kick lets it back sooner. The red line is where the bass is back.</p>
       </div>
 
       <div class="card map">
@@ -348,10 +348,10 @@ function computeParams(engine, snap, main, second, lfo = [32768, 0, 0, 0], lfoSh
     // Pitch sweep (METER + SHAPE 2): lfo[3], up to +12 st, 20 ms fall.
     sweepDepth: F(lfo[3] / F(65535)) < F(0.01) ? 0 : q16(F(F(F(lfo[3] / F(65535)) * F(lfo[3] / F(65535))) * F(12))),
     sweepC: decayQ31(F(0.02)),
-    // Sidechain duck (FN 1 + SHAPE 2 / MOD 2): depth squared, release
-    // 20 ms .. 300 ms time constant after a 16.5 ms hold.
+    // Sidechain duck (FN 1 + SHAPE 2 / MOD 2): depth squared; Release, bass
+    // fully back 40 ms .. 800 ms after the hit: curve step per sample.
     duckDepth: duckDepthQ15(duck),
-    duckRelease: decayQ31(F(F(0.02) * fExp2(F((duck ? F(duck[1] / F(65535)) : F(0)) * F(3.9068906))))),
+    duckRelease: Math.trunc(F(F(2147483520) / F(F(F(0.04) * fExp2(F((duck ? F(duck[1] / F(65535)) : F(0)) * F(4.3219281)))) * K_SR_F))),
     tauSeconds: tau
   };
 }
@@ -429,7 +429,8 @@ class TomlineVoice {
     this.amp = 0; this.attack = K_UNITY; this.snap = 0; this.sweep = 0; this.partial = 0;
     this.lift = 0; this.hold = K_POWER_UP_HOLD; this.lastMix = 0; this.tail = 0; this.fade = 0; this.rng = 0x21f3a5c1;
     this.crushPhase = 0; this.crushHold = 0;
-    this.scLp = 0; this.peak = 0; this.peakHold = 0; this.duck = 0; this.duckLevel = 0;
+    this.scLp = 0; this.lastAc = 0; this.rising = false; this.peak = 0; this.peakHold = 0;
+    this.duckMem = 0; this.duckRetrig = 0; this.duckPhase = 0x7fffffff; this.duck = 0; this.duckLevel = 0;
     this.gainWord = 0; this.freqWord = 0; this.v = 0; this.env = 0;
   }
   // pitch: semitones above C1, Q16 (as Ui::Pitch). Outputs gainWord (0..65535)
@@ -497,19 +498,32 @@ class TomlineVoice {
       v = clip15(v + (Math.imul(this.tail, this.fade) >> 15));
     }
     this.lastMix = v;
-    // Sidechain duck: DC blocker (10 Hz), rectifier, peak held 16.5 ms (and
-    // again by each peak within 6 %), Release decay, 2 ms glide. Before the lift.
+    // Sidechain duck: DC blocker (10 Hz), rectifier, kick level from the tops
+    // of its half cycles (held 16.5 ms, then a 10 ms fall), hit detection,
+    // the Release curve (1 - t/T)^2 from each hit; duck = min(kick, curve),
+    // gliding 0.5 ms down / 8 ms back. Before the lift.
     this.scLp += (sidechain * 256 - this.scLp) >> 9;
     let ac = sidechain - (this.scLp >> 8);
     if (ac < 0) ac = -ac;
     if (ac > 32767) ac = 32767;
     ac <<= 15;
-    if (ac >= this.peak - (this.peak >> 4)) { if (ac > this.peak) this.peak = ac; this.peakHold = 512; }
+    if (ac < this.lastAc && this.rising && this.lastAc >= this.peak - (this.peak >> 2)) { this.peak = this.lastAc; this.peakHold = 512; }
+    this.rising = ac > this.lastAc || (this.rising && ac === this.lastAc);
+    this.lastAc = ac;
+    if (ac > this.peak) { this.peak = ac; this.peakHold = 512; }
     else if (this.peakHold > 0) this.peakHold--;
-    else this.peak = mul31(this.peak, p.duckRelease);
+    else this.peak = mul31(this.peak, 2140587007);
+    if (this.duckRetrig > 0) this.duckRetrig--;
+    else if (this.peak - this.duckMem > (this.duckMem >> 1) && (this.peak >> 15) > 64) { this.duckPhase = 0; this.duckRetrig = 933; }
+    if (this.peak > this.duckMem) this.duckMem += (this.peak - this.duckMem) >> 9;
+    else this.duckMem = mul31(this.duckMem, 2146792985);
+    if (this.duckPhase < 0x7fffffff - p.duckRelease) this.duckPhase += p.duckRelease; else this.duckPhase = 0x7fffffff;
+    const u = 32767 - (this.duckPhase >> 16), curve = Math.imul(u, u) >> 15;
     let heard = ((this.peak >> 15) - 64) << 2;
     heard = heard < 0 ? 0 : (heard > 32767 ? 32767 : heard);
-    this.duck += ((heard << 15) - this.duck) >> 6;
+    this.kickHeard = heard;  // for the sidechain scope only
+    const dt = (heard < curve ? heard : curve) << 15;
+    this.duck += (dt - this.duck) >> (dt > this.duck ? 4 : 8);
     this.duckLevel = this.duck >> 15;
     if (p.duckDepth) v = Math.imul(v, 32768 - (Math.imul(this.duck >> 15, p.duckDepth) >> 15)) >> 15;
     // Fixed lift: 1 s at 0 V after power-up, then +1 per sample to mid scale.
@@ -608,7 +622,7 @@ class Engine {
       const d = this.ds, j = d.i, b = this.voice.v * 3.33;
       if (this.kv < d.kmin[j]) d.kmin[j] = this.kv; if (this.kv > d.kmax[j]) d.kmax[j] = this.kv;
       if (b < d.bmin[j]) d.bmin[j] = b; if (b > d.bmax[j]) d.bmax[j] = b;
-      d.heard[j] = this.voice.duckLevel / 32767;
+      d.heard[j] = this.voice.kickHeard / 32767;
       d.duck[j] = this.voice.duckLevel * this.p.duckDepth / 1073741824;
       if (++d.c >= d.per) { d.c = 0; if (++d.i >= d.n) { this.send({ t: 'dscope', v: { kmin: d.kmin, kmax: d.kmax, bmin: d.bmin, bmax: d.bmax, heard: d.heard, duck: d.duck, ms: d.n * d.per / FW_RATE * 1000 } }); this.ds = null; } }
     }
@@ -852,7 +866,7 @@ const META = {
   'lfo3': { n: 'SWEEP', f: v => v < 0.01 ? 'off' : 'starts +' + (v * v * 12).toFixed(1) + ' st, falls in 20 ms' },
   'none': { n: 'NOT USED', f: () => 'this knob does nothing on this layer' },
   'duck0': { n: 'DUCK', f: v => v < 0.01 ? 'off' : v > 0.99 ? 'bass silent at the kick' : (20 * Math.log10(1 - v * v)).toFixed(1) + ' dB at the kick' },
-  'duck1': { n: 'RELEASE', f: v => 'bass back about ' + Math.round(16.5 + 20 * Math.pow(15, v) * Math.log(18)) + ' ms after the kick' },
+  'duck1': { n: 'RELEASE', f: v => 'bass fully back ' + Math.round(40 * Math.pow(20, v)) + ' ms after the hit (sooner if the kick is shorter)' },
   'second2': { n: 'WAVE', f: v => v < 0.01 ? 'sine' : v < 1 / 3 ? 'sine → triangle' : v < 2 / 3 ? 'triangle → folded' : v < 0.99 ? 'folded → square' : 'square' },
   'second3': { n: 'GLIDE', f: v => v < 0.01 ? 'off' : Math.round((0.004 + v * v * 0.5) * 1000) + ' ms' },
   'lfo0': { n: 'LFO SPEED', f: v => { const hz = 0.05 * Math.pow(400, v); return (hz < 1 ? hz.toFixed(2) : hz.toFixed(1)) + ' Hz'; } },
