@@ -55,12 +55,10 @@ blinks red.
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve). **FN 2 held: Glide** between notes (fully CCW = off) | Pitch LFO amount (depth): fully CCW = off, up to ±12 semitones |
 | SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change | Pitch sweep. Fully CCW = off (the default); turning up makes each hit start higher, up to +12 semitones at fully CW (+3 at noon), and fall back to the note with a 20 ms time constant, so the held note stays in tune |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Pitch LFO speed, 0.05 to 20 Hz (1 Hz at noon) |
-| FN 1 (left button), tap | Engine: BT / LT | |
-| FN 1, hold | Duck layer: **SHAPE 2 = Duck depth** (fully CCW = off, the default; fully CW = the bass is silent at the kick's peak). **MOD 2 = Release**: how soon the bass comes back, about 75 ms after the kick at fully CCW, 240 ms at noon, 0.9 s at fully CW. The bass follows the kick's own shape (patched into IN 2). SHAPE 1 and MOD 1 do nothing here. A tap without a turn still switches the engine | |
-| FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | |
-| FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. SHAPE 2 and MOD 2 do nothing here. The LFO lives on the METER page | |
-| FN 2 held + tap METER | LFO wave: triangle / ramp up | |
-| FN 2 held + tap FN 1 | LFO restarts on each trigger (default) / free running | |
+| FN 1 (left button), tap | Engine: BT / LT | LFO restarts on each trigger (default) / free running |
+| FN 1, hold | Duck layer, from the main or the METER page: **SHAPE 2 = Duck depth** (fully CCW = off, the default; fully CW = the bass is silent at the kick's peak). **MOD 2 = Release**: how soon the bass comes back, about 75 ms after the kick at fully CCW, 240 ms at noon, 0.9 s at fully CW. The bass follows the kick's own shape (patched into IN 2). SHAPE 1 and MOD 1 do nothing here. A tap without a turn still does its job | |
+| FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | LFO wave: triangle / ramp up. FN 2 doesn't open its own page from here |
+| FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. Nothing else (SHAPE 2, MOD 2, FN 1 and METER do nothing here). Everything LFO lives on the METER page | |
 | METER, tap | Latch / unlatch the second layer | |
 | METER, hold 3 s without turning a knob | Stock offset calibration (see Calibration) | |
 | FN 1 + FN 2, hold 1 s | V/oct calibration | |
@@ -74,7 +72,7 @@ and made all values jump on a page change), so the LEDs are a quarter dimmer
 than before, and readings settle for 50 ms after a page change before a turn
 counts. A button tap only does its job if
 no knob was turned and no other button was pressed while it was down (the
-FN 2 + METER and FN 2 + FN 1 taps are their own gestures): turning a knob
+FN 1 and FN 2 taps on the METER page are its LFO buttons): turning a knob
 while holding METER or FN 2 never latches, calibrates or changes snap. The LFO
 always goes to pitch and is added after the glide. By default every trigger
 restarts it at the middle of its wave (no pitch jump, going up), so each hit
@@ -114,10 +112,11 @@ its defaults), not later changes.
 | Left column, 2nd | LT engine |
 | Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, checked in the first second after power-up, or trimmer 1 not at LIN) |
 | Left column, bottom | Flashes green on each trigger |
-| Right column | Snap, from the bottom: no LED = off, 1 = 0.4 ms, 2 = 1.5 ms, 3 = 4 ms |
+| Right column (normal page) | Snap, from the bottom: no LED = off, 1 = 0.4 ms, 2 = 1.5 ms, 3 = 4 ms |
 | Engine and snap LEDs amber instead of green | Second layer active |
-| FN 2 held: engine LED red, right column top (triangle) or 2nd (ramp up) pulsing red | FN 2 page; the pulse follows the LFO, so its speed shows even at zero depth |
-| FN 2 held: right column 3rd LED red | LFO free running (off = restarts on each trigger) |
+| METER page: right column top (triangle) or 2nd (ramp up) pulsing amber | LFO wave; the pulse follows the LFO, so its speed shows even at zero amount |
+| METER page: right column 3rd LED amber | LFO free running (off = restarts on each trigger) |
+| FN 2 held: engine LED red, right column off | Tune and glide page |
 | FN 1 held: engine LED yellow, right column a red meter from the bottom | Duck page; the meter shows the kick heard on IN 2 (all four = full duck at full depth), even with the depth at zero, so you can check the patch |
 
 ## Offset
@@ -141,7 +140,7 @@ From the Streams manual: connect your audio interface output to channel 1's
 **EXCITE** input. Power on the system with channel 1's function button (FN 1)
 held: the four left LEDs blink orange. Set channel 1's **SHAPE** knob to its
 middle position. Turn speakers off and silence other sounds on the computer,
-then play `release/tomline-0.4.wav`. On red blinking, press FN 1 to retry and
+then play `release/tomline-0.5.wav`. On red blinking, press FN 1 to retry and
 adjust the level with SHAPE 1 (best with 2 green and 1 orange LED lit on the
 right).
 
@@ -193,8 +192,8 @@ Every row below was read from the code in `streams/` and the schematic
 
 ## Unverified (needs a real module)
 
-Heard on the module by the owner: the soft-distortion build (test file
-`tomline-test-distortion-5d530a7.wav`, merged in #24) flashed and sounded good.
+Heard on the module by the owner: the soft-distortion build (v10,
+`tomline-v10-distortion.wav`, commit 5d530a7, merged in #24) flashed and sounded good.
 Not measured yet:
 
 - Peak output level (about 6.7 V expected, from gain.h and the schematic).
@@ -321,8 +320,8 @@ g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tom
 ./build/tomline_panel
 ```
 
-Last run: all 79 checks OK (FN 1 held + SHAPE 2 / MOD 2 set the duck, the
-engine only switches on a tap, records from before the duck carry over). Without the LEDs-off reading, the model moves
+Last run: all 83 checks OK (FN 1 held + SHAPE 2 / MOD 2 set the duck, a
+tap still does its job, records from before the duck carry over). Without the LEDs-off reading, the model moves
 untouched values on page changes; with it, nothing moves.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for 16
