@@ -266,19 +266,37 @@ int main() {
   Start();
   Down(BUTTON_FN_2);
   Tap(BUTTON_METER);
+  Tap(BUTTON_FN_1);
   Up(BUTTON_FN_2);
-  Check(ui->settings_.lfo_shape == LFO_RAMP_UP && ui->settings_.snap == 2 &&
-        !ui->second_layer_latched_, "FN 2 held + METER tap: LFO wave only");
+  Check(ui->settings_.lfo_shape == LFO_TRIANGLE && !(ui->settings_.flags & kFlagLfoFree) &&
+        ui->settings_.snap == 2 && ui->settings_.engine == ENGINE_BT && !ui->second_layer_latched_,
+        "FN 2 held + METER / FN 1 taps: do nothing");
   Start();
-  Down(BUTTON_FN_2);
+  Down(BUTTON_METER);
+  Tap(BUTTON_FN_2);
+  Up(BUTTON_METER);
+  Check(ui->settings_.lfo_shape == LFO_RAMP_UP && ui->settings_.snap == 2 &&
+        !ui->second_layer_latched_, "METER held + FN 2 tap: LFO wave only");
+  Start();
+  Down(BUTTON_METER);
   Tap(BUTTON_FN_1);
-  Up(BUTTON_FN_2);
+  Up(BUTTON_METER);
   Check((ui->settings_.flags & kFlagLfoFree) && ui->settings_.engine == ENGINE_BT &&
-        ui->settings_.snap == 2, "FN 2 held + FN 1 tap: LFO free run only");
-  Down(BUTTON_FN_2);
+        !ui->second_layer_latched_, "METER held + FN 1 tap: LFO free run only");
+  Tap(BUTTON_METER);  // latch
   Tap(BUTTON_FN_1);
+  Tap(BUTTON_FN_2);
+  Check(!(ui->settings_.flags & kFlagLfoFree) && ui->settings_.lfo_shape == LFO_RAMP_UP &&
+        ui->second_layer_latched_ && ui->layer_ == 1 && ui->settings_.engine == ENGINE_BT &&
+        ui->settings_.snap == 2, "METER latched: FN 1 / FN 2 taps = free run / wave, page stays");
+  Down(BUTTON_FN_2);
+  Turn(KNOB_SHAPE_1, 50000, 400);
   Up(BUTTON_FN_2);
-  Check(!(ui->settings_.flags & kFlagLfoFree), "  ... again: restart on trigger");
+  Check(ui->settings_.lfo_shape == LFO_RAMP_UP && Near(ui->settings_.second_layer[KNOB_SHAPE_1], 50000),
+        "  ... FN 2 held while turning SHAPE 1: crush moves, no wave change");
+  Tap(BUTTON_METER);  // unlatch
+  Tap(BUTTON_FN_1);
+  Check(ui->settings_.engine == ENGINE_LT, "  ... back on the main page, FN 1 = engine again");
   Start();
   Down(BUTTON_FN_2);
   Down(BUTTON_FN_1);
@@ -287,18 +305,6 @@ int main() {
   Up(BUTTON_FN_2);
   Check(!(ui->settings_.flags & kFlagLfoFree), "FN 2 then FN 1 held 1 s (V/oct calibration): free run unchanged");
   Tap(BUTTON_FN_1);
-  Start();
-  Down(BUTTON_METER);
-  Tap(BUTTON_FN_2);
-  Up(BUTTON_METER);
-  Check(ui->settings_.snap == 2 && !ui->second_layer_latched_,
-        "METER held + FN 2 tap: no snap, no latch");
-  Start();
-  Down(BUTTON_METER);
-  Tap(BUTTON_FN_1);
-  Up(BUTTON_METER);
-  Check(ui->settings_.engine == ENGINE_BT && !ui->second_layer_latched_,
-        "METER held + FN 1 tap: no engine change, no latch");
   Start();
   Tap(BUTTON_FN_1);
   Check(ui->settings_.engine == ENGINE_LT, "FN 1 tap: next engine");

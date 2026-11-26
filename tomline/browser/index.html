@@ -202,9 +202,9 @@ code{font-family:var(--f-mono);font-size:.92em;background:color-mix(in srgb,var(
             <tr><td>MOD 1</td><td>Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it never goes silent), most envelope at noon, open at 5 o'clock. FN 2 held: Glide (fully left = off)</td><td>Pitch LFO amount, up to ±12 st (fully left = off)</td></tr>
             <tr><td>SHAPE 2</td><td>Wave: fully left = sine, then triangle, folded sine, and square at fully right</td><td>Not used</td></tr>
             <tr><td>MOD 2</td><td>Soft distortion: fully left = clean, turning up drives the sound into a soft clipper. The loud start of each hit saturates, the quiet tail comes up; the hit stays as loud as the clean sound (within 1 dB)</td><td>Pitch LFO speed, 0.05–20 Hz</td></tr>
-            <tr><td>FN 1</td><td>Engine: BT or LT</td><td>—</td></tr>
-            <tr><td>FN 2</td><td>Tap: snap, the attack click: off, 0.4, 1.5 or 4 ms</td><td>—</td></tr>
-            <tr><td>FN 2 held</td><td>Tune and glide (or hold L): SHAPE 1 tune, MOD 1 glide. Tap METER: LFO: triangle / ramp up. Tap FN 1: restarts on each trigger (default) / free running. LEDs red, the wave LED pulses, the third right LED lit = free running</td><td>—</td></tr>
+            <tr><td>FN 1</td><td>Engine: BT or LT</td><td>LFO: restarts on each trigger / free running</td></tr>
+            <tr><td>FN 2</td><td>Tap: snap, the attack click: off, 0.4, 1.5 or 4 ms</td><td>LFO wave: triangle / ramp up</td></tr>
+            <tr><td>FN 2 held</td><td>Tune and glide (or hold L): SHAPE 1 tune, MOD 1 glide. Nothing else; LEDs red. On the METER page the right LEDs show the LFO: the wave LED pulses, the third lit = free running</td><td>—</td></tr>
             <tr><td>METER</td><td>Tap to latch the second row, or hold Shift</td><td>—</td></tr>
             <tr><td>LEVEL MOD 1</td><td>Keep fully counter-clockwise. Turned up, it adds a DC offset <span class="an">analog</span></td><td>—</td></tr>
             <tr><td>Curve 1</td><td>Keep fully clockwise (LIN). Toward EXP, it bends the wave <span class="an">analog</span></td><td>—</td></tr>
@@ -806,16 +806,17 @@ function drawGuide() {
   }).join('');
   const lfoWave = S.k.lfoShape ? 'ramp up' : 'triangle', lfoMode = S.k.lfoFree ? 'free running' : 'restarts on each hit';
   const rows = S.layer === 2 ? [
-    ['FN 1 click', 'LFO mode, now <u>' + lfoMode + '</u>'],
-    ['METER click', 'LFO wave, now <u>' + lfoWave + '</u>'],
-    ['FN 2', 'release (or click Normal above) to go back']
+    ['FN 2', 'release (or click Normal above) to go back'],
+    ['FN 1, METER', 'do nothing on this page']
   ] : S.layer === 1 ? [
+    ['FN 1 click', 'LFO mode, now <u>' + lfoMode + '</u>'],
+    ['FN 2 click', 'LFO wave, now <u>' + lfoWave + '</u>'],
     ['METER', 'click again (or Normal above) to go back'],
-    ['LFO', lfoWave + ', ' + lfoMode + ' · change both on the FN 2 page']
+    ['LEDs', 'right column = LFO: wave LED pulses, 3rd lit = free run']
   ] : [
     ['FN 1 click', 'engine, now <u>' + ENG[S.k.engine] + '</u>'],
     ['FN 2 click', 'snap, now <u>' + ['off', '0.4 ms', '1.5 ms', '4 ms'][S.k.snap] + '</u>'],
-    ['METER click', 'METER page: crush, LFO'],
+    ['METER click', 'METER page: crush, sweep, LFO'],
     ['Keyboard', 'hold Shift = METER page, hold L = FN 2']
   ];
   document.getElementById('gbtns').innerHTML = rows.map(([a, b]) => `<div><b style="color:${pc}">${a}:</b> ${b}</div>`).join('');
@@ -861,15 +862,16 @@ KN.forEach(k => {
 /* ===================== buttons + LEDs (as ui.cc PaintLeds) ===================== */
 let trigOn = false, trigT = 0, blinkT = 0;
 function paint(el, c) { el.querySelector('.lens').setAttribute('fill', c || '#dcd9cb'); el.querySelector('.lens').setAttribute('stroke', c ? 'rgba(0,0,0,.18)' : '#bdb9aa'); el.querySelector('.halo').setAttribute('fill', c ? c + '55' : 'transparent'); }
-// Off lens colour to red, for the LFO LED that pulses with the wave.
+// Off lens colour to amber, for the LFO LED that pulses with the wave (METER page).
+function amberAt(a) { const m = (x, y) => Math.round(x + (y - x) * a).toString(16).padStart(2, '0'); return '#' + m(0xdc, 0xff) + m(0xd9, 0xb4) + m(0xcb, 0x46); }
 function redAt(a) { const m = (x, y) => Math.round(x + (y - x) * a).toString(16).padStart(2, '0'); return '#' + m(0xdc, 0xff) + m(0xd9, 0x4a) + m(0xcb, 0x3d); }
 let lfoUiPhase = 0, lfoUiT = 0, lfoRaf = 0;
 function lfoLed(t) {
-  if (S.layer !== 2) { lfoRaf = 0; return; }
+  if (S.layer !== 1) { lfoRaf = 0; return; }
   const hz = 0.05 * Math.pow(400, S.k.lfo[0] / 65535);
   lfoUiPhase = (lfoUiPhase + hz * Math.min(0.1, (t - (lfoUiT || t)) / 1000)) % 1; lfoUiT = t;
   const w = lfoWave(Math.floor(lfoUiPhase * 4294967296) >>> 0, S.k.lfoShape);
-  for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), i === S.k.lfoShape ? redAt((w + 32768) / 65535) : (i === 2 && S.k.lfoFree ? '#ff4a3d' : null));
+  for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), i === S.k.lfoShape ? amberAt((w + 32768) / 65535) : (i === 2 && S.k.lfoFree ? '#ffb446' : null));
   lfoRaf = requestAnimationFrame(lfoLed);
 }
 function drawLeds() {
@@ -879,7 +881,8 @@ function drawLeds() {
   const blink = (Math.floor(performance.now() / 256) & 1) === 1;
   paint(document.getElementById('L2'), S.warn && blink ? '#ff4a3d' : null);
   paint(document.getElementById('L3'), trigOn ? '#6be07b' : null);
-  if (S.layer === 2) { if (!lfoRaf) { lfoUiT = 0; lfoRaf = requestAnimationFrame(lfoLed); } }
+  if (S.layer === 1) { if (!lfoRaf) { lfoUiT = 0; lfoRaf = requestAnimationFrame(lfoLed); } }
+  else if (S.layer === 2) for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), null);  // FN 2 page: tune, glide only
   else for (let i = 0; i < 4; i++) paint(document.getElementById('R' + i), (3 - i) < S.k.snap ? on : null);
   svg.classList.toggle('shift', S.layer === 1);
   svg.classList.toggle('lfo', S.layer === 2);
@@ -898,21 +901,24 @@ function press(id, fn) {
 }
 let comboing = false;
 function combo() { comboing = true; lcd('FN 1 + FN 2', 'V/oct calibration: runs on the module (1 V, then 3 V)'); }
-// FN 1 tapped while FN 2 is held: LFO restart on trigger / free running.
-document.getElementById('b1').addEventListener('pointerdown', () => { S.fn1WithFn2 = S.fn2 || S.fn2Lock; if (S.fn1WithFn2) S.fn2Used = true; });
+// As ui.cc: FN 1 does nothing on the FN 2 page; on the METER page it is LFO restart on trigger / free running.
+const meterPage = () => !(S.fn2 || S.fn2Lock) && (S.latched || S.held);
+document.getElementById('b1').addEventListener('pointerdown', () => { S.fn1WithFn2 = S.fn2 || S.fn2Lock; S.fn1Lfo = meterPage(); if (S.fn1WithFn2) S.fn2Used = true; });
 press('b1', () => {
-  if (S.fn1WithFn2) { S.fn1WithFn2 = false; setK('lfoFree', S.k.lfoFree ? 0 : 1); drawLeds(); lcd('LFO', S.k.lfoFree ? 'free running' : 'restarts on each trigger'); return; }
+  if (S.fn1WithFn2) { S.fn1WithFn2 = false; lcd('FN 1', 'does nothing while FN 2 is held'); return; }
+  if (S.fn1Lfo) { setK('lfoFree', S.k.lfoFree ? 0 : 1); drawLeds(); lcd('LFO MODE', S.k.lfoFree ? 'free running' : 'restarts on each hit'); return; }
   setK('engine', (S.k.engine + 1) % 2); drawLeds(); drawKnobs(); lcd('ENGINE', ENG[S.k.engine]); });
 // FN 2: tap = snap. Held (or L held on the keyboard) = LFO layer; a knob or
 // METER used meanwhile cancels the snap step, as in ui.cc.
 press('b2', () => {
+  if (S.fn2Lfo) { S.fn2Lfo = false; nextLfoShape(); return; }  // METER page: LFO wave
   if (S.fn2Lock) { S.fn2 = false; setFn2Lock(false); return; }  // a click on FN 2 lets go of the hold
   const used = S.fn2Used; S.fn2 = false; setLayer();
   if (!used) { setK('snap', (S.k.snap + 1) % 4); drawLeds(); lcd('SNAP', ['off · no click', '0.4 ms click', '1.5 ms click', '4 ms click'][S.k.snap]); }
 });
 {
   const b2 = document.getElementById('b2');
-  b2.addEventListener('pointerdown', () => { S.fn2 = true; S.fn2Used = false; setLayer(); });
+  b2.addEventListener('pointerdown', () => { S.fn2Lfo = meterPage(); if (S.fn2Lfo) return; S.fn2 = true; S.fn2Used = false; setLayer(); });
   const off = () => { if (S.fn2) { S.fn2 = false; setLayer(); } };
   b2.addEventListener('pointerup', off); b2.addEventListener('pointerleave', off); b2.addEventListener('pointercancel', off);
 }
@@ -926,11 +932,12 @@ document.getElementById('pgM').addEventListener('click', () => { S.latched = tru
 document.getElementById('pgF').addEventListener('click', () => setFn2Lock(true));
 function setLayer() {
   const l = (S.fn2 || S.fn2Lock) ? 2 : ((S.latched || S.held) ? 1 : 0); if (l === S.layer) return; S.layer = l; drawLeds(); drawKnobs();
-  if (l === 2) lcd('FN 2 held', 'SHAPE 1 tune, MOD 1 glide · tap METER: LFO ' + (S.k.lfoShape ? 'ramp up' : 'triangle') + ' · tap FN 1: LFO ' + (S.k.lfoFree ? 'free running' : 'restart on trigger'));
-  else lcd('METER', l ? 'second row: crush, LFO amount, sweep, LFO speed' : 'main row: decay, tone, wave, drive');
+  if (l === 2) lcd('FN 2 held', 'SHAPE 1 tune, MOD 1 glide');
+  else if (l === 1) lcd('METER page', 'crush, sweep, LFO amount and speed · FN 1: LFO ' + (S.k.lfoFree ? 'free running' : 'restart on hit') + ' · FN 2: LFO wave ' + (S.k.lfoShape ? 'ramp up' : 'triangle'));
+  else lcd('Normal page', 'decay, tone, wave, drive');
 }
 function nextLfoShape() { setK('lfoShape', (S.k.lfoShape + 1) % 2); S.fn2Used = true; drawLeds(); lcd('LFO WAVE', S.k.lfoShape ? 'ramp up' : 'triangle'); }
-press('meter', () => { if (S.fn2 || S.fn2Lock) { nextLfoShape(); return; } S.latched = !S.latched; setLayer(); });
+press('meter', () => { if (S.fn2 || S.fn2Lock) { lcd('METER', 'does nothing while FN 2 is held'); return; } S.latched = !S.latched; setLayer(); });
 JK.forEach(j => {
   const g = document.getElementById('j-' + j.id);
   const act = () => {
@@ -994,7 +1001,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Shift') { S.held = true; setLayer(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   const k = e.key.toLowerCase();
-  if (k === 'l') { S.fn2 = true; S.fn2Used = true; setLayer(); return; }
+  if (k === 'l') { if (meterPage()) return; S.fn2 = true; S.fn2Used = true; setLayer(); return; }
   if (k === ' ' && !(e.target.closest && e.target.closest('button,[role="slider"],[role="button"],[role="switch"]'))) { e.preventDefault(); togglePlay(); return; }
   const i = QW.indexOf(k); if (i >= 0) { playKey(i); return; }
   if (k === 'z') setOct(S.koct - 1); if (k === 'x') setOct(S.koct + 1);

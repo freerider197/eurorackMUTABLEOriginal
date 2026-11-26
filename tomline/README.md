@@ -54,11 +54,9 @@ blinks red.
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve). **FN 2 held: Glide** between notes (fully CCW = off) | Pitch LFO amount (depth): fully CCW = off, up to ±12 semitones |
 | SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change | Pitch sweep. Fully CCW = off (the default); turning up makes each hit start higher, up to +12 semitones at fully CW (+3 at noon), and fall back to the note with a 20 ms time constant, so the held note stays in tune |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Pitch LFO speed, 0.05 to 20 Hz (1 Hz at noon) |
-| FN 1 (left button) | Engine: BT / LT | |
-| FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | |
-| FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. SHAPE 2 and MOD 2 do nothing here. The LFO lives on the METER page | |
-| FN 2 held + tap METER | LFO wave: triangle / ramp up | |
-| FN 2 held + tap FN 1 | LFO restarts on each trigger (default) / free running | |
+| FN 1 (left button) | Engine: BT / LT | LFO restarts on each trigger (default) / free running |
+| FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | LFO wave: triangle / ramp up. FN 2 doesn't open its own page from here |
+| FN 2, hold | Pitch layer: SHAPE 1 = Tune, MOD 1 = Glide. Nothing else (SHAPE 2, MOD 2, FN 1 and METER do nothing here). Everything LFO lives on the METER page | |
 | METER, tap | Latch / unlatch the second layer | |
 | METER, hold 3 s without turning a knob | Stock offset calibration (see Calibration) | |
 | FN 1 + FN 2, hold 1 s | V/oct calibration | |
@@ -72,7 +70,7 @@ and made all values jump on a page change), so the LEDs are a quarter dimmer
 than before, and readings settle for 50 ms after a page change before a turn
 counts. A button tap only does its job if
 no knob was turned and no other button was pressed while it was down (the
-FN 2 + METER and FN 2 + FN 1 taps are their own gestures): turning a knob
+FN 1 and FN 2 taps on the METER page are its LFO buttons): turning a knob
 while holding METER or FN 2 never latches, calibrates or changes snap. The LFO
 always goes to pitch and is added after the glide. By default every trigger
 restarts it at the middle of its wave (no pitch jump, going up), so each hit
@@ -99,10 +97,11 @@ trigger", and plays the snap one step longer.
 | Left column, 2nd | LT engine |
 | Left column, 3rd | Blinking red: setup warning (LEVEL MOD 1 not at zero, checked in the first second after power-up, or trimmer 1 not at LIN) |
 | Left column, bottom | Flashes green on each trigger |
-| Right column | Snap, from the bottom: no LED = off, 1 = 0.4 ms, 2 = 1.5 ms, 3 = 4 ms |
+| Right column (normal page) | Snap, from the bottom: no LED = off, 1 = 0.4 ms, 2 = 1.5 ms, 3 = 4 ms |
 | Engine and snap LEDs amber instead of green | Second layer active |
-| FN 2 held: engine LED red, right column top (triangle) or 2nd (ramp up) pulsing red | FN 2 page; the pulse follows the LFO, so its speed shows even at zero depth |
-| FN 2 held: right column 3rd LED red | LFO free running (off = restarts on each trigger) |
+| METER page: right column top (triangle) or 2nd (ramp up) pulsing amber | LFO wave; the pulse follows the LFO, so its speed shows even at zero amount |
+| METER page: right column 3rd LED amber | LFO free running (off = restarts on each trigger) |
+| FN 2 held: engine LED red, right column off | Tune and glide page |
 
 ## Offset
 
@@ -292,7 +291,7 @@ g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tom
 ./build/tomline_panel
 ```
 
-Last run: all 67 checks OK. Without the LEDs-off reading, the model moves
+Last run: all 68 checks OK. Without the LEDs-off reading, the model moves
 untouched values on page changes; with it, nothing moves.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for 13

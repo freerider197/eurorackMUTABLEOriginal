@@ -138,6 +138,8 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   fill(&long_press_handled_[0], &long_press_handled_[BUTTON_LAST], false);
   fill(&down_[0], &down_[BUTTON_LAST], false);
   fill(&used_[0], &used_[BUTTON_LAST], false);
+  fill(&turned_[0], &turned_[BUTTON_LAST], false);
+  fill(&lfo_button_[0], &lfo_button_[BUTTON_LAST], false);
   combo_handled_ = false;
   event_read_ = event_write_ = 0;
   layer_ = 0;
@@ -281,19 +283,22 @@ void Ui::OnButtonPressed(uint8_t button) {
   if (mode_ != UI_MODE_NORMAL) {
     return;
   }
+  // On the METER page (held or latched), FN 1 and FN 2 are the LFO buttons:
+  // their taps are acted on at the release (FN 1 + FN 2 for the V/oct
+  // calibration ignores both releases), and FN 2 does not open its page.
+  bool meter_page = meter_held_ || second_layer_latched_;
+  turned_[button] = false;
   if (button == BUTTON_FN_1) {
-    // Acted on at the release, so pressing FN 1 + FN 2 for the V/oct
-    // calibration (its release is ignored) does not also toggle it.
-    fn1_with_fn2_ = fn2_held_;  // FN 2's own tap is cancelled (used_)
+    fn1_with_fn2_ = fn2_held_;  // FN 1 does nothing on the FN 2 page
+    lfo_button_[button] = !fn2_held_ && meter_page;
   } else if (button == BUTTON_FN_2) {
-    fn2_held_ = true;
+    lfo_button_[button] = meter_page;
+    if (!meter_page) {
+      fn2_held_ = true;
+    }
   } else if (button == BUTTON_METER) {
     if (fn2_held_) {
-      // FN 2 held + METER: next LFO wave. METER's release does nothing.
-      settings_.lfo_shape = (settings_.lfo_shape + 1) % LFO_SHAPE_LAST;
-      SettingsChanged();
-      parameters_dirty_ = true;
-      long_press_handled_[button] = true;
+      long_press_handled_[button] = true;  // does nothing on the FN 2 page
     } else {
       meter_held_ = true;
     }
@@ -340,8 +345,10 @@ void Ui::OnButtonReleased(uint8_t button, uint32_t duration) {
   switch (button) {
     case BUTTON_FN_1:
       if (fn1_with_fn2_) {
-        // Tapped while FN 2 was held: LFO restart on trigger / free running.
-        if (short_press) {
+        // FN 2 page: nothing.
+      } else if (lfo_button_[button]) {
+        // METER page: LFO restart on trigger / free running.
+        if (short_press && !turned_[button]) {
           settings_.flags ^= kFlagLfoFree;
           SettingsChanged();
           parameters_dirty_ = true;
@@ -354,7 +361,14 @@ void Ui::OnButtonReleased(uint8_t button, uint32_t duration) {
       break;
 
     case BUTTON_FN_2:
-      if (short_press && !used_[button]) {
+      if (lfo_button_[button]) {
+        // METER page: next LFO wave.
+        if (short_press && !turned_[button]) {
+          settings_.lfo_shape = (settings_.lfo_shape + 1) % LFO_SHAPE_LAST;
+          SettingsChanged();
+          parameters_dirty_ = true;
+        }
+      } else if (short_press && !used_[button]) {
         settings_.snap = (settings_.snap + 1) & 3;
         SettingsChanged();
         parameters_dirty_ = true;
@@ -457,7 +471,7 @@ void Ui::ReadKnobs() {
   for (uint8_t i = 0; i < KNOB_LAST; ++i) {
     if (Pickup::Distance(pot_[i], press_pot_[i]) > kPickupMove) {
       for (uint8_t b = 0; b < BUTTON_LAST; ++b) {
-        if (down_[b]) used_[b] = true;
+        if (down_[b]) used_[b] = turned_[b] = true;
       }
     }
   }
@@ -605,8 +619,8 @@ void Ui::PaintLeds() {
       break;
   }
 
-  // Normal mode. Amber instead of green while the second layer is active,
-  // red on the LFO layer.
+  // Normal mode. Amber instead of green on the METER page, red on the FN 2
+  // page.
   uint8_t red = layer_ ? 255 : 0;
   uint8_t green = layer_ == 1 ? 120 : (layer_ == 2 ? 0 : 255);
   leds_.set(settings_.engine, red, green);
@@ -616,17 +630,20 @@ void Ui::PaintLeds() {
   if (trigger_flash_) {
     leds_.set(3, 0, 255);
   }
-  if (layer_ == 2) {
-    // Right column: top LED = triangle, second = ramp up. It pulses with
-    // the LFO, so its speed is visible even with the depth at zero. Third
-    // LED on = free running (off = restarts on each trigger).
+  if (layer_ == 1) {
+    // METER page, right column: the LFO. Top LED = triangle, second = ramp
+    // up; it pulses with the LFO, so its speed shows even at zero amount.
+    // Third LED on = free running (off = restarts on each trigger).
     int32_t wave = Voice::LfoWave(lfo_phase_, settings_.lfo_shape);
     uint8_t brightness = static_cast<uint8_t>((wave + 32768) >> 8);
-    leds_.set(4 + settings_.lfo_shape, brightness, 0);
+    leds_.set(4 + settings_.lfo_shape, brightness, brightness * 120 >> 8);
     if (settings_.flags & kFlagLfoFree) {
-      leds_.set(6, 255, 0);
+      leds_.set(6, red, green);
     }
     return;
+  }
+  if (layer_ == 2) {
+    return;  // FN 2 page: tune and glide only, right column off
   }
   for (uint8_t row = 0; row < 4; ++row) {
     if (3 - row < settings_.snap) {
