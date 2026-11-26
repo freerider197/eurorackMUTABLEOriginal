@@ -7,12 +7,12 @@
 //   MOD 1     tone (filter env)   | with METER: LFO depth    | FN 2 held: glide
 //   SHAPE 2   wave                | with METER: pitch sweep  | FN 2 held: unused
 //   MOD 2     soft distortion     | with METER: LFO speed    | FN 2 held: unused
-//   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
-//             each trigger (default) / free running.
+//   FN 1      engine: BT / LT. On the METER page: LFO restarts on each
+//             trigger (default) / free running.
 //   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: tune and glide layer.
+//             On the METER page: LFO wave, triangle / ramp up.
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
 //             Hold 3 s without turning a knob: stock offset calibration.
-//             Tapped while FN 2 is held: LFO wave, triangle / ramp up.
 //   FN 1+FN 2 held 1 s: V/oct calibration (1 V, then 3 V into EXCITE 2).
 //
 // A button tap only does its job if no knob was turned and no other button
@@ -161,7 +161,9 @@ class Ui {
   bool second_layer_latched_;
   bool meter_held_;
   bool fn2_held_;
-  bool fn1_with_fn2_;  // FN 1 pressed while FN 2 held: its tap toggles free run
+  bool fn1_with_fn2_;  // FN 1 pressed while FN 2 held: its tap does nothing
+  bool lfo_button_[BUTTON_LAST];  // pressed on the METER page: LFO tap
+  bool turned_[BUTTON_LAST];  // a knob was turned while the button was down
   bool down_[BUTTON_LAST];
   bool used_[BUTTON_LAST];  // a knob or another button was used meanwhile
 
