@@ -2,7 +2,7 @@
 
 Every `.wav` handed to the owner gets the next number. The latest build is the highest number.
 
-**Latest: v17** · **Next build: v18**
+**Latest: v18** · **Next build: v19**
 
 Name a new build `tomline-vNN-<topic>.wav`, with no commit code, date or "test" in the name (rules in `AGENTS.md`,
 "Build numbers"). Add its row here and raise "Next build" by one, in the same PR.

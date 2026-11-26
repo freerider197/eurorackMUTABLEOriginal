@@ -647,6 +647,64 @@ int main() {
     Up(BUTTON_FN_1);
   }
 
+  printf("Wave CV (LEVEL 2 adds to SHAPE 2)\n");
+  {
+    // The voice's wave fields match ComputeWaveParameters for wave w.
+    auto plays = [](int32_t w) {
+      VoiceParameters n;
+      ComputeWaveParameters(w, &n);
+      const VoiceParameters& p = ui->parameters_;
+      return p.wave_tri == n.wave_tri && p.wave_fold == n.wave_fold &&
+             p.fold_gain == n.fold_gain && p.wave_square == n.wave_square &&
+             p.wave_gain == n.wave_gain;
+    };
+    Start();
+    Level2(0, 100);
+    Check(ui->Wave() == 0 && plays(0), "nothing patched: the wave is the knob's (sine)");
+    Level2(0.5, 50);
+    Check(Near(ui->Wave(), 32768, 400) && plays(ui->Wave()),
+          "knob at sine, 2.5 V: the voice plays the wave half way (folded)");
+    Turn(S2, 20000, 400);
+    Check(Near(ui->settings_.second_layer[S2], 20000) && Near(ui->Wave(), 52768, 500) &&
+          plays(ui->Wave()), "SHAPE 2 turned to 20000: knob plus CV, the knob's value saved");
+    Level2(1.0, 50);
+    Check(ui->Wave() == 65535 && plays(65535) && ui->parameters_.wave_square == 32768,
+          "5 V on top: stops at fully CW (square)");
+    Level2(0, 100);
+    Check(ui->Wave() == ui->settings_.second_layer[S2] && plays(ui->Wave()),
+          "CV back to 0 V: exactly the knob again");
+    int settle = 0;
+    for (int t = 1; t <= 100 && !settle; ++t) {
+      Level2(0.5, 1);
+      if (Near(ui->Wave(), ui->settings_.second_layer[S2] + 32768, 660) && plays(ui->Wave()))
+        settle = t;
+    }
+    char text[120];
+    snprintf(text, sizeof(text), "0 V to 2.5 V in one step: the wave follows in %d ms", settle);
+    Check(settle && settle <= 20, text);
+    {
+      int32_t low = 65535, high = 0;
+      Level2(0.3, 50, 48);  // settle first
+      for (int t = 0; t < 500; ++t) {
+        Level2(0.3, 1, 48);
+        low = std::min<int32_t>(low, ui->Wave());
+        high = std::max<int32_t>(high, ui->Wave());
+      }
+      Check(high - low < 328, "ADC noise (+/- 3 steps) at 1.5 V: the wave moves under 0.5 %");
+    }
+    Ms(3000);
+    int saves = stmlib::sim_settings_saves;
+    uint16_t knob = ui->settings_.second_layer[S2];
+    for (int t = 0; t < 3000; t += 10) Level2((t % 1000) / 1000.0, 10);
+    Ms(3000);
+    Check(stmlib::sim_settings_saves == saves && ui->settings_.second_layer[S2] == knob,
+          "3 s of a moving CV: nothing saved, the knob's value kept");
+    Level2(0.5, 50);
+    Tap(BUTTON_FN_1);  // engine: a full parameter update
+    Check(ui->settings_.engine == ENGINE_LT && plays(ui->Wave()) &&
+          Near(ui->Wave(), knob + 32768, 500), "engine switched with the CV on: the wave keeps the CV");
+  }
+
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);
   return failures ? 1 : 0;
 }

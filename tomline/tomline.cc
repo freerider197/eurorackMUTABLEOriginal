@@ -4,8 +4,8 @@
 //
 // Patch: trigger into EXCITE 1, V/oct into EXCITE 2, sound from OUT 1.
 // Set channel 1's response trimmer fully clockwise (LIN) and LEVEL MOD 1
-// fully counter-clockwise. IN 1 is not used. LEVEL 2 is read (test: a meter
-// on the FN 2 page) through channel 2's VCA sense line.
+// fully counter-clockwise. IN 1 is not used. LEVEL 2 (a CV that moves the
+// wave) is read through channel 2's VCA sense line.
 
 #include "stmlib/system/system_clock.h"
 

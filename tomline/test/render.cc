@@ -506,6 +506,36 @@ WaveResult MeasureWave(uint8_t engine, uint16_t knob, double start_s = 0,
   return r;
 }
 
+// Wave CV: ui.cc sends the voice only the wave fields when the LEVEL 2 CV
+// moves (ComputeWaveParameters). They must be the same as the full
+// ComputeVoiceParameters gives for that wave, all along the knob, and the
+// call must leave every other field alone.
+bool WaveCvOk() {
+  uint16_t main_layer[4] = { 9146, 65535, 32768, 20000 }, zero[4] = { 0, 0, 0, 0 };
+  bool same = true, others_kept = true;
+  for (int32_t w = 0; w <= 65535; w += 257) {  // 0 .. 65535
+    uint16_t second_layer[4] = { 0, 0, static_cast<uint16_t>(w), 0 };
+    VoiceParameters full, part, before;
+    ComputeVoiceParameters(ENGINE_BT, 2, main_layer, second_layer, zero, LFO_TRIANGLE, &full);
+    memset(&part, 0x5a, sizeof(part));
+    before = part;
+    ComputeWaveParameters(w, &part);
+    same = same && part.wave_tri == full.wave_tri && part.wave_fold == full.wave_fold &&
+           part.fold_gain == full.fold_gain && part.wave_square == full.wave_square &&
+           part.wave_gain == full.wave_gain;
+    part.wave_tri = before.wave_tri;
+    part.wave_fold = before.wave_fold;
+    part.fold_gain = before.fold_gain;
+    part.wave_square = before.wave_square;
+    part.wave_gain = before.wave_gain;
+    others_kept = others_kept && memcmp(&part, &before, sizeof(part)) == 0;
+  }
+  bool ok = same && others_kept;
+  printf("Wave CV: wave fields alone = full parameters at 256 points along the knob, "
+         "other fields untouched  %s\n", ok ? "OK" : "FAIL");
+  return ok;
+}
+
 bool WaveOk(uint8_t engine) {
   const uint16_t knobs[4] = { 0, 21845, 43690, 65535 };  // off, triangle, folded, square
   const char* names[4] = { "sine", "triangle", "folded", "square" };
@@ -1208,6 +1238,7 @@ int main() {
     failures += !WaveLevelOk(engine);
     failures += !CrushOk(engine);
   }
+  failures += !WaveCvOk();
 
   printf("\nTone fully closed vs fully open, RMS over a note (must be >= -6 dB):\n");
   for (int e = 0; e < 2; ++e) {

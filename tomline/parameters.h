@@ -37,6 +37,11 @@ void ComputeVoiceParameters(
     bool lfo_free = false,
     const uint16_t* duck_layer = NULL);
 
+// Only the wave fields (wave_tri, wave_fold, fold_gain, wave_square,
+// wave_gain), from a Wave value 0..65535. ComputeVoiceParameters fills them
+// the same way from second_layer[KNOB_SHAPE_2].
+void ComputeWaveParameters(uint16_t wave_knob, VoiceParameters* p);
+
 }  // namespace tomline
 
 #endif  // TOMLINE_PARAMETERS_H_

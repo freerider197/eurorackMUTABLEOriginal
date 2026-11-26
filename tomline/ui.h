@@ -5,14 +5,16 @@
 //   SHAPE 1   decay               | with METER: crush        | FN 2 held: tune,
 //                                 |                          |   +/-12 st, saved
 //   MOD 1     tone (filter env)   | with METER: LFO depth    | FN 2 held: glide
-//   SHAPE 2   wave                | with METER: pitch sweep  | FN 2 held: unused
+//   SHAPE 2   wave (+ LEVEL 2 CV) | with METER: pitch sweep  | FN 2 held: unused
 //   MOD 2     soft distortion     | with METER: LFO speed    | FN 2 held: unused
 //   FN 1      tap: engine BT / LT. On the METER page: LFO restarts on each
 //             trigger (default) / free running.
 //             Held (not on the FN 2 page): duck layer. SHAPE 2 = sidechain
 //             duck depth, MOD 2 = release (the kick goes into IN 2).
 //   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: tune and glide layer;
-//             its right column is a meter of the CV read on LEVEL 2 (test).
+//             its right column is a meter of the CV read on LEVEL 2.
+//   LEVEL 2   CV added to the wave; LEVEL MOD 2 sets how much (a full meter
+//             = the whole wave range, from wherever SHAPE 2 is).
 //             On the METER page: LFO wave, triangle / ramp up.
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
 //             Hold 3 s without turning a knob: stock offset calibration.
@@ -159,6 +161,8 @@ class Ui {
   void SettingsChanged();
   uint16_t* KnobValue(uint8_t layer, uint8_t knob);
   void ComputeParameters();
+  uint16_t Wave() const;
+  void FollowWaveCv();
   void CheckSetup();
   void PaintLeds();
   void SaveSettings();
@@ -211,6 +215,7 @@ class Ui {
   volatile uint32_t lfo_phase_;
   volatile int32_t duck_level_;  // kick heard on IN 2, 0 .. 32767
   volatile int32_t level_2_sense_;  // channel 2's VCA sense, smoothed, << 8
+  int32_t wave_cv_;  // the LEVEL 2 CV in wave units, as last sent to the voice
   volatile uint32_t idle_samples_;
   volatile uint32_t idle_open_samples_;
   volatile uint32_t mid_samples_;
