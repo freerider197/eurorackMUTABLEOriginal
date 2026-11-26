@@ -58,7 +58,8 @@ void ComputeVoiceParameters(
     const uint16_t* lfo_layer,
     uint8_t lfo_shape,
     VoiceParameters* p,
-    bool lfo_free) {
+    bool lfo_free,
+    const uint16_t* duck_layer) {
   bool bt = engine == ENGINE_BT;
   float decay = main_layer[KNOB_SHAPE_1] / 65535.0f;
   float tune = main_layer[KNOB_SHAPE_2] / 65535.0f;
@@ -170,6 +171,15 @@ void ComputeVoiceParameters(
   n.sweep_depth = sweep < 0.01f ? 0 : Q16(sweep * sweep * 12.0f);
   n.sweep_coefficient = DecayQ31(0.02f);
 
+  // Sidechain duck (FN 1 + SHAPE 2 / MOD 2): depth on a squared curve, so
+  // a light duck is easy to set; fully CW silences the bass at the kick's
+  // peak. Release time constant 20 ms .. 300 ms (77 ms at noon), after a
+  // 16.5 ms hold: after a 4 V kick the bass is back (duck under 10 %) about
+  // 75 ms later at fully CCW, 240 ms at noon, 0.9 s at fully CW.
+  float duck_depth = duck_layer ? duck_layer[0] / 65535.0f : 0.0f;
+  float duck_release = duck_layer ? duck_layer[1] / 65535.0f : 0.0f;
+  n.duck_depth = duck_depth < 0.01f ? 0 : Q15(duck_depth * duck_depth);
+  n.duck_release = DecayQ31(0.02f * Exp2(duck_release * 3.9068906f));  // 15 = 2^3.907
 }
 
 }  // namespace tomline

@@ -25,6 +25,21 @@ const int32_t kLift = 32767;
 // rises by one step per sample (about 1 s), slow enough that an AC-coupled
 // input downstream does not thump.
 const int32_t kPowerUpHold = 31088;
+// Sidechain (IN 2). DC blocker: 1 / 512 per sample, a 10 Hz corner, so the
+// steady +3.33 V of an empty IN 2 (or a DC offset on the kick) never ducks.
+const int32_t kSidechainDcShift = 9;
+// The kick's peak is held for 16.5 ms (half a period at 30 Hz) before the
+// Release knob lets it fall, and held again by each new peak that comes
+// close: the duck stays smooth instead of following each wiggle of the
+// kick's waveform.
+const int32_t kDuckHold = 512;
+// Below about 16 mV (64 counts) IN 2 is noise: no duck.
+const int32_t kDuckGate = 64;
+// Full duck from about 2 V (8192 counts) of kick peak above the gate.
+const int32_t kDuckShift = 2;
+// The duck amount glides with a 2 ms time constant (64 samples), so it
+// never steps.
+const int32_t kDuckSmoothShift = 6;
 
 static inline int32_t Sine(uint32_t phase) {
   uint32_t index = phase >> 22;
@@ -107,12 +122,17 @@ void Voice::Init() {
   rng_state_ = 0x21f3a5c1;
   crush_phase_ = 0;
   crush_hold_ = 0;
+  sidechain_lp_ = 0;
+  peak_ = 0;
+  peak_hold_ = 0;
+  duck_ = 0;
 }
 
 void Voice::Process(
     const VoiceParameters& p,
     bool trigger,
     int32_t pitch,
+    int32_t sidechain,
     uint16_t* gain,
     uint16_t* frequency) {
   if (trigger) {
@@ -245,6 +265,40 @@ void Voice::Process(
     CLIP(v);
   }
   last_mix_ = v;
+
+  // Sidechain duck: follows the kick on IN 2. DC blocker, rectifier, peak
+  // with hold, then the Release decay; the amount glides to it.
+  sidechain_lp_ += (sidechain * 256 - sidechain_lp_) >> kSidechainDcShift;
+  int32_t ac = sidechain - (sidechain_lp_ >> 8);
+  if (ac < 0) {
+    ac = -ac;
+  }
+  if (ac > 32767) {
+    ac = 32767;
+  }
+  ac <<= 15;  // Q15 below one count, so a slow release is not cut short
+  if (ac >= peak_ - (peak_ >> 4)) {
+    // A peak as high as the held one, or nearly (within 6 %): the kick is
+    // still sounding, hold again.
+    if (ac > peak_) {
+      peak_ = ac;
+    }
+    peak_hold_ = kDuckHold;
+  } else if (peak_hold_ > 0) {
+    --peak_hold_;
+  } else {
+    peak_ = Decay(peak_, p.duck_release);
+  }
+  int32_t heard = ((peak_ >> 15) - kDuckGate) << kDuckShift;
+  CONSTRAIN(heard, 0, 32767);
+  duck_ += ((heard << 15) - duck_) >> kDuckSmoothShift;
+  // Applied before the lift: only the wave gets quieter, OUT 1's rest level
+  // stays put (a moving rest level would thump through a DC-coupled input).
+  if (p.duck_depth) {
+    int32_t amount = static_cast<int32_t>(
+        static_cast<int64_t>(duck_ >> 15) * p.duck_depth >> 15);
+    v = v * (32768 - amount) >> 15;
+  }
 
   // Write the wave on top of a fixed lift, so the VCA word stays above zero.
   // A lift that follows each note jumps at every hit: a low-frequency step

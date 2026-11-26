@@ -67,6 +67,8 @@ struct VoiceParameters {
   int32_t lfo_free;             // 1 = free running, 0 = restarts on each trigger
   int32_t sweep_coefficient;    // Q31 per-sample decay of the pitch sweep
   int32_t sweep_depth;          // semitones, Q16, start of the sweep, 0 = off
+  int32_t duck_depth;           // Q15, sidechain duck at full kick, 0 = off
+  int32_t duck_release;         // Q31 per-sample decay of the duck after its hold
 };
 
 class Voice {
@@ -78,15 +80,19 @@ class Voice {
 
   // trigger: rising edge seen on EXCITE 1 this sample.
   // pitch: target pitch in semitones above C1, Q16 (V/oct + tune).
+  // sidechain: IN 2 (the kick), ADC counts as CvScaler::audio_sample.
   void Process(
       const VoiceParameters& p,
       bool trigger,
       int32_t pitch,
+      int32_t sidechain,
       uint16_t* gain,
       uint16_t* frequency);
 
   inline int32_t envelope() const { return amp_; }
   inline uint32_t lfo_phase() const { return lfo_phase_; }
+  // Kick heard on IN 2, 0 .. 32767 (32767 = full duck at full depth).
+  inline int32_t duck_level() const { return duck_ >> 15; }
 
   // Where a trigger restarts the LFO: the middle of the wave (no pitch
   // offset), going up.
@@ -145,6 +151,11 @@ class Voice {
   uint32_t rng_state_;
   uint32_t crush_phase_;  // sample-and-hold clock, a new sample on each wrap
   int32_t crush_hold_;    // the held sample
+
+  int32_t sidechain_lp_;  // Q8, slow average of IN 2 (its DC level)
+  int32_t peak_;          // rectified IN 2 peak, ADC counts, Q15
+  int32_t peak_hold_;     // samples left before the peak starts to fall
+  int32_t duck_;          // Q30, smoothed duck amount
 
   DISALLOW_COPY_AND_ASSIGN(Voice);
 };

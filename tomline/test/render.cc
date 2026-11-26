@@ -15,7 +15,9 @@
 //     cutoff = 48 kHz * 2^(-16.6 * (1 - frequency / 65535)) (2164 at
 //     -33 mV/dB, 100k / 33 pF integrators). Nominal values, not measured.
 
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -53,7 +55,11 @@ struct Patch {
   uint16_t lfo_layer[4];     // LFO speed, LFO depth, unused, unused
   uint8_t lfo_shape;         // LFO_TRIANGLE / LFO_RAMP_UP
   bool lfo_free;             // false = LFO restarts on each trigger
+  uint16_t duck_layer[2] = { 0, 32768 };  // duck depth (off), release (noon)
 };
+
+// IN 2 (the sidechain) in ADC counts for firmware sample n; NULL = empty.
+int32_t (*g_sidechain)(int64_t n) = NULL;
 
 struct Result {
   std::vector<float> raw;  // OUT 1 volts at kHostRate
@@ -70,7 +76,7 @@ Result Render(const Patch& start, const std::vector<Step>& steps, double bpm,
   VoiceParameters p;
   ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
                          patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p,
-                         patch.lfo_free);
+                         patch.lfo_free, patch.duck_layer);
   Voice voice;
   voice.Init();
   // Skip the power-up (1 s at 0 V, then the lift rises over about 1 s), with
@@ -79,7 +85,7 @@ Result Render(const Patch& start, const std::vector<Step>& steps, double bpm,
     VoiceParameters warm = p;
     warm.lfo_increment = 0;
     uint16_t g, f;
-    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(warm, false, 0, &g, &f);
+    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(warm, false, 0, 0, &g, &f);
   }
   Result r;
   r.min_v = 1e9;
@@ -114,11 +120,13 @@ Result Render(const Patch& start, const std::vector<Step>& steps, double bpm,
     if (gate && n > next_step - samples_per_step / 2) gate = false;
     if (control && control(n, &patch)) {
       ComputeVoiceParameters(patch.engine, patch.snap, patch.main_layer,
-                             patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p);
+                             patch.second_layer, patch.lfo_layer, patch.lfo_shape, &p,
+                             patch.lfo_free, patch.duck_layer);
     }
     int32_t semitones = counts * kVoctK >> 8;
     pitch += (semitones - pitch) >> 5;
-    voice.Process(p, trigger, pitch, &gain, &frequency);
+    voice.Process(p, trigger, pitch, g_sidechain ? g_sidechain(n) : 0,
+                  &gain, &frequency);
     pwm_filtered += ((65535 - frequency) - pwm_filtered) >> 4;
     int32_t pwm_word = pwm_filtered >> 6;  // 10-bit PWM
     ++n;
@@ -326,10 +334,10 @@ bool LfoRestartOk() {
       uint16_t gain, frequency;
       for (int hit = 0; hit < 3; ++hit) {
         for (int n = 0; n < 10007 * (hit + 1); ++n) {
-          voice.Process(p, false, 0, &gain, &frequency);
+          voice.Process(p, false, 0, 0, &gain, &frequency);
         }
         uint32_t before = voice.lfo_phase();
-        voice.Process(p, true, 0, &gain, &frequency);
+        voice.Process(p, true, 0, 0, &gain, &frequency);
         uint32_t expected = (free_run ? before : Voice::LfoStart(shape)) +
                             static_cast<uint32_t>(p.lfo_increment);
         ok = ok && voice.lfo_phase() == expected;
@@ -361,10 +369,10 @@ double SweepTailCents(bool* start_higher, bool* off_same) {
     Voice voice;
     voice.Init();
     uint16_t g, f;
-    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, 0, &g, &f);
     int prev = 0, count = 0;
     for (int i = 0; i < static_cast<int>(0.05 * kFirmwareRate); ++i) {
-      voice.Process(p, i == 0, 12 << 16, &g, &f);
+      voice.Process(p, i == 0, 12 << 16, 0, &g, &f);
       int v = static_cast<int>(g) - 32767;
       if (prev < 0 && v >= 0) ++count;
       prev = v;
@@ -404,7 +412,7 @@ DistortionResult MeasureDistortion(uint8_t engine, uint16_t knob) {
   Voice voice;
   voice.Init();
   uint16_t g, f;
-  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, 0, &g, &f);
   const double f0 = 65.40639133;
   const int cycles = static_cast<int>(8 * kFirmwareRate / f0 + 0.5);
   const int tail_a = static_cast<int>(0.45 * kFirmwareRate);
@@ -412,7 +420,7 @@ DistortionResult MeasureDistortion(uint8_t engine, uint16_t knob) {
   double re1 = 0, im1 = 0, re3 = 0, im3 = 0, tail = 0;
   DistortionResult r = { 0, 0, 0 };
   for (int n = 0; n < tail_b; ++n) {
-    voice.Process(p, n == 0, 0, &g, &f);  // 0 V: C2
+    voice.Process(p, n == 0, 0, 0, &g, &f);  // 0 V: C2
     int32_t v = static_cast<int32_t>(g) - 32767;
     if (abs(v) > r.peak) r.peak = abs(v);
     if (n < cycles) {
@@ -476,7 +484,7 @@ WaveResult MeasureWave(uint8_t engine, uint16_t knob, double start_s = 0,
   Voice voice;
   voice.Init();
   uint16_t g, f;
-  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, 0, &g, &f);
   const double f0 = 65.40639133;
   const int cycles = static_cast<int>(8 * kFirmwareRate / f0 + 0.5);
   const int start = static_cast<int>(start_s * kFirmwareRate);
@@ -484,7 +492,7 @@ WaveResult MeasureWave(uint8_t engine, uint16_t knob, double start_s = 0,
   WaveResult r;
   r.peak = 0;
   for (int n = 0; n < start + cycles; ++n) {
-    voice.Process(p, n == 0, 0, &g, &f);  // 0 V: C2
+    voice.Process(p, n == 0, 0, 0, &g, &f);  // 0 V: C2
     if (n < start) continue;
     int32_t v = static_cast<int32_t>(g) - 32767;
     if (abs(v) > r.peak) r.peak = abs(v);
@@ -551,11 +559,11 @@ bool WaveLevelOk(uint8_t engine) {
     Voice voice;
     voice.Init();
     uint16_t g, f;
-    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+    for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, 0, &g, &f);
     double sum = 0;
     const int n = static_cast<int>(0.5 * kFirmwareRate);
     for (int i = 0; i < n; ++i) {
-      voice.Process(p, i == 0, 0, &g, &f);
+      voice.Process(p, i == 0, 0, 0, &g, &f);
       double v = static_cast<double>(g) - 32767;
       sum += v * v;
     }
@@ -591,11 +599,11 @@ bool DistortionLevelOk(uint8_t engine) {
         Voice voice;
         voice.Init();
         uint16_t g, f;
-        for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+        for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, 0, &g, &f);
         double sum = 0;
         const int n = static_cast<int>(0.3 * kFirmwareRate);
         for (int i = 0; i < n; ++i) {
-          voice.Process(p, i == 0, 0, &g, &f);
+          voice.Process(p, i == 0, 0, 0, &g, &f);
           double v = static_cast<double>(g) - 32767;
           sum += v * v;
         }
@@ -626,14 +634,14 @@ CrushResult MeasureCrush(uint8_t engine, uint16_t knob) {
   Voice voice;
   voice.Init();
   uint16_t g, f;
-  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, &g, &f);
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) voice.Process(p, false, 0, 0, &g, &f);
   CrushResult r = { 0, 0, 0 };
   const int a = static_cast<int>(0.1 * kFirmwareRate), b = static_cast<int>(0.6 * kFirmwareRate);
   int32_t last = 0;
   double sum = 0;
   int changes = 0;
   for (int n = 0; n < 3 * kFirmwareRate; ++n) {
-    voice.Process(p, n == 0, 0, &g, &f);
+    voice.Process(p, n == 0, 0, 0, &g, &f);
     int32_t v = static_cast<int32_t>(g) - 32767;
     if (abs(v) > r.peak) r.peak = abs(v);
     if (n >= a && n < b) {
@@ -902,12 +910,179 @@ bool PowerUpOk() {
   uint16_t g, f, prev = 0;
   bool ok = true;
   for (int i = 0; i < 3 * kFirmwareRate; ++i) {
-    voice.Process(p, false, 0, &g, &f);
+    voice.Process(p, false, 0, 0, &g, &f);
     if (i < 31088) ok = ok && g == 0;
     ok = ok && g >= prev && g - prev <= 1;
     prev = g;
   }
   return ok && g == 32767;
+}
+
+// --- Sidechain duck (IN 2) ---------------------------------------------------
+
+// A kick like the browser page's: sine, pitch 158 Hz falling to 48 Hz (30 ms),
+// level falling with a 280 ms time constant, `peak` volts.
+double KickVolts(double t, double peak = 6.0) {
+  if (t < 0) return 0;
+  double pe = exp(-t / 0.03);
+  double phase = 48.0 * t + 110.0 * 0.03 * (1.0 - pe);
+  return peak * exp(-t / 0.28) * sin(2 * M_PI * phase);
+}
+
+// IN 2 counts. The real scaling of IN 2 is not measured: the EXCITE scale
+// (3972 counts per volt) is assumed. Inverted, like CvScaler::audio_sample.
+int32_t KickCounts(double volts) {
+  double c = -volts * kCountsPerVolt;
+  if (c > 32767) c = 32767;
+  if (c < -32768) c = -32768;
+  return static_cast<int32_t>(c);
+}
+
+const double kKickBpm = 122.0;
+int32_t KickOnBeats(int64_t n) {  // a kick every beat (4 steps)
+  double beat = 60.0 / kKickBpm;
+  double t = n / kFirmwareRate;
+  return KickCounts(KickVolts(fmod(t, beat)));
+}
+
+struct DuckRun {
+  std::vector<int32_t> wave;   // VCA word minus the lift
+  std::vector<int32_t> level;  // Voice::duck_level()
+};
+
+// Firmware-rate run: optional note at sample 0, sidechain from `in2`.
+DuckRun RunDuck(uint16_t depth, uint16_t release, bool note,
+                int32_t (*in2)(int64_t), int samples, int32_t warm_in2 = 0) {
+  uint16_t main_layer[4] = { 65535, 65535, 32768, 0 };  // long decay, open
+  uint16_t second[4] = { 0, 0, 0, 0 }, lfo[4] = { 32768, 0, 0, 0 };
+  uint16_t duck[2] = { depth, release };
+  VoiceParameters p;
+  ComputeVoiceParameters(ENGINE_BT, 0, main_layer, second, lfo, LFO_TRIANGLE,
+                         &p, false, duck);
+  Voice voice;
+  voice.Init();
+  uint16_t g, f;
+  for (int i = 0; i < 3 * kFirmwareRate; ++i) {
+    voice.Process(p, false, 0, warm_in2, &g, &f);
+  }
+  DuckRun r;
+  for (int i = 0; i < samples; ++i) {
+    voice.Process(p, note && i == 0, 0, in2 ? in2(i) : warm_in2, &g, &f);
+    r.wave.push_back(static_cast<int32_t>(g) - 32767);
+    r.level.push_back(voice.duck_level());
+  }
+  return r;
+}
+
+double RmsOf(const std::vector<int32_t>& x, size_t a, size_t b) {
+  double sum = 0;
+  for (size_t i = a; i < b; ++i) sum += static_cast<double>(x[i]) * x[i];
+  return sqrt(sum / (b - a));
+}
+
+int32_t KickAt100ms(int64_t n) {  // one kick, 100 ms in
+  return KickCounts(KickVolts((n - 3109) / kFirmwareRate));
+}
+int32_t Burst(int64_t n) {  // 4 V, 50 Hz for 200 ms, then nothing
+  return n < 6218 ? KickCounts(4.0 * sin(2 * M_PI * 50.0 * n / kFirmwareRate)) : 0;
+}
+int32_t Sine1V(int64_t n) {  // steady 50 Hz at 1 V
+  return KickCounts(1.0 * sin(2 * M_PI * 50.0 * n / kFirmwareRate));
+}
+
+bool DuckOk() {
+  const int len = static_cast<int>(kFirmwareRate);  // 1 s
+  bool all = true;
+  // Depth at zero: the duck changes nothing, even with a kick on IN 2.
+  DuckRun plain = RunDuck(0, 32768, true, NULL, len);
+  DuckRun off = RunDuck(0, 32768, true, KickAt100ms, len);
+  bool off_ok = plain.wave == off.wave;
+  printf("  depth at zero, kick on IN 2: VCA words identical to no kick  %s\n",
+         off_ok ? "OK" : "FAIL");
+  all = all && off_ok;
+  // Full depth, IN 2 empty (steady level after power-up): no duck.
+  DuckRun empty = RunDuck(65535, 32768, true, NULL, len, -13227);  // +3.33 V
+  bool empty_ok = empty.wave == plain.wave;
+  printf("  full depth, IN 2 empty (steady +3.33 V): identical to no duck  %s\n",
+         empty_ok ? "OK" : "FAIL");
+  all = all && empty_ok;
+  // Full depth, one kick: the bass drops at the kick's peak.
+  DuckRun full = RunDuck(65535, 32768, true, KickAt100ms, len);
+  size_t a = 3109 + 311, b = 3109 + 933;  // 10 .. 30 ms after the kick
+  double drop = 20 * log10(RmsOf(full.wave, a, b) / RmsOf(plain.wave, a, b));
+  DuckRun half = RunDuck(46341, 32768, true, KickAt100ms, len);  // knob at 71 %
+  double half_drop = 20 * log10(RmsOf(half.wave, a, b) / RmsOf(plain.wave, a, b));
+  double before = 20 * log10(RmsOf(full.wave, 1000, 3000) / RmsOf(plain.wave, 1000, 3000));
+  bool depth_ok = drop < -30 && half_drop > -9 && half_drop < -4 && fabs(before) < 0.01;
+  printf("  6 V kick, 10-30 ms in: full depth %.1f dB, 71 %% depth %.1f dB, before it %.2f dB  %s\n",
+         drop, half_drop, before, depth_ok ? "OK" : "FAIL");
+  all = all && depth_ok;
+  // Rest level: a kick with no note playing leaves the VCA word at the lift.
+  DuckRun rest = RunDuck(65535, 32768, false, KickAt100ms, len);
+  bool rest_ok = true;
+  for (int32_t w : rest.wave) rest_ok = rest_ok && w == 0;
+  printf("  kick with no note: OUT 1 stays at the rest level  %s\n",
+         rest_ok ? "OK" : "FAIL");
+  all = all && rest_ok;
+  // Release: time after the end of a 4 V burst until the duck is under 10 %.
+  // Expected: 16.5 ms hold + tau * ln(15888 / 883).
+  const uint16_t knobs[3] = { 0, 32768, 65535 };
+  const double taus[3] = { 0.02, 0.02 * sqrt(15.0), 0.3 };
+  for (int k = 0; k < 3; ++k) {
+    DuckRun r = RunDuck(65535, knobs[k], false, Burst, 3 * len);
+    int end = 6218, i = end;
+    while (i < 3 * len && r.level[i] >= 3277) ++i;
+    double ms = (i - end) * 1000.0 / kFirmwareRate;
+    double expected = 16.5 + 1000.0 * taus[k] * log(15888.0 / 883.0);
+    bool ok = fabs(ms - expected) < expected * 0.15;
+    printf("  release knob %3d %%: duck under 10 %% %.0f ms after the kick (expected %.0f)  %s\n",
+           knobs[k] * 100 / 65535, ms, expected, ok ? "OK" : "FAIL");
+    all = all && ok;
+  }
+  // Smooth: a steady 50 Hz, 1 V input ducks evenly, no wobble at 100 Hz.
+  DuckRun steady = RunDuck(65535, 0, false, Sine1V, len);
+  int32_t lo = 32767, hi = 0;
+  for (int i = len / 2; i < len; ++i) {
+    lo = std::min(lo, steady.level[i]);
+    hi = std::max(hi, steady.level[i]);
+  }
+  bool smooth_ok = hi > 0 && (hi - lo) < hi / 50;
+  printf("  steady 50 Hz at 1 V, fastest release: duck %.0f %%, wobble %.2f %%  %s\n",
+         hi * 100.0 / 32767, (hi - lo) * 100.0 / std::max(hi, 1), smooth_ok ? "OK" : "FAIL");
+  all = all && smooth_ok;
+  // One-sample steps of the ducked wave stay small: no click from the duck.
+  int32_t worst = 0, worst_plain = 0;
+  for (size_t i = 3109; i < 3109 + 1555; ++i) {
+    worst = std::max(worst, abs(full.wave[i] - full.wave[i - 1]));
+    worst_plain = std::max(worst_plain, abs(plain.wave[i] - plain.wave[i - 1]));
+  }
+  bool click_ok = worst <= worst_plain;
+  printf("  largest one-sample step while ducking %d (bass alone %d)  %s\n",
+         worst, worst_plain, click_ok ? "OK" : "FAIL");
+  return all && click_ok;
+}
+
+// The roller with a kick on every beat, ducked and not, kick mixed in (as on
+// a mixer), for listening: build/tomline_duck.wav, tomline_duck_off.wav.
+void WriteDuckWavs(const Patch& base, const std::vector<Step>& roller) {
+  for (int on = 0; on < 2; ++on) {
+    Patch patch = base;
+    patch.duck_layer[0] = on ? 52000 : 0;
+    g_sidechain = KickOnBeats;
+    Result r = Render(patch, roller, kKickBpm, 4);
+    g_sidechain = NULL;
+    // AC-couple OUT 1 (3 Hz), then add the kick.
+    double x1 = r.raw[0], y1 = 0, k = 1.0 - 2 * M_PI * 3.0 / kHostRate;
+    double beat = 60.0 / kKickBpm;
+    std::vector<float> mix(r.raw.size());
+    for (size_t i = 0; i < r.raw.size(); ++i) {
+      double y = r.raw[i] - x1 + k * y1;
+      x1 = r.raw[i]; y1 = y;
+      double t = i / kHostRate;
+      mix[i] = static_cast<float>(y + KickVolts(fmod(t, beat)) * 0.6);
+    }
+    WriteWav(on ? "build/tomline_duck.wav" : "build/tomline_duck_off.wav", mix, false);
+  }
 }
 
 int main() {
@@ -1052,6 +1227,11 @@ int main() {
   failures += !power_ok;
 
   bool mix_ok = MixScalingOk();
+  printf("Sidechain duck (kick on IN 2):\n");
+  failures += !DuckOk();
+  WriteDuckWavs(bt, roller);
+  printf("  wrote build/tomline_duck.wav (ducked) and tomline_duck_off.wav\n");
+
   printf("Loud output mix (82000, beyond the real 50000): %s\n",
          mix_ok ? "clips correctly  OK" : "wraps around  FAIL (32-bit overflow)");
   failures += !mix_ok;

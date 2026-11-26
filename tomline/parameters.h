@@ -23,6 +23,8 @@ enum Knob {
 //   ui.cc KnobValue says which knob sets each).
 // lfo_layer: LFO speed, LFO depth, tune (read through main_layer), pitch sweep.
 // lfo_free: false = the LFO restarts on each trigger, true = free running.
+// duck_layer: sidechain duck depth (FN 1 + SHAPE 2), release (FN 1 + MOD 2).
+//   NULL = no duck.
 // All values 0..65535 (knob fully counter-clockwise .. fully clockwise).
 void ComputeVoiceParameters(
     uint8_t engine,
@@ -32,7 +34,8 @@ void ComputeVoiceParameters(
     const uint16_t* lfo_layer,
     uint8_t lfo_shape,
     VoiceParameters* p,
-    bool lfo_free = false);
+    bool lfo_free = false,
+    const uint16_t* duck_layer = NULL);
 
 }  // namespace tomline
 

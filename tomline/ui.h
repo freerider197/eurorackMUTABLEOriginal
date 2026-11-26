@@ -7,7 +7,9 @@
 //   MOD 1     tone (filter env)   | with METER: LFO depth    | FN 2 held: glide
 //   SHAPE 2   wave                | with METER: pitch sweep  | FN 2 held: unused
 //   MOD 2     soft distortion     | with METER: LFO speed    | FN 2 held: unused
-//   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
+//   FN 1 held: duck layer. SHAPE 2 = sidechain duck depth, MOD 2 = release
+//             (the kick goes into IN 2). SHAPE 1 and MOD 1 do nothing there.
+//   FN 1      tap: engine BT / LT. Tapped while FN 2 is held: LFO restarts on
 //             each trigger (default) / free running.
 //   FN 2      tap: snap off / 0.4 / 1.5 / 4 ms. Hold: tune and glide layer.
 //   METER     hold: second layer while held. Tap: latch / unlatch it.
@@ -66,6 +68,20 @@ struct Settings {
   int32_t voct_offset;  // EXCITE 2 counts at 0 V
   int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
   uint16_t lfo_layer[KNOB_LAST];  // LFO speed, LFO depth, tune, pitch sweep
+  uint16_t duck_layer[2];         // duck depth, duck release
+  uint32_t magic;
+};
+
+// The record before the duck: read once, then saved as a Settings.
+struct SettingsV2 {
+  uint8_t engine;
+  uint8_t snap;
+  uint8_t lfo_shape;
+  uint8_t flags;
+  uint16_t second_layer[KNOB_LAST];
+  int32_t voct_offset;
+  int32_t voct_k;
+  uint16_t lfo_layer[KNOB_LAST];
   uint32_t magic;
 };
 
@@ -106,8 +122,9 @@ class Ui {
   }
 
   inline void OnSample(bool trigger, uint16_t gain, uint16_t sense,
-                       uint32_t lfo_phase) {
+                       uint32_t lfo_phase, int32_t duck_level = 0) {
     lfo_phase_ = lfo_phase;
+    duck_level_ = duck_level;
     if (trigger) {
       trigger_flash_ = 100;  // 25 ms at 4 kHz
     }
@@ -157,10 +174,11 @@ class Ui {
   int32_t calibration_pot_[2];      // SHAPE 1 / 2 in offset calibration
   uint32_t knob_time_;
   int32_t press_settle_;           // ms before press_pot_ is taken
-  uint8_t layer_;  // 0 main, 1 second (METER), 2 LFO (FN 2 held)
+  uint8_t layer_;  // 0 main, 1 second (METER), 2 LFO (FN 2 held), 3 duck (FN 1 held)
   bool second_layer_latched_;
   bool meter_held_;
   bool fn2_held_;
+  bool fn1_held_;
   bool fn1_with_fn2_;  // FN 1 pressed while FN 2 held: its tap toggles free run
   bool down_[BUTTON_LAST];
   bool used_[BUTTON_LAST];  // a knob or another button was used meanwhile
@@ -179,6 +197,7 @@ class Ui {
   volatile int32_t voct_samples_;
   volatile uint16_t trigger_flash_;
   volatile uint32_t lfo_phase_;
+  volatile int32_t duck_level_;  // kick heard on IN 2, 0 .. 32767
   volatile uint32_t idle_samples_;
   volatile uint32_t idle_open_samples_;
   volatile uint32_t mid_samples_;
