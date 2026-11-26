@@ -337,8 +337,8 @@ int main() {
   Turn(S2, 40000, 400);
   Up(BUTTON_METER);
   Ms(2500);
-  Check(Near(ui->sweep_, 40000) && stmlib::sim_settings_saves == 0,
-        "METER + SHAPE 2: pitch sweep (TEST) follows, not saved");
+  Check(Near(ui->settings_.lfo_layer[KNOB_MOD_2], 40000) && stmlib::sim_settings_saves == 1,
+        "METER + SHAPE 2: pitch sweep follows, saved");
   Down(BUTTON_FN_2);
   Turn(S1, 10000, 400);
   Turn(M1, 30000, 400);
@@ -419,8 +419,13 @@ int main() {
   Check(ui->settings_.lfo_layer[S2] == 0, "  ... saved before tune was saved: tune fully down");
   old_record.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune;
   old_record.lfo_layer[S2] = 30000;
+  old_record.lfo_layer[KNOB_MOD_2] = 25000;  // leftover from an old FN 2 + MOD 2 turn
   Start();
   Check(ui->settings_.lfo_layer[S2] == 30000, "settings saved with a tune: kept");
+  Check(ui->settings_.lfo_layer[KNOB_MOD_2] == 0, "  ... saved before the sweep: sweep off");
+  old_record.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune | kFlagSweep;
+  Start();
+  Check(ui->settings_.lfo_layer[KNOB_MOD_2] == 25000, "settings saved with a sweep: kept");
   stmlib::sim_settings_record = NULL;
 
   printf(failures ? "%d FAILED\n" : "All OK\n", failures);

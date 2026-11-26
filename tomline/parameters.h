@@ -21,7 +21,7 @@ enum Knob {
 //   by ui.cc from the saved tune (FN 2 + SHAPE 1).
 // second_layer: crush, unused, wave, glide (the slots where they are saved;
 //   ui.cc KnobValue says which knob sets each).
-// lfo_layer: LFO speed, LFO depth, tune (read through main_layer), unused.
+// lfo_layer: LFO speed, LFO depth, tune (read through main_layer), pitch sweep.
 // lfo_free: false = the LFO restarts on each trigger, true = free running.
 // All values 0..65535 (knob fully counter-clockwise .. fully clockwise).
 void ComputeVoiceParameters(

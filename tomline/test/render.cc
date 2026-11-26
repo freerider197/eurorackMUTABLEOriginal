@@ -993,7 +993,7 @@ int main() {
   bool sweep_start, sweep_off;
   double sweep_cents = SweepTailCents(&sweep_start, &sweep_off);
   bool sweep_ok = sweep_start && sweep_off && fabs(sweep_cents) < 1.0;
-  printf("Pitch sweep (TEST): off = none, full starts higher, 0.2-1.2 s later %+.2f cents from C2  %s\n",
+  printf("Pitch sweep: off = none, full starts higher, 0.2-1.2 s later %+.2f cents from C2  %s\n",
          sweep_cents, sweep_ok ? "OK" : "FAIL");
   failures += !sweep_ok;
   bool lfo_off_ok = LfoOffIsSilent(roller);

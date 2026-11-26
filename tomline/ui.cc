@@ -46,8 +46,11 @@ const uint16_t kSecondLayerDefaults[KNOB_LAST] = {
 // 10 ms, moved up one step (10 ms becomes 4 ms). An older Tomline plays this
 // record's snap one step longer. kFlagTune: LFO-layer SHAPE 2 is the tune
 // (it used to be the main SHAPE 2 knob, unsaved); older records hold an
-// unused leftover there, so tune starts fully down (C1 at 0 V).
+// unused leftover there, so tune starts fully down (C1 at 0 V). kFlagSweep:
+// LFO-layer MOD 2 is the pitch sweep (METER + SHAPE 2); older records hold an
+// unused leftover there, so the sweep starts off.
 const uint8_t kFlagLfoFree = 0x01;
+const uint8_t kFlagSweep = 0x08;
 const uint8_t kFlagTune = 0x10;
 const uint8_t kFlagSnap = 0x20;
 const uint8_t kFlagCrush = 0x40;
@@ -56,7 +59,7 @@ const uint16_t kLfoLayerDefaults[KNOB_LAST] = {
   32768,  // LFO speed 1 Hz
   0,      // LFO depth off
   0,      // tune fully down: 0 V on EXCITE 2 plays C1
-  0       // unused
+  0       // pitch sweep off
 };
 
 static inline int32_t Abs(int32_t x) { return x < 0 ? -x : x; }
@@ -74,7 +77,7 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     settings_.engine = ENGINE_BT;
     settings_.snap = 2;  // 1.5 ms
     settings_.lfo_shape = LFO_TRIANGLE;
-    settings_.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune;
+    settings_.flags = kFlagWave | kFlagCrush | kFlagSnap | kFlagTune | kFlagSweep;
     copy(&kSecondLayerDefaults[0], &kSecondLayerDefaults[KNOB_LAST],
          &settings_.second_layer[0]);
     settings_.voct_offset = 0;
@@ -111,8 +114,11 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
   if (!(settings_.flags & kFlagTune)) {
     settings_.lfo_layer[KNOB_SHAPE_2] = kLfoLayerDefaults[KNOB_SHAPE_2];
   }
+  if (!(settings_.flags & kFlagSweep)) {
+    settings_.lfo_layer[KNOB_MOD_2] = kLfoLayerDefaults[KNOB_MOD_2];
+  }
   settings_.flags = (settings_.flags & kFlagLfoFree) | kFlagWave | kFlagCrush |
-      kFlagSnap | kFlagTune;
+      kFlagSnap | kFlagTune | kFlagSweep;
   if (settings_.engine >= ENGINE_LAST) settings_.engine = ENGINE_BT;
   if (settings_.snap > 3) settings_.snap = 2;
   if (settings_.lfo_shape >= LFO_SHAPE_LAST) settings_.lfo_shape = LFO_TRIANGLE;
@@ -127,7 +133,6 @@ void Ui::Init(Adc* adc, CvScaler* cv_scaler) {
     main_layer_[i] = pot_[i];
     press_pot_[i] = pot_[i];
   }
-  sweep_ = 0;
   calibration_pot_[0] = calibration_pot_[1] = 0;
   fill(&press_time_[0], &press_time_[BUTTON_LAST], 0);
   fill(&long_press_handled_[0], &long_press_handled_[BUTTON_LAST], false);
@@ -396,7 +401,7 @@ uint16_t* Ui::KnobValue(uint8_t layer, uint8_t knob) {
     if (knob == KNOB_SHAPE_1) return &settings_.second_layer[KNOB_SHAPE_1];
     if (knob == KNOB_MOD_1) return &settings_.lfo_layer[KNOB_MOD_1];
     if (knob == KNOB_MOD_2) return &settings_.lfo_layer[KNOB_SHAPE_1];
-    return &sweep_;  // SHAPE 2: pitch sweep (TEST, not saved)
+    return &settings_.lfo_layer[KNOB_MOD_2];  // SHAPE 2: pitch sweep
   }
   if (layer == 2) {
     if (knob == KNOB_SHAPE_1) return &settings_.lfo_layer[KNOB_SHAPE_2];
@@ -461,7 +466,7 @@ void Ui::ReadKnobs() {
     uint16_t* value = KnobValue(layer_, i);
     if (value && pickup_[i].Follow(pot_[i], elapsed, value)) {
       parameters_dirty_ = true;
-      if (value != &sweep_ && (layer_ || i == KNOB_SHAPE_2)) {  // saved values
+      if (layer_ || i == KNOB_SHAPE_2) {  // saved values
         SettingsChanged();
       }
     }
@@ -475,13 +480,9 @@ void Ui::ComputeParameters() {
   uint16_t main_layer[KNOB_LAST];
   copy(&main_layer_[0], &main_layer_[KNOB_LAST], &main_layer[0]);
   main_layer[KNOB_SHAPE_2] = settings_.lfo_layer[KNOB_SHAPE_2];
-  // The sweep goes to the voice through the unused LFO-layer slot 3.
-  uint16_t lfo_layer[KNOB_LAST];
-  copy(&settings_.lfo_layer[0], &settings_.lfo_layer[KNOB_LAST], &lfo_layer[0]);
-  lfo_layer[KNOB_MOD_2] = sweep_;
   ComputeVoiceParameters(
       settings_.engine, settings_.snap, main_layer, settings_.second_layer,
-      lfo_layer, settings_.lfo_shape, &n,
+      settings_.lfo_layer, settings_.lfo_shape, &n,
       (settings_.flags & kFlagLfoFree) != 0);
   // Copy field by field: each 32-bit store is atomic for the interrupt.
   volatile int32_t* dst = reinterpret_cast<volatile int32_t*>(&parameters_);

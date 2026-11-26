@@ -5,7 +5,7 @@
 //   SHAPE 1   decay               | with METER: crush        | FN 2 held: tune,
 //                                 |                          |   +/-12 st, saved
 //   MOD 1     tone (filter env)   | with METER: LFO depth    | FN 2 held: glide
-//   SHAPE 2   wave                | with METER: unused       | FN 2 held: unused
+//   SHAPE 2   wave                | with METER: pitch sweep  | FN 2 held: unused
 //   MOD 2     soft distortion     | with METER: LFO speed    | FN 2 held: unused
 //   FN 1      engine: BT / LT. Tapped while FN 2 is held: LFO restarts on
 //             each trigger (default) / free running.
@@ -61,11 +61,11 @@ struct Settings {
   uint8_t engine;
   uint8_t snap;
   uint8_t lfo_shape;
-  uint8_t flags;     // kFlagLfoFree, kFlagTune, kFlagSnap, kFlagCrush, kFlagWave
+  uint8_t flags;     // kFlagLfoFree, kFlagSweep, kFlagTune, kFlagSnap, kFlagCrush, kFlagWave
   uint16_t second_layer[KNOB_LAST];  // crush, unused (was +1 octave), wave, glide
   int32_t voct_offset;  // EXCITE 2 counts at 0 V
   int32_t voct_k;       // semitones Q16 = (counts - offset) * voct_k >> 8
-  uint16_t lfo_layer[KNOB_LAST];  // SHAPE 1 speed, MOD 1 depth, SHAPE 2 tune
+  uint16_t lfo_layer[KNOB_LAST];  // LFO speed, LFO depth, tune, pitch sweep
   uint32_t magic;
 };
 
@@ -152,7 +152,6 @@ class Ui {
 
   int32_t pot_[KNOB_LAST];          // filtered positions
   uint16_t main_layer_[KNOB_LAST];
-  uint16_t sweep_;  // pitch sweep (TEST), METER + SHAPE 2, not saved
   Pickup pickup_[KNOB_LAST];        // for the page that is open
   int32_t press_pot_[KNOB_LAST];    // positions at the last button press
   int32_t calibration_pot_[2];      // SHAPE 1 / 2 in offset calibration

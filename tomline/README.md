@@ -52,7 +52,7 @@ blinks red.
 |---|---|---|
 | SHAPE 1 | Decay, 95 ms to 2.5 s. **FN 2 held: Tune**, ±12 semitones; fully CCW = C1 at 0 V (the default), noon = C2. Saved, so a bump on the main page can't detune it | Crush. Fully CCW = off; just past it the sample rate drops to 6 kHz, and turning up lowers it to 750 Hz at fully CW: ring tones and grit on top of the note. Best heard with Tone open |
 | MOD 1 | Tone: filter envelope. Darkest at 7 o'clock (the filter stops just above the note, so it gets dark but never silent), most envelope at noon, open at 5 o'clock (stock Streams curve). **FN 2 held: Glide** between notes (fully CCW = off) | Pitch LFO amount (depth): fully CCW = off, up to ±12 semitones |
-| SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change | Pitch sweep (test, not saved: off after every power-up). Fully CCW = off; turning up makes each hit start higher, up to +12 semitones at fully CW (+3 at noon), and fall back to the note with a 20 ms time constant, so the held note stays in tune |
+| SHAPE 2 | Wave of the main tone. Fully CCW = sine (the usual sound), then triangle (9 o'clock to 11), folded sine (the top of the wave folds back: brighter and grittier, the bass stays), and a soft-edged square at fully CW. The level stays even along the knob (within 1 dB). The snap doesn't change | Pitch sweep. Fully CCW = off (the default); turning up makes each hit start higher, up to +12 semitones at fully CW (+3 at noon), and fall back to the note with a 20 ms time constant, so the held note stays in tune |
 | MOD 2 | Soft distortion. Fully CCW = clean; turning up drives the whole sound (tone and snap) into a soft clipper, up to +12 dB (+5 dB at noon). The loud start of each hit saturates, the quiet tail stays clean but gets louder, so the decay sounds longer. A gain after the clipper keeps each hit as loud as the clean sound (within 1 dB at any Decay and Wave), so the knob changes colour, not volume | Pitch LFO speed, 0.05 to 20 Hz (1 Hz at noon) |
 | FN 1 (left button) | Engine: BT / LT | |
 | FN 2 (right button), tap | Snap, the attack click (a burst of noise and a quick pitch blip): off, 0.4, 1.5, 4 ms. Off has no click at all; the tone still fades in over 0.4 ms, so a hit never pops | |
@@ -78,7 +78,7 @@ always goes to pitch and is added after the glide. By default every trigger
 restarts it at the middle of its wave (no pitch jump, going up), so each hit
 gets the same pitch movement; free running, it ignores triggers.
 
-Engine, snap, the second-layer values (crush, wave, glide), LFO speed, depth, wave and free run, Tune, and the
+Engine, snap, crush, wave, glide, LFO speed, amount, wave and free run, Tune, sweep, and the
 V/oct calibration are saved to flash 2 s after the last change. Settings saved
 by an older Tomline (before the LFO) are read once: engine, snap, second-layer
 values and V/oct calibration carry over, and the LFO starts off. Settings saved
@@ -86,7 +86,7 @@ before the free-run option read as "restart on trigger". Settings saved before
 the wave start with the wave at sine (that slot held an unused old value);
 everything else carries over. Settings saved before Crush start with Crush
 off (that slot was the noise level; the noise is gone). Settings saved
-before Tune moved to FN 2 start with Tune fully down (C1 at 0 V). A snap saved before
+before Tune moved to FN 2 start with Tune fully down (C1 at 0 V). Settings saved before the sweep start with the sweep off. A snap saved before
 "off" existed keeps its length (10 ms becomes 4 ms). Going back to an older
 Tomline keeps all settings except free run, which reads as "restart on
 trigger", and plays the snap one step longer.
@@ -209,8 +209,8 @@ Check the stack after every firmware change:
 python3 tomline/tools/stack_usage.py build/tomline/tomline.elf
 ```
 
-Last run: worst case 580 bytes (main loop 324, SysTick 100, audio interrupt
-156), 4096 reserved, 3516 to spare. The
+Last run: worst case 596 bytes (main loop 332, SysTick 100, audio interrupt
+164), 4096 reserved, 3500 to spare. The
 makefile uses `tomline/tools/encoder.py`, a Python 3 port of the bootloader
 encoder (needs numpy). `tomline/tools/check_wav.py` decodes a WAV and checks
 every packet: the official `streams_1.01.wav` decodes 112/112, and the
@@ -292,7 +292,7 @@ g++ -O2 -Itomline/test/stub -I. -o build/tomline_panel tomline/test/panel.cc tom
 ./build/tomline_panel
 ```
 
-Last run: all 64 checks OK. Without the LEDs-off reading, the model moves
+Last run: all 67 checks OK. Without the LEDs-off reading, the model moves
 untouched values on page changes; with it, nothing moves.
 
 `tomline/test/words.cc` dumps the firmware's VCA and filter words for 13
